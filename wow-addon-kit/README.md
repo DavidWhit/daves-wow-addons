@@ -19,7 +19,7 @@ After editing the plugin, bump `version` in `plugins/wow-forever-addons/.claude-
 | --- | --- |
 | `/wow-forever-addons:wow-addon-new [Name] [idea]` | Scaffold an addon (TOC, events, SavedVariables, slash command, Settings panel), validate it, link it into the game |
 | `/wow-forever-addons:wow-addon-test [folder]` | Validate against the real Forever API, run the advisor code review (fixes wait for your approval), then walk through the in-game test checklist |
-| `/wow-forever-addons:wow-addon-setup` | Find the game and Interface numbers, install luacheck and the API index, link/unlink addons |
+| `/wow-forever-addons:wow-addon-setup` | Find the game and Interface numbers, install luacheck and the API index, link/unlink addons (one, or every addon in the repo after a clone or pull) |
 | `/wow-forever-addons:wow-addon-release [folder] [version]` | Version bump, clean zip, BigWigsMods/packager setup |
 | `wow-forever-api` (loaded automatically) | Forever facts, secret values, restrictions, removed-API table, Settings API |
 | `@agent-wow-forever-addons:wow-addon-reviewer` | Advisor-mode code review for Forever/Midnight compatibility, taint and performance: numbered findings and proposed fixes, never edits. Runs automatically from `wow-addon-test` and `wow-addon-new` |
@@ -35,10 +35,12 @@ Windows PowerShell 5.1, no admin needed. Run them from `plugins/wow-forever-addo
 | `Test-WowAddon.ps1 -Path X [-Flavor ...] [-Json]` | Static validator; exit code 1 on errors |
 | `Find-WowApi.ps1 <name or pattern> [-Events] [-SecretOnly]` | Look up functions/events in the Forever API index |
 | `Deploy-WowAddon.ps1 -Path X [-Mode Link/Copy] [-Remove]` | Junction or copy into `Interface\AddOns`; never deletes real folders |
+| `Link-WowAddons.ps1 [-Path dir] [-Flavor ...] [-Remove] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into each client its TOC targets; real folders go to `AddOns.backup`. Also runs under PowerShell 7 on macOS (symlinks) |
+| `link-wow-addons.sh [--dry-run] [--remove] [--wow-root DIR] [dir]` | The same for a Mac without PowerShell (bash, symlinks, every addon into every client) |
 | `Install-WowDevTools.ps1` | luacheck from its official GitHub release, plus the API index |
 | `Update-WowApiIndex.ps1 [-Branch forever]` | Rebuild `data/api-<branch>.json` from Blizzard's UI source (after patches) |
 
-Self-test: `plugins/wow-forever-addons/tests/Invoke-KitSelfTest.ps1` checks that every planted bug in `tests/fixtures/BrokenAddon` is caught, and that a fresh scaffold and the example come out clean.
+Self-test: `plugins/wow-forever-addons/tests/Invoke-KitSelfTest.ps1` checks that every planted bug in `tests/fixtures/BrokenAddon` is caught, that a fresh scaffold and the example come out clean, and that `Link-WowAddons.ps1` links, re-points, backs up and unlinks correctly in a fake install.
 
 ## Example addon
 

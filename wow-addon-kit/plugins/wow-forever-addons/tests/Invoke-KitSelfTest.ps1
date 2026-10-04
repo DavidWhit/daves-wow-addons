@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
   Self-test for the kit: proves the validator catches every planted problem in
-  fixtures\BrokenAddon, and that a freshly scaffolded addon comes out clean.
+  fixtures\BrokenAddon, that a freshly scaffolded addon comes out clean, and that
+  Link-WowAddons.ps1 links, re-points, backs up and unlinks correctly in a fake install.
 
 .EXAMPLE
   .\tests\Invoke-KitSelfTest.ps1
@@ -75,6 +76,53 @@ try {
 	$c = Invoke-Check $probe @('forever', 'retail', 'classic_era')
 	Assert ($c.Exit -eq 0 -and $c.Result.Errors -eq 0 -and $c.Result.Warnings -eq 0) "scaffold is clean ($($c.Result.Errors) errors, $($c.Result.Warnings) warnings)"
 } finally {
+	if (-not $KeepTemp) { Remove-Item -LiteralPath $tmp -Recurse -Force } else { Write-Host "  kept $tmp" }
+}
+
+Write-Host 'Link-WowAddons (fake WoW install in a temp folder):' -ForegroundColor Cyan
+Import-Module (Join-Path $scripts 'WowKit.psm1') -Force
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("wowkit-linktest-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
+$wow = Join-Path $tmp 'World of Warcraft'; $src = Join-Path $tmp 'wowaddons'; $elsewhere = Join-Path $tmp 'elsewhere'
+$fAdd = Join-Path $wow '_classic_beta_\Interface\AddOns'; $rAdd = Join-Path $wow '_retail_\Interface\AddOns'
+try {
+	foreach ($d in $fAdd, $rAdd, $elsewhere, "$src\ForeverOnly", "$src\Both", "$src\RetailOnly", "$src\NotAnAddon", "$fAdd\Both") { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+	Set-Content (Join-Path $wow '.build.info') "Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0`nus|1|1.60.1.70205|wow_classic_beta`nus|1|12.1.0.65000|wow"
+	Set-Content (Join-Path $wow '_classic_beta_\.flavor.info') "Product Flavor!STRING:0`nwow_classic_beta"   # _retail_ has none: name fallback
+	Set-Content "$src\ForeverOnly\ForeverOnly.toc" '## Interface: 16001'
+	Set-Content "$src\Both\Both.toc" '## Interface: 16001, 120100'
+	Set-Content "$src\RetailOnly\RetailOnly_Mainline.toc" '## Interface: 120100'
+	Set-Content "$src\NotAnAddon\README.md" 'no toc here'
+	Set-Content "$fAdd\Both\marker.txt" 'installed copy'                       # real folder: must be backed up
+	New-WowLink (Join-Path $rAdd 'RetailOnly') $elsewhere                     # stale link: must be re-pointed
+
+	$inst = @(Get-WowInstall $wow)
+	Assert (@($inst | Where-Object { $_.Folder -eq '_retail_' -and $_.Flavor -eq 'retail' }).Count -eq 1) 'client without .flavor.info identified by folder name'
+
+	$link = Join-Path $scripts 'Link-WowAddons.ps1'
+	& $link -Path $src -Root $wow -WhatIf 6>$null | Out-Null
+	Assert ((Test-Path "$fAdd\Both\marker.txt") -and -not (Test-Path "$fAdd\ForeverOnly")) '-WhatIf changes nothing'
+
+	$res = @(& $link -Path $src -Root $wow -PassThru 6>$null)
+	function St($client, $addon) { ($res | Where-Object { $_.Client -eq $client -and $_.Addon -eq $addon }).Status }
+	Assert (@($res | Where-Object Addon -eq 'NotAnAddon').Count -eq 0) 'folder without a TOC ignored'
+	Assert ((St '_classic_beta_' 'ForeverOnly') -eq 'Linked' -and (Test-WowSamePath (Get-WowLinkTarget "$fAdd\ForeverOnly") "$src\ForeverOnly")) 'new addon linked'
+	Assert ((St '_retail_' 'ForeverOnly') -eq 'Skipped' -and -not (Test-Path "$rAdd\ForeverOnly")) 'Forever-only addon not linked into Retail'
+	Assert ((St '_classic_beta_' 'RetailOnly') -eq 'Skipped') 'flavor TOC (_Mainline) read: Retail-only addon not linked into Forever'
+	Assert ((St '_retail_' 'RetailOnly') -eq 'Relinked' -and (Test-WowSamePath (Get-WowLinkTarget "$rAdd\RetailOnly") "$src\RetailOnly") -and (Test-Path $elsewhere)) 'stale link re-pointed, old target kept'
+	$bak = @(Get-ChildItem (Join-Path $wow '_classic_beta_\Interface\AddOns.backup') -Directory -Filter 'Both-*' -ErrorAction SilentlyContinue)
+	Assert ((Test-WowLink "$fAdd\Both") -and $bak.Count -eq 1 -and (Test-Path (Join-Path $bak[0].FullName 'marker.txt'))) 'real folder moved to AddOns.backup, then linked'
+
+	$res = @(& $link -Path $src -Root $wow -PassThru 6>$null)
+	Assert (@($res | Where-Object Status -eq 'AlreadyLinked').Count -eq 4 -and @($res | Where-Object Status -eq 'Skipped').Count -eq 2) 'second run leaves correct links alone'
+
+	$res = @(& $link -Path "$src\Both" -Root $wow -Remove -PassThru 6>$null)
+	Assert ($res.Count -eq 2 -and @($res | Where-Object Status -eq 'Unlinked').Count -eq 2 -and (Test-Path "$fAdd\ForeverOnly")) '-Path <one addon> touches only that addon'
+
+	$res = @(& $link -Path $src -Root $wow -Remove -PassThru 6>$null)
+	Assert (@($res | Where-Object Status -eq 'Unlinked').Count -eq 2 -and -not (Test-Path "$fAdd\ForeverOnly") -and -not (Test-Path "$fAdd\Both") -and (Test-Path "$src\Both\Both.toc")) '-Remove unlinks, sources intact'
+} finally {
+	# Unlink before deleting: Remove-Item -Recurse in 5.1 would follow a junction into its target.
+	foreach ($a in $fAdd, $rAdd) { Get-ChildItem -LiteralPath $a -Force -ErrorAction SilentlyContinue | Where-Object { Test-WowLink $_.FullName } | ForEach-Object { Remove-WowLink $_.FullName } }
 	if (-not $KeepTemp) { Remove-Item -LiteralPath $tmp -Recurse -Force } else { Write-Host "  kept $tmp" }
 }
 

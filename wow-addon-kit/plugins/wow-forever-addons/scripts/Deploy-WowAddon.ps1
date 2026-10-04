@@ -40,20 +40,11 @@ if (-not $AddOnsPath) {
 New-Item -ItemType Directory -Force -Path $AddOnsPath | Out-Null
 $target = Join-Path $AddOnsPath $name
 
-function Test-Junction([string]$p) {
-	$i = Get-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
-	return $i -and ($i.Attributes -band [IO.FileAttributes]::ReparsePoint)
-}
-function Remove-Junction([string]$p) {
-	# Directory.Delete without recursion removes only the link, never the target's files.
-	[IO.Directory]::Delete($p, $false)
-}
-
 if (Test-Path -LiteralPath $target) {
-	if (Test-Junction $target) {
-		$current = (Get-Item -LiteralPath $target -Force).Target
-		if ($Remove -or $Mode -eq 'Copy' -or ($current -and ($current | Select-Object -First 1) -ne $src)) {
-			if ($PSCmdlet.ShouldProcess($target, 'Unlink junction')) { Remove-Junction $target; Write-Host "Unlinked $target" }
+	if (Test-WowLink $target) {
+		$current = Get-WowLinkTarget $target
+		if ($Remove -or $Mode -eq 'Copy' -or ($current -and -not (Test-WowSamePath $current $src))) {
+			if ($PSCmdlet.ShouldProcess($target, 'Unlink junction')) { Remove-WowLink $target; Write-Host "Unlinked $target" }
 		} elseif ($Mode -eq 'Link') {
 			Write-Host "Already linked: $target -> $src" -ForegroundColor Green; exit 0
 		}
@@ -63,10 +54,7 @@ if (Test-Path -LiteralPath $target) {
 		# Our own earlier copy: safe to refresh.
 		Remove-Item -LiteralPath $target -Recurse -Force
 	} elseif ($Force) {
-		$backupRoot = Join-Path (Split-Path $AddOnsPath -Parent) 'AddOns.backup'
-		New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
-		$backup = Join-Path $backupRoot ("{0}-{1:yyyyMMdd-HHmmss}" -f $name, (Get-Date))
-		Move-Item -LiteralPath $target -Destination $backup
+		$backup = Move-WowAddonToBackup $target
 		Write-Host "Moved the existing folder to $backup" -ForegroundColor Yellow
 	} else {
 		throw "$target already exists as a real folder (maybe an installed copy of this addon). Re-run with -Force to move it to AddOns.backup first."
@@ -76,7 +64,7 @@ if ($Remove) { exit 0 }
 
 if ($Mode -eq 'Link') {
 	if ($PSCmdlet.ShouldProcess($target, "Junction to $src")) {
-		New-Item -ItemType Junction -Path $target -Target $src | Out-Null
+		New-WowLink $target $src   # junction on Windows, symlink on macOS
 		Write-Host "Linked $target -> $src" -ForegroundColor Green
 	}
 } else {

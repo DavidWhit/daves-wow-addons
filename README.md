@@ -6,19 +6,36 @@ World of Warcraft addons for **WoW: Forever** (Interface 16001), plus the Claude
 
 | Folder | What it is |
 | --- | --- |
-| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs (v0.1.0) |
-| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: an all-in-one bag with categories, search and quality borders (v1.7.5) |
+| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs (v0.1.1) |
+| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: an all-in-one bag with categories, search and quality borders (v1.7.6) |
+| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: an animated elemental cast bar (frost, fire, shadow, nature, arcane, holy), different every cast (v0.1.0) |
 | [`wow-addon-kit`](wow-addon-kit) | Claude Code plugin (`wow-forever-addons`) for scaffolding, testing, reviewing and releasing addons, plus a `HelloForever` example |
 
-## Installing an addon
+## After cloning (or pulling)
 
-Copy (or junction-link) an addon folder from `wowaddons/` into your game's AddOns folder, e.g.:
+Link every addon in `wowaddons/` into the game, so it loads straight from the repo. Run from the repo root; re-run after a pull that adds an addon (existing links are left alone).
+
+Windows (PowerShell, no admin needed; makes junctions):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.ps1
+```
+
+Mac (makes symlinks; looks for the game in `/Applications/World of Warcraft`, override with `--wow-root` or `WOW_ROOT`):
+
+```sh
+bash wow-addon-kit/plugins/wow-forever-addons/scripts/link-wow-addons.sh
+```
+
+Add `-WhatIf` (Windows) or `--dry-run` (Mac) to preview, and `-Remove` / `--remove` to unlink. An existing real folder with the same name is moved to `Interface/AddOns.backup/` first. Then fully restart the game once and enable the addons.
+
+## Installing an addon without the repo
+
+Copy an addon folder from `wowaddons/` into your game's AddOns folder, e.g.:
 
 ```
 <WoW install>\_forever_\Interface\AddOns\daves_sack
 ```
-
-The `wow-addon-setup` skill / scripts in `wow-addon-kit` can find the folder and create the link for you.
 
 ## Using the addon kit
 

@@ -10,17 +10,31 @@ Arguments: `$ARGUMENTS` (addon name and/or what it should do; may be empty).
 
 ## 1. Settle the basics (ask only for what's missing)
 
-- **Name**: a folder-safe identifier (`CampTracker`, letters/digits/underscore, starts with a letter). WoW only loads a TOC whose name matches its folder.
-- **Flavors**: default `forever`. Add `retail` (Midnight) and `classic_era` only if the user wants them. `forever` and `retail` share one API; `classic_era` needs feature-detected fallbacks.
-- **Where**: default to a dev folder such as `%USERPROFILE%\Documents\WowAddons\`, not straight into the game folder. The deploy step links it in.
-- **Slash command**: default is the lowercased name.
-- **Icon** (always settle this before scaffolding): the `## IconTexture` shown in the AddOns list and the minimap addon menu. Pick a stock `Interface\Icons\...` icon that fits what the addon does (orbs → `Spell_Priest_ShadowOrbs`, bags → `INV_Misc_Bag_08`, maps → `INV_Misc_Map_01`), propose it, and confirm it with the user. Never ship the template's `INV_Misc_QuestionMark`; the validator warns about it.
+Take what you can from `$ARGUMENTS` and the conversation. Ask for the rest with the **AskUserQuestion** tool, not a free-text message: up to 4 questions per call, 2-4 options each, the default first and labelled "(recommended)". The user can always pick "Other" and type their own answer. Ask in dependency order: purpose before name, and name before slash command and icon. With no arguments that is two calls: purpose, flavors, where and link first, then name, slash command and icon.
+
+| Question | Options (first is the default) |
+| --- | --- |
+| **What it does** (only if unknown) | 3-4 common kinds, e.g. unit frames or health bars / bags and inventory / cast bar or action bar tweak / tracker or info panel |
+| **Name** | 2-3 names in the style of the addons already in the repo's `wowaddons/` (`daves_balls`, `daves_sack`: `daves_<thing>`), based on the purpose. Skip any that already exist |
+| **Flavors** | Forever only (recommended) / Forever + Retail / Forever + Retail + Classic Era |
+| **Where** | The repo's `wowaddons/` folder (recommended) / Another folder |
+| **Slash command** | `/<lowercased name>` (recommended) / a short custom one such as `/<abbreviation>` |
+| **Icon** | 2-3 stock `Interface\Icons\...` icons that fit (orbs → `Spell_Priest_ShadowOrbs`, bags → `INV_Misc_Bag_08`, maps → `INV_Misc_Map_01`) |
+| **Link it into the game afterwards?** | Yes, link it (recommended) / No |
+
+If the user says "use defaults" (or skips), take the first option of each and don't ask again. With no purpose at all, scaffold the plain template as `daves_newaddon`. A "Yes" to linking is the go-ahead for the link step in step 4.
+
+Rules behind the answers:
+- **Name**: folder-safe (letters, digits, underscore; starts with a letter). WoW only loads a TOC whose name matches its folder.
+- **Flavors**: `forever` and `retail` share one API; `classic_era` needs feature-detected fallbacks.
+- **Where**: the repo's `wowaddons/` is the nearest one walking up from the current folder. Outside the repo, use a dev folder such as `%USERPROFILE%\Documents\WowAddons\`. Never scaffold straight into the game folder; step 4 links it in.
+- **Icon**: always settle it before scaffolding. It's the `## IconTexture` shown in the AddOns list and the minimap addon menu. Never ship the template's `INV_Misc_QuestionMark`; the validator warns about it.
 
 ## 2. Scaffold
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/New-WowAddon.ps1" `
-  -Name <Name> -OutDir "<dev folder>" -Flavor forever[,retail,classic_era] `
+  -Name <Name> -OutDir "<repo>\wowaddons, or the chosen folder>" -Flavor forever[,retail,classic_era] `
   -Notes "<one line>" -Author "<author>" -Icon <IconName> [-Slash <cmd>]
 ```
 
@@ -55,6 +69,7 @@ The kit runs on Windows PowerShell 5.1. Watch for these when writing helper scri
 - **`Get-ChildItem -LiteralPath <dir> -Recurse -Include *.lua` silently ignores `-Include`** and returns every file. A bulk find-and-replace built on it once rewrote every `.tga` as text and corrupted all of an addon's art. Filter with `Where-Object { $_.Extension -in '.lua','.toc' }`, never run text edits on binary files, and back up first.
 - **Deletes:** use `Remove-Item -LiteralPath "<full path>"`. A path built from variables inside a long command can be refused by the sandbox as a system path.
 - **Encoding:** `Set-Content`/`Add-Content` default to ANSI. Write addon files (`.lua`, `.toc`, `.xml`) with the Write/Edit tools, or pass `-Encoding utf8`.
+- **PowerShell finds .NET members without regard to case.** In an `Add-Type` C# class, a method `Glyphs()` next to a field `glyphs` or a constant `GLYPHS` fails with "does not contain a method named 'Glyphs'". Give members names that differ by more than case. Also, a type added by `Add-Type` stays loaded for the whole session, so after changing the C#, run the script in a fresh `powershell -File` process.
 - **No Python by default.** Use `System.Drawing` (`Add-Type -AssemblyName System.Drawing`) for image previews. It can't read `.tga`, so decode the 18-byte header and BGRA pixels yourself.
 - **Check art before asking for a restart:** render a quick PNG composite of the layers and look at it. New or changed textures need a full client restart, so each art round-trip costs the user a restart.
 
@@ -63,10 +78,10 @@ The kit runs on Windows PowerShell 5.1. Watch for these when writing helper scri
 Once the feature code is written, run the **wow-addon-test** skill on the addon, not just the validator script. It runs the validator and then the **wow-addon-reviewer** agent in advisor mode. Show the user the reviewer's numbered findings and **wait for them to choose** which to apply before changing anything. Deploy only after that round is settled.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Deploy-WowAddon.ps1" -Path "<addon folder>" -Flavor forever
+powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Link-WowAddons.ps1" -Path "<addon folder>"
 ```
 
-Deploy creates a junction in the client's `Interface\AddOns`, so later edits are live after `/reload`. It refuses to replace a real folder unless given `-Force`, and then it moves that folder to `AddOns.backup` first. **Ask before deploying** if the user didn't request it, since it writes into the game folder.
+This links the addon into every installed client its TOC targets (so a Forever + Retail addon lands in both): a junction in each client's `Interface\AddOns`, so later edits are live after `/reload`. A real folder of the same name is moved to `AddOns.backup` first. For one client only, use `Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever` instead (it refuses to replace a real folder without `-Force`). On a Mac, run the same script with `pwsh`, or `bash .../scripts/link-wow-addons.sh "<addon folder>"`. If the user answered "No" to linking, skip this and tell them the command. If linking was never asked, **ask first**, since it writes into the game folder.
 
 ## 5. Tell the user
 

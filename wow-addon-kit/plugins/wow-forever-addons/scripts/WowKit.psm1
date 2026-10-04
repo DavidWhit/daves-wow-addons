@@ -1,7 +1,10 @@
 # WowKit.psm1 - shared helpers for the wow-forever-addons plugin scripts.
-# Windows PowerShell 5.1 compatible (no ?:, ??, &&).
+# Windows PowerShell 5.1 compatible (no ?:, ??, &&). The install and link helpers also run
+# under PowerShell 7 on macOS; everything else assumes Windows.
 
 $script:KitRoot = Split-Path $PSScriptRoot -Parent
+# $IsWindows only exists in PowerShell 6+; OSVersion.Platform works in 5.1 and 7.
+$script:IsWindowsOS = [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT
 
 # Interface numbers per flavor, from Warcraft Wiki "Public client builds"
 # (https://warcraft.wiki.gg/wiki/Public_client_builds, checked 2026-10-03).
@@ -44,6 +47,16 @@ function ConvertTo-WowInterface([string]$Version) {
 
 function Get-WowRoot {
 	$candidates = New-Object System.Collections.Generic.List[string]
+	if (-not $script:IsWindowsOS) {
+		# macOS: Battle.net installs to /Applications/World of Warcraft, with .build.info and the
+		# _retail_ / _classic_beta_ / ... client folders directly under it, as on Windows.
+		$candidates.Add('/Applications/World of Warcraft')
+		$candidates.Add((Join-Path $HOME 'Applications/World of Warcraft'))
+		foreach ($c in $candidates) {
+			if (Test-Path (Join-Path $c '.build.info')) { return (Resolve-Path $c).Path }
+		}
+		return $null
+	}
 	foreach ($key in 'HKLM:\SOFTWARE\WOW6432Node\Blizzard Entertainment\World of Warcraft', 'HKLM:\SOFTWARE\Blizzard Entertainment\World of Warcraft') {
 		try {
 			$ip = (Get-ItemProperty $key -ErrorAction Stop).InstallPath
@@ -76,6 +89,16 @@ function Read-BlizzardInfoFile([string]$Path) {
 	return @($rows)
 }
 
+# Which game an Interface number belongs to, by major/minor (Forever is 1.60.x = 160xx, Classic Era
+# 1.15.x = 115xx, ...); any 11.x or later number is Retail. $null when no known flavor matches.
+function Get-WowFlavorForInterface([int]$Interface) {
+	foreach ($k in $script:KnownFlavors.Keys) {
+		$known = $script:KnownFlavors[$k].Interface
+		if ([math]::Floor($known / 100) -eq [math]::Floor($Interface / 100) -or ($k -eq 'retail' -and $Interface -ge 110000)) { return $k }
+	}
+	return $null
+}
+
 # Every installed client folder (_retail_, _classic_beta_, ...) with its product, build and Interface number.
 function Get-WowInstall([string]$Root = (Get-WowRoot)) {
 	if (-not $Root) { return @() }
@@ -83,17 +106,16 @@ function Get-WowInstall([string]$Root = (Get-WowRoot)) {
 	$out = foreach ($dir in (Get-ChildItem $Root -Directory | Where-Object { $_.Name -match '^_.+_$' })) {
 		$flavorInfo = @(Read-BlizzardInfoFile (Join-Path $dir.FullName '.flavor.info'))
 		$product = if ($flavorInfo.Count) { $flavorInfo[0].'Product Flavor' } else { $null }
+		if (-not $product) {
+			# No .flavor.info: Battle.net names the folders after the product (_retail_ = "wow",
+			# _classic_beta_ = "wow_classic_beta"), so use that when .build.info lists the product.
+			$guess = if ($dir.Name -eq '_retail_') { 'wow' } else { 'wow' + $dir.Name.TrimEnd('_') }
+			if ($build | Where-Object { $_.Product -eq $guess }) { $product = $guess }
+		}
 		$row = $build | Where-Object { $_.Product -eq $product } | Select-Object -First 1
 		$version = if ($row) { $row.Version } else { $null }
 		$iface = if ($version) { ConvertTo-WowInterface $version } else { $null }
-		# Identify the game by its Interface major/minor (Forever is 1.60.x, Classic Era 1.15.x, ...).
-		$flavor = $null
-		if ($iface) {
-			foreach ($k in $script:KnownFlavors.Keys) {
-				$known = $script:KnownFlavors[$k].Interface
-				if ([math]::Floor($known / 100) -eq [math]::Floor($iface / 100) -or ($k -eq 'retail' -and $iface -ge 110000)) { $flavor = $k; break }
-			}
-		}
+		$flavor = if ($iface) { Get-WowFlavorForInterface $iface } else { $null }
 		[pscustomobject]@{
 			Folder    = $dir.Name
 			Flavor    = $flavor
@@ -101,7 +123,8 @@ function Get-WowInstall([string]$Root = (Get-WowRoot)) {
 			Version   = $version
 			Interface = $iface
 			Path      = $dir.FullName
-			AddOns    = Join-Path $dir.FullName 'Interface\AddOns'
+			# Two Join-Paths, so the separator is right on macOS too.
+			AddOns    = Join-Path (Join-Path $dir.FullName 'Interface') 'AddOns'
 		}
 	}
 	return @($out)
@@ -114,6 +137,58 @@ function Get-WowInterfaceFor([string]$Flavor, $Installs = $null) {
 	if ($hit) { return $hit.Interface }
 	if ($script:KnownFlavors.Contains($Flavor)) { return $script:KnownFlavors[$Flavor].Interface }
 	return $null
+}
+
+# --- Links in Interface\AddOns: a directory junction on Windows, a symlink on macOS. ---
+# Used by Deploy-WowAddon.ps1 and Link-WowAddons.ps1. None of these prompt; callers do ShouldProcess.
+
+function Test-WowLink([string]$Path) {
+	$i = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+	return [bool]($i -and ($i.Attributes -band [IO.FileAttributes]::ReparsePoint))
+}
+
+# Where a link points, as a full path ($null if it is not a link). 5.1 returns Target as an array.
+function Get-WowLinkTarget([string]$Path) {
+	$i = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+	if (-not $i) { return $null }
+	$t = @($i.Target) | Select-Object -First 1
+	if (-not $t) { return $null }
+	$t = ([string]$t) -replace '^\\\\\?\\|^\\\?\?\\', ''
+	if (-not [IO.Path]::IsPathRooted($t)) { $t = Join-Path (Split-Path $Path -Parent) $t }
+	return [IO.Path]::GetFullPath($t)
+}
+
+function Test-WowSamePath([string]$A, [string]$B) {
+	if (-not $A -or -not $B) { return $false }
+	$sep = [char[]]'\/'
+	$a1 = [IO.Path]::GetFullPath($A).TrimEnd($sep); $b1 = [IO.Path]::GetFullPath($B).TrimEnd($sep)
+	# Case-insensitive: NTFS and macOS's default APFS both are.
+	return [string]::Equals($a1, $b1, [StringComparison]::OrdinalIgnoreCase)
+}
+
+function New-WowLink([string]$Path, [string]$Target) {
+	$type = if ($script:IsWindowsOS) { 'Junction' } else { 'SymbolicLink' }
+	New-Item -ItemType $type -Path $Path -Target $Target | Out-Null
+}
+
+# Removes only the link, never the files it points to. Never use Remove-Item -Recurse on a
+# junction in PowerShell 5.1: it deletes the target's files.
+function Remove-WowLink([string]$Path) {
+	if (-not (Test-WowLink $Path)) { throw "$Path is not a link; not removing it." }
+	if ($script:IsWindowsOS) { [IO.Directory]::Delete($Path, $false) }   # non-recursive: just the junction
+	else { [IO.File]::Delete($Path) }                                      # unlink() on the symlink itself
+}
+
+# Moves a real folder out of AddOns to Interface\AddOns.backup\<Name>-<timestamp>; returns the new path.
+function Move-WowAddonToBackup([string]$Path) {
+	$addOns = Split-Path $Path -Parent
+	$backupRoot = Join-Path (Split-Path $addOns -Parent) 'AddOns.backup'
+	New-Item -ItemType Directory -Force -Path $backupRoot | Out-Null
+	$base = Join-Path $backupRoot ("{0}-{1:yyyyMMdd-HHmmss}" -f (Split-Path $Path -Leaf), (Get-Date))
+	$backup = $base; $n = 1
+	while (Test-Path -LiteralPath $backup) { $n++; $backup = "$base-$n" }
+	Move-Item -LiteralPath $Path -Destination $backup
+	return $backup
 }
 
 $script:ApiCache = @{}
