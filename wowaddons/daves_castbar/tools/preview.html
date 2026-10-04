@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>daves_castbar preview</title>
+<style>
+	:root { --text: #e8e6e1; --muted: #9a978f; --accent: #d4a94e; --panel: rgba(0,0,0,.45); }
+	* { box-sizing: border-box; }
+	body { margin: 0; color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; min-height: 100vh; background: #101114; }
+	body.bg-dark  { background: radial-gradient(ellipse at 30% 20%, #2a2f3a, #0e0f12 70%); }
+	body.bg-stone { background: repeating-linear-gradient(90deg, #4a4540 0 3px, #3e3a36 3px 7px), #444; background-blend-mode: overlay; }
+	body.bg-grass { background: radial-gradient(ellipse at 50% 0%, #6f8f4a, #2f4a22 75%); }
+	body.bg-snow  { background: radial-gradient(ellipse at 50% 10%, #f1f5fb, #9fb1c7 80%); }
+	header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 20px; background: var(--panel); backdrop-filter: blur(6px); }
+	h1 { font-size: 15px; margin: 0 8px 0 0; color: var(--accent); letter-spacing: .02em; }
+	label { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; }
+	input[type=range] { width: 110px; }
+	select, button { background: #262830; color: var(--text); border: 1px solid #444; border-radius: 4px; padding: 3px 8px; font: inherit; }
+	button:hover { border-color: var(--accent); }
+	main { padding: 26px 20px 40px; display: grid; gap: 6px; justify-content: start; }
+	.row { display: grid; grid-template-columns: 80px auto; align-items: center; gap: 10px; }
+	.row .name { color: var(--muted); text-transform: capitalize; text-shadow: 0 1px 2px #000; }
+	body.bg-snow .row .name { color: #334; text-shadow: none; }
+	canvas { display: block; }
+	footer { padding: 0 20px 30px; color: var(--muted); max-width: 760px; }
+</style>
+</head>
+<body class="bg-dark">
+<header>
+	<h1>daves_castbar</h1>
+	<label>Style <select id="style"><option value="borderless">Borderless (soft edges)</option><option value="framed">Framed</option></select></label>
+	<label>Width <input id="w" type="range" min="160" max="560" value="320"></label>
+	<label>Height <input id="h" type="range" min="14" max="56" value="28"></label>
+	<label>Speed <input id="speed" type="range" min="0.25" max="2" step="0.05" value="1"></label>
+	<label>Mode <select id="mode"><option value="cast">Cast</option><option value="channel">Channel</option></select></label>
+	<label><input id="freeze" type="checkbox"> Hold at <input id="hold" type="range" min="0" max="100" value="70"></label>
+	<label>Backdrop <select id="bg"><option value="dark">Dark</option><option value="stone">Stone</option><option value="grass">Grass</option><option value="snow">Snow</option></select></label>
+	<button id="interrupt">Interrupt</button>
+</header>
+<main id="bars"></main>
+<footer>Every cast gets fresh random values: the vines take a new path, glyphs and stars appear in new places, and the layer speeds drift on unrelated cycles, so no two casts look the same.</footer>
+
+<script>
+const TEX = /*TEXTURES*/{};
+const FROST_CUTS = /*FROSTCUTS*/[];
+
+const $ = id => document.getElementById(id);
+const DEBUG = new URLSearchParams(location.search).has('debug');
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp01 = v => v < 0 ? 0 : v > 1 ? 1 : v;
+const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
+const easeOutBack = t => { const c = 1.7; t -= 1; return 1 + t * t * ((c + 1) * t + c); };
+
+// A smooth random signal (-1..1): three sines with unrelated random periods, so it never visibly loops.
+function wobble(scale = 1) {
+	const f = [rand(.07, .12), rand(.17, .26), rand(.37, .53)].map(v => v * scale), p = f.map(() => rand(0, 6.283));
+	return t => Math.sin(t * f[0] * 6.283 + p[0]) * .5 + Math.sin(t * f[1] * 6.283 + p[1]) * .3 + Math.sin(t * f[2] * 6.283 + p[2]) * .2;
+}
+
+const imgs = {};
+function loadAll() {
+	return Promise.all(Object.entries(TEX).map(([k, src]) => new Promise(res => {
+		const i = new Image(); i.onload = () => { imgs[k] = i; res(); }; i.src = src;
+	})));
+}
+
+// Tinted copies of white sprites, cached (WoW does the same with SetVertexColor).
+const tintCache = {};
+function tinted(key, c) {
+	const id = key + c.join(',');
+	if (tintCache[id]) return tintCache[id];
+	const img = imgs[key], cv = document.createElement('canvas');
+	cv.width = img.width; cv.height = img.height;
+	const g = cv.getContext('2d');
+	g.drawImage(img, 0, 0);
+	g.globalCompositeOperation = 'multiply'; g.fillStyle = rgba(c, 1); g.fillRect(0, 0, cv.width, cv.height);
+	g.globalCompositeOperation = 'destination-in'; g.drawImage(img, 0, 0);
+	return tintCache[id] = cv;
+}
+
+// Textures pre-scaled to the bar's size: canvas patterns resample at tile edges when given a scale,
+// which draws seams (WoW's REPEAT wrap doesn't), so patterns only ever get translated.
+const scaledCache = {};
+function scaled(key, k, src) {
+	const im = src || imgs[key], w = Math.max(1, Math.round(im.width * k)), h = Math.max(1, Math.round(im.height * k));
+	const id = key + '|' + w + 'x' + h;
+	if (scaledCache[id]) return scaledCache[id];
+	const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+	const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, w, h);
+	return scaledCache[id] = cv;
+}
+function cutCanvas(key, kx, ky, flipH, flipV) {   // a cut layer stretched and mirrored for this cast
+	const id = 'cut|' + key + '|' + kx.toFixed(3) + '|' + ky.toFixed(3) + '|' + flipH + '|' + flipV;
+	if (scaledCache[id]) return scaledCache[id];
+	const im = imgs[key], cv = document.createElement('canvas');
+	cv.width = Math.max(1, Math.round(im.width * kx)); cv.height = Math.max(1, Math.round(im.height * ky));
+	const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high';
+	g.translate(flipH ? cv.width : 0, flipV ? cv.height : 0); g.scale(flipH ? -1 : 1, flipV ? -1 : 1);
+	g.drawImage(im, 0, 0, cv.width, cv.height);
+	return scaledCache[id] = cv;
+}
+function pattern(g, cv, du, dv) {
+	const pat = g.createPattern(cv, 'repeat');
+	pat.setTransform(new DOMMatrix().translate(-Math.round((((du % 1) + 1) % 1) * cv.width), -Math.round((((dv % 1) + 1) % 1) * cv.height)));
+	return pat;
+}
+
+// ------------------------------------------------------------------ elements
+const P = (o) => Object.assign({ rate: 5, size: [.2, .4], life: [.6, 1.2], vx: [-5, 5], vy: [-5, 5], spin: [0, 0], add: true, from: 'fill', alpha: 1 }, o);
+const EL = {
+	frost: {
+		spell: 'Frostbolt', border: [190, 225, 255], glow: [110, 180, 255], spark: [200, 235, 255], veil: [140, 200, 255],
+		layers: [{ t: 'frost_ice', su: 0 }],
+		frost: true, sweep: true, cuts: ['frost_cut0', 'frost_cut1', 'frost_cut2', 'frost_cut3', 'frost_cut4'],
+		emit: [
+			P({ t: 'p_flake', rate: 3, color: [[210, 235, 255]], size: [.3, .5], life: [1.2, 2.2], vx: [-30, -8], vy: [-6, 10], spin: [-1.2, 1.2], from: 'edge' }),
+			P({ t: 'p_star', rate: 9, color: [[225, 245, 255]], size: [.15, .32], life: [.3, .7], twinkle: true }),
+		],
+	},
+	fire: {
+		spell: 'Fireball', border: [220, 100, 30], glow: [255, 110, 20], spark: [255, 210, 140], veil: [255, 120, 30],
+		layers: [{ t: 'fire_base', su: .02 }, { t: 'fire_flow', su: .025, sv: -.55, a: [.5, .95], add: true, flicker: true }],
+		emit: [
+			P({ t: 'p_ember', rate: 24, color: [[255, 170, 60], [255, 120, 30], [255, 220, 120]], size: [.12, .26], life: [.5, 1.2], vx: [-8, 8], vy: [-45, -15], from: 'bottom', swirl: 20 }),
+		],
+	},
+	shadow: {
+		spell: 'Shadow Bolt', border: [60, 30, 95], glow: [130, 40, 220], spark: [200, 130, 255], veil: [90, 30, 160],
+		layers: [{ t: 'shadow_base', su: .01, sv: .02 }, { t: 'shadow_flow', su: -.03, sv: .06, a: [.5, 1], add: true }],
+		emit: [
+			P({ t: 'p_soft', rate: 9, color: [[6, 4, 10]], size: [.8, 1.4], life: [1.6, 2.8], vx: [-10, -2], vy: [-12, -3], add: false, alpha: .7 }),
+			P({ t: 'p_soft', rate: 8, color: [[180, 90, 255]], size: [.1, .2], life: [.8, 1.6], vx: [-14, -4], vy: [-10, 4], from: 'edge' }),
+		],
+	},
+	nature: {
+		spell: 'Wrath', border: [80, 150, 50], glow: [110, 200, 60], spark: [210, 255, 160], veil: [120, 200, 80],
+		layers: [{ t: 'nature_base', su: .004 }, { t: 'nature_flow', su: .02, a: [.35, .8], add: true }],
+		vines: true,
+		emit: [
+			P({ t: 'p_soft', rate: 6, color: [[220, 255, 140]], size: [.08, .16], life: [1, 2], vx: [-6, 6], vy: [-10, -2] }),
+		],
+	},
+	arcane: {
+		spell: 'Arcane Blast', border: [90, 110, 255], glow: [120, 110, 255], spark: [230, 190, 255], veil: [120, 90, 255],
+		layers: [{ t: 'arcane_base', su: .012 }, { t: 'arcane_flow', su: .028, a: [.55, 1], add: true }],
+		glyphs: true,
+		emit: [
+			P({ t: 'p_star', rate: 10, color: [[255, 160, 235], [150, 210, 255]], size: [.15, .3], life: [.4, .9], vx: [-22, -5], vy: [-8, 8], from: 'edge', twinkle: true }),
+		],
+	},
+	holy: {
+		spell: 'Holy Light', border: [240, 205, 120], glow: [255, 210, 110], spark: [255, 250, 220], veil: [255, 220, 140],
+		layers: [{ t: 'holy_base', su: .008 }, { t: 'holy_flow', su: .02, a: [.4, .9], add: true }],
+		twinkles: true,
+		emit: [
+			P({ t: 'p_soft', rate: 12, color: [[255, 225, 150], [255, 245, 210]], size: [.08, .18], life: [1, 2], vx: [-5, 5], vy: [-18, -6] }),
+		],
+	},
+};
+
+const settings = { W: 320, H: 28, speed: 1, style: 'borderless', mode: 'cast', freeze: false, hold: .7 };
+
+// ------------------------------------------------------------------ edge mask (borderless)
+let maskCache = null;
+function edgeMask(W, H) {
+	if (maskCache && maskCache.W === W && maskCache.H === H) return maskCache.cv;
+	const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+	const g = cv.getContext('2d');
+	const pat = g.createPattern(imgs.edge_v, 'repeat');
+	pat.setTransform(new DOMMatrix().scale(H / 64));
+	g.fillStyle = pat; g.fillRect(0, 0, W, H);
+	// end caps: edge_h across the first and last H*1.4 pixels
+	const caps = document.createElement('canvas'); caps.width = W; caps.height = H;
+	const c = caps.getContext('2d'), capW = Math.round(H * 1.4);
+	c.fillStyle = '#fff'; c.fillRect(capW, 0, W - 2 * capW, H);
+	c.drawImage(imgs.edge_h, 0, 0, capW, H);
+	c.save(); c.translate(W, 0); c.scale(-1, 1); c.drawImage(imgs.edge_h, 0, 0, capW, H); c.restore();
+	g.globalCompositeOperation = 'destination-in'; g.drawImage(caps, 0, 0);
+	maskCache = { W, H, cv };
+	return cv;
+}
+
+// ------------------------------------------------------------------ bar
+class Bar {
+	constructor(key, parent) {
+		this.key = key; this.cfg = EL[key];
+		const row = document.createElement('div'); row.className = 'row';
+		row.innerHTML = `<div class="name">${this.cfg.label || key}</div>`;
+		this.cv = document.createElement('canvas'); row.appendChild(this.cv); parent.appendChild(row);
+		this.g = this.cv.getContext('2d');
+		this.off = document.createElement('canvas'); this.og = this.off.getContext('2d');
+		this.layerOff = this.cfg.layers.map(L => ({ u: rand(0, 1), v: L.sv ? rand(0, 1) : 0 }));   // only layers that scroll vertically tile vertically
+		this.wob = this.cfg.layers.map(() => wobble());
+		this.speedWob = this.cfg.layers.map(() => wobble(.7));
+		this.glowWob = wobble(1.5); this.sparkWob = wobble(6);
+		this.parts = []; this.emitAcc = this.cfg.emit.map(() => 0);
+		this.clock = rand(0, 100);
+		this.newCast();
+	}
+	newCast() {
+		this.dur = rand(1.6, 3.2); this.elapsed = 0; this.state = 'cast'; this.stateT = 0;
+		this.vines = this.cfg.vines ? this.makeVines() : null;
+		this.sweepT = rand(.4, 1.5); this.sweep = null; this.traceCuts = [pick([0, 1, 2, 3, 5])];   // frost: one of this cast's edge-to-edge cut lines to trace (not the girdle, 4)
+		const nCuts = this.cfg.cuts ? 6 : 0;
+		this.cutParams = Array.from({ length: nCuts }, (_, i) => ({ c: i < 5 ? i : Math.floor(rand(0, 4)), u: rand(0, 1), stretch: rand(.7, 1.5), flipH: Math.random() < .5, flipV: Math.random() < .5, w: rand(.55, 1), wob: wobble(1.3) }));
+		this.glyphs = []; this.glyphT = 0; this.twinkles = []; this.twinkleAcc = 0; this.circles = []; this.circleNext = rand(.2, 1.2) * settings.H;
+		this.cv.style.opacity = 1; this.parts = [];
+	}
+	interrupt() { if (this.state === 'cast') { this.state = 'interrupted'; this.stateT = 0; } }
+
+	// ---- nature: vines that grow with the bar, twisting around each other on a random path
+	makeVines() {
+		const n = Math.random() < .5 ? 2 : 3, base = rand(0, 6.283);
+		return Array.from({ length: n }, (_, i) => ({
+			ph: base + i * 6.283 / n + rand(-.4, .4), freq: rand(.28, .45), fw: wobble(2.2), yw: wobble(3),
+			amp: rand(.24, .36), w: rand(.075, .105), moss: Math.random() < .4, x: 0, pts: [], leaves: [], nextThorn: rand(.2, .6) * settings.H, thornSide: 1,
+		}));
+	}
+	growVines(fillW, H) {
+		for (const v of this.vines) {
+			while (v.x < fillW) {
+				v.x += 2;
+				const xn = v.x / H;
+				v.ph += (2 / H) * 6.283 * v.freq * (1 + .45 * v.fw(xn * .35));   // twist rate drifts randomly
+				const y = H / 2 + H * v.amp * Math.sin(v.ph) + H * .07 * v.yw(xn * .5);
+				v.pts.push({ x: v.x, y, d: Math.cos(v.ph) });
+				const p0 = v.pts[v.pts.length - 2], tang = p0 ? Math.atan2(y - p0.y, 2) : 0;
+				if (Math.random() < .10 && p0) {
+					const side = Math.random() < .5 ? -1 : 1;
+					v.leaves.push({ x: v.x, y, ang: tang + side * rand(.8, 1.8), size: H * rand(.34, .55), born: this.clock, d: Math.cos(v.ph),
+						tint: pick([[90, 165, 60], [60, 135, 50], [125, 175, 70], [55, 115, 60], [150, 185, 80], [80, 150, 45]]) });
+				}
+				if (v.x >= v.nextThorn && p0) {   // thorns at uneven spacing, alternating sides, raked toward the tip
+					v.nextThorn = v.x + H * rand(.2, .45); v.thornSide = -v.thornSide;
+					v.leaves.push({ x: v.x, y, thorn: true, ang: tang + v.thornSide * (Math.PI / 2 - rand(.25, .6)), side: v.thornSide,
+						size: H * v.w * rand(2.8, 3.6), born: this.clock, d: Math.cos(v.ph) });
+				}
+				if (Math.random() < .008) {   // a leaf lets go and falls
+					this.spawn(P({ t: 'p_leaf', color: [pick([[110, 165, 60], [150, 170, 70], [170, 140, 60]])], size: [.3, .42], life: [1.2, 2], vx: [-14, -4], vy: [10, 26], spin: [-3, 3], add: false }), v.x, y);
+				}
+			}
+		}
+	}
+	drawVines(g, ox, oy, fillW, H) {
+		// Three passes (dark outline, bark core, highlight) so segments blend into one smooth stem.
+		const seg = (v, front) => {
+			const pts = v.pts, core = v.moss ? [70, 92, 36] : [104, 70, 38];
+			g.lineCap = 'round'; g.lineJoin = 'round';
+			for (let pass = 0; pass < (front ? 3 : 2); pass++) {
+				for (let i = 1; i < pts.length; i++) {
+					const a = pts[i - 1], b = pts[i];
+					if (b.x > fillW) break;
+					if ((b.d >= 0) !== front) continue;
+					const taper = Math.max(.2, Math.min(1, (fillW - b.x) / (H * .8)));
+					const w = H * v.w * (front ? .85 + .3 * b.d : .7 + .2 * b.d) * taper;
+					const lit = front ? .72 + .28 * b.d : .42 + .18 * (1 + b.d);
+					if (pass === 0) { g.strokeStyle = 'rgba(22,14,6,.85)'; g.lineWidth = w + 1.4; }
+					else if (pass === 1) { g.strokeStyle = rgba(core.map(c => Math.round(c * lit)), 1); g.lineWidth = w; }
+					else { g.strokeStyle = `rgba(200,170,110,${.3 * lit})`; g.lineWidth = Math.max(.5, w * .22); }
+					const dy = pass === 2 ? -w * .22 : 0;
+					g.beginPath(); g.moveTo(ox + a.x, oy + a.y + dy); g.lineTo(ox + b.x, oy + b.y + dy); g.stroke();
+				}
+			}
+		};
+		const leaves = (v, front) => {
+			for (const l of v.leaves) {
+				if (l.x > fillW || (l.d >= 0) !== front) continue;
+				const s = easeOutBack(clamp01((this.clock - l.born) / .45)) * l.size;
+				const shade = front ? 1 : .6;
+				g.save(); g.translate(ox + l.x, oy + l.y); g.rotate(l.ang);
+				if (l.thorn) {
+					// sprite points up with its base on the bottom edge: turn "up" to the thorn's angle
+					g.rotate(Math.PI / 2); if (l.side < 0) g.scale(-1, 1);
+					const sh = Math.round(255 * shade);
+					g.drawImage(tinted('p_thorn', [sh, sh, sh]), -s / 2, -s - H * v.w * .3, s, s);
+				} else {
+					g.rotate(-Math.PI / 4);
+					g.translate(s * .35, s * .35);   // the leaf's base sits on the vine
+					g.drawImage(tinted('p_leaf', l.tint.map(c => Math.round(c * shade))), -s / 2, -s / 2, s, s);
+				}
+				g.restore();
+			}
+		};
+		for (const v of this.vines) seg(v, false);
+		for (const v of this.vines) leaves(v, false);
+		for (const v of this.vines) seg(v, true);
+		for (const v of this.vines) leaves(v, true);
+	}
+
+	// ---- frost: two of the cut lines baked into the ice texture (random ones each cast) are traced live.
+	// FROST_CUTS is the generator's geometry (texture pixels); the bright heads run along the cuts at the
+	// fill edge and what it has passed settles into a softer glow.
+	drawFrost(g, fillW, H, dpr) {
+		const head = fillW, fade = H * 1.6, k = H * dpr / 64;
+		g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
+		const tips = [];
+		for (const ci of this.traceCuts) {
+			const cp = this.cutParams[ci], cv = cutCanvas(this.cfg.cuts[cp.c] + '_hi', k * cp.stretch, k, cp.flipH, cp.flipV);
+			const tw = cv.width / dpr, sx = tw / 512, sy = cv.height / dpr / 64;
+			const x0 = -(((cp.u % 1) + 1) % 1) * tw;                                 // where texture x = 0 lands on the bar
+			// the cut as placed this cast: mirrored like its layer
+			const cut = FROST_CUTS[cp.c].map(([x, y]) => [cp.flipH ? 512 - x : x, cp.flipV ? 64 - y : y]);
+			if (cp.flipH) cut.reverse();
+			for (let rep = x0 - 2 * tw; rep < fillW; rep += tw) {
+				for (let i = 1; i < cut.length; i++) {
+					{
+						let ax = rep + cut[i - 1][0] * sx, ay = cut[i - 1][1] * sy;
+						let bx = rep + cut[i][0] * sx, by = cut[i][1] * sy;
+						if (bx < 0 || ax > head) continue;
+						if (bx > head) { const t = (head - ax) / (bx - ax); bx = head; by = ay + (by - ay) * t; tips.push([bx, by]); }
+						// draw in short pieces so brightness can fall off behind the head
+						const len = Math.hypot(bx - ax, by - ay), steps = Math.max(1, Math.ceil(len / 6));
+						for (let s = 0; s < steps; s++) {
+							const t1 = s / steps, t2 = (s + 1) / steps;
+							const px = ax + (bx - ax) * t1, py = ay + (by - ay) * t1, qx = ax + (bx - ax) * t2, qy = ay + (by - ay) * t2;
+							const glow = Math.exp(-Math.max(0, head - qx) / fade);
+							g.strokeStyle = `rgba(150,210,255,${.05 + .25 * glow})`; g.lineWidth = Math.max(1.2, H * (.04 + .04 * glow));
+							g.beginPath(); g.moveTo(px, py); g.lineTo(qx, qy); g.stroke();
+							g.strokeStyle = `rgba(235,248,255,${.22 + .7 * glow})`; g.lineWidth = Math.max(.5, H * .018);
+							g.beginPath(); g.moveTo(px, py); g.lineTo(qx, qy); g.stroke();
+						}
+					}
+				}
+			}
+		}
+		// a bright point where each cut meets the fill edge
+		for (const [x, y] of tips) {
+			const s = H * .5;
+			g.drawImage(tinted('p_star', [220, 242, 255]), x - s / 2, y - s / 2, s, s);
+		}
+		g.globalCompositeOperation = 'source-over';
+	}
+
+	// light catching the cut ice: a soft diagonal band sweeps across at random moments
+	drawSweep(g, fillW, H, dt) {
+		this.sweepT -= dt;
+		if (!this.sweep && this.sweepT <= 0) this.sweep = { t: 0, dur: rand(.45, .8) };
+		if (!this.sweep) return;
+		this.sweep.t += dt;
+		const p = this.sweep.t / this.sweep.dur;
+		if (p >= 1) { this.sweep = null; this.sweepT = rand(1.2, 3.5); return; }
+		const x = -H + (fillW + 2 * H) * p;
+		g.save(); g.globalCompositeOperation = 'lighter';
+		g.transform(1, 0, -.6, 1, H * .3, 0);   // lean the band
+		const gr = g.createLinearGradient(x - H * .5, 0, x + H * .5, 0);
+		gr.addColorStop(0, 'rgba(200,235,255,0)'); gr.addColorStop(.5, 'rgba(220,245,255,.55)'); gr.addColorStop(1, 'rgba(200,235,255,0)');
+		g.fillStyle = gr; g.fillRect(x - H * .5, 0, H, H);
+		g.restore();
+	}
+
+	// ---- particles
+	spawn(e, x, y) {
+		const H = settings.H, k = H / 28;
+		this.parts.push({
+			x, y, vx: rand(...e.vx) * k, vy: rand(...e.vy) * k, life: rand(...e.life), age: 0,
+			size: rand(...e.size) * H, rot: rand(0, 6.28), spin: rand(...e.spin), e, color: pick(e.color),
+			tw: e.twinkle ? rand(8, 16) : 0, sw: e.swirl ? rand(0, 6.28) : 0,
+		});
+	}
+	emit(dt, fillW, H) {
+		this.cfg.emit.forEach((e, i) => {
+			this.emitAcc[i] += e.rate * dt * (fillW > 2 ? 1 : 0);
+			while (this.emitAcc[i] >= 1) {
+				this.emitAcc[i]--;
+				let x, y;
+				if (e.from === 'edge') { x = fillW + rand(-4, 1); y = rand(0, H); }
+				else if (e.from === 'bottom') { x = rand(0, fillW); y = H * rand(.35, 1); }
+				else { x = rand(0, fillW); y = rand(0, H); }
+				this.spawn(e, x, y);
+			}
+		});
+	}
+	drawParts(g, ox, oy, dt) {
+		this.parts = this.parts.filter(p => (p.age += dt) < p.life);
+		for (const p of this.parts) {
+			if (p.e.swirl) p.vx += Math.sin(p.age * 6 + p.sw) * p.e.swirl * dt;
+			p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.spin * dt;
+			const t = p.age / p.life;
+			let a = Math.min(1, t / .15) * Math.min(1, (1 - t) / .4) * p.e.alpha;
+			if (p.tw) a *= .5 + .5 * Math.sin(p.age * p.tw);
+			g.globalAlpha = clamp01(a);
+			g.globalCompositeOperation = p.e.add ? 'lighter' : 'source-over';
+			g.save(); g.translate(ox + p.x, oy + p.y); g.rotate(p.rot);
+			g.drawImage(tinted(p.e.t, p.color), -p.size / 2, -p.size / 2, p.size, p.size);
+			g.restore();
+		}
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+
+	// ---- arcane rune circles: placed at random heights and sizes as the bar fills, each turning
+	// its own way at its own speed, so they never line up into a repeating stamp
+	drawCircles(g, fillW, H, dt) {
+		while (fillW > this.circleNext) {
+			this.circles.push({ x: this.circleNext, y: H * rand(.1, .9), s: H * rand(1.0, 2.3), i: Math.floor(rand(0, 3)), rot: rand(0, 6.283),
+				spin: rand(.12, .45) * (Math.random() < .5 ? -1 : 1), born: this.clock, c: pick([[255, 175, 235], [175, 205, 255], [215, 175, 255]]), ph: rand(0, 6.283) });
+			this.circleNext += H * rand(1.3, 3.0);
+		}
+		g.globalCompositeOperation = 'lighter';
+		for (const q of this.circles) {
+			if (q.x - q.s / 2 > fillW) continue;
+			q.rot += q.spin * dt * settings.speed;
+			g.globalAlpha = Math.min(1, (this.clock - q.born) / .5) * (.75 + .2 * Math.sin(this.clock * 1.3 + q.ph));
+			g.save(); g.translate(q.x, q.y); g.rotate(q.rot);
+			g.drawImage(tinted('p_runecircles', q.c), q.i * 128, 0, 128, 128, -q.s / 2, -q.s / 2, q.s, q.s);
+			g.restore();
+		}
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+
+	// ---- arcane glyphs that flare up inside the bar and fade
+	drawGlyphs(g, fillW, H, dt) {
+		this.glyphT -= dt;
+		if (this.glyphT <= 0 && fillW > H) {
+			this.glyphT = rand(.25, .6);
+			this.glyphs.push({ x: rand(H * .3, fillW - H * .2), y: H / 2 + rand(-.12, .12) * H, s: H * rand(.6, .95), age: 0, life: rand(.9, 1.7),
+				i: Math.floor(rand(0, 16)), c: pick([[255, 150, 230], [140, 200, 255], [255, 215, 140]]), rot: rand(-.25, .25) });
+		}
+		this.glyphs = this.glyphs.filter(q => (q.age += dt) < q.life && q.x < fillW);
+		g.globalCompositeOperation = 'lighter';
+		for (const q of this.glyphs) {
+			const t = q.age / q.life, a = Math.sin(Math.PI * t) ** 1.5, s = q.s * (.75 + .25 * easeOutBack(clamp01(t * 2.5)));
+			g.globalAlpha = a;
+			g.save(); g.translate(q.x, q.y); g.rotate(q.rot);
+			g.drawImage(tinted('p_glyphs', q.c), (q.i % 8) * 64, Math.floor(q.i / 8) * 64, 64, 64, -s / 2, -s / 2, s, s);
+			g.restore();
+		}
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+
+	// ---- holy twinkles: sharp four-point stars that pop in and out, some spilling past the edges
+	drawTwinkles(g, ox, oy, fillW, H, dt) {
+		this.twinkleAcc += dt * 9;
+		while (this.twinkleAcc >= 1 && fillW > 4) {
+			this.twinkleAcc--;
+			const big = Math.random() < .15;
+			this.twinkles.push({ x: rand(0, fillW), y: rand(-.25, 1.25) * H, s: H * (big ? rand(.9, 1.4) : rand(.35, .7)), age: 0, life: rand(.4, 1.1),
+				c: pick([[255, 245, 215], [255, 225, 150], [255, 255, 255]]), rot: rand(-.3, .3) });
+		}
+		this.twinkles = this.twinkles.filter(q => (q.age += dt) < q.life);
+		g.globalCompositeOperation = 'lighter';
+		for (const q of this.twinkles) {
+			const t = q.age / q.life, a = Math.sin(Math.PI * t) ** 2, s = q.s * (.6 + .4 * Math.sin(Math.PI * t));
+			g.globalAlpha = a;
+			g.save(); g.translate(ox + q.x, oy + q.y); g.rotate(q.rot + t * .4);
+			g.drawImage(tinted('p_twinkle', q.c), -s / 2, -s / 2, s, s);
+			g.restore();
+		}
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+
+	frame(dt) {
+		const { W, H, style } = settings, cfg = this.cfg;
+		const PAD = Math.round(H * 0.9);
+		const dpr = window.devicePixelRatio || 1;
+		const cw = W + PAD * 2, ch = H + PAD * 2;
+		if (this.cv.width !== cw * dpr || this.cv.height !== ch * dpr) {
+			this.cv.width = cw * dpr; this.cv.height = ch * dpr; this.cv.style.width = cw + 'px'; this.cv.style.height = ch + 'px';
+			this.off.width = W * dpr; this.off.height = H * dpr;
+		}
+		this.clock += dt;
+		// cast state
+		if (this.state === 'cast') {
+			this.elapsed += dt;
+			if (settings.freeze) this.elapsed = Math.min(this.elapsed, settings.hold * this.dur);
+			if (this.elapsed >= this.dur) { this.state = 'done'; this.stateT = 0; }
+		} else {
+			this.stateT += dt;
+			const total = this.state === 'done' ? .9 : 1.2;
+			this.cv.style.opacity = this.stateT < total - .5 ? 1 : clamp01((total - this.stateT) / .5);
+			if (this.stateT > total + .4) this.newCast();
+		}
+		const p = clamp01(this.elapsed / this.dur);
+		const channel = settings.mode === 'channel';
+		const fillW = W * (channel ? 1 - p : p);
+
+		const g = this.g, og = this.og;
+		g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, cw, ch);
+		og.setTransform(dpr, 0, 0, dpr, 0, 0); og.clearRect(0, 0, W, H);
+
+		// outer glow behind the filled part
+		const ga = .30 + .12 * this.glowWob(this.clock);
+		g.save(); g.shadowColor = rgba(cfg.glow, ga * 1.4); g.shadowBlur = H * .9; g.fillStyle = rgba(cfg.glow, ga * .35);
+		if (fillW > 1) g.fillRect(PAD + 2, PAD + 3, fillW - 4, H - 6);
+		g.restore();
+
+		// empty track (layers are drawn in device pixels so the patterns are never rescaled)
+		og.fillStyle = style === 'framed' ? 'rgba(6,6,10,.85)' : 'rgba(6,6,10,.45)'; og.fillRect(0, 0, W, H);
+		og.setTransform(1, 0, 0, 1, 0, 0);
+		const k = H * dpr / 64, DW = W * dpr, DH = H * dpr, DF = fillW * dpr;
+		og.globalAlpha = .16; og.fillStyle = pattern(og, scaled(cfg.layers[0].t, k), this.layerOff[0].u, 0); og.fillRect(0, 0, DW, DH); og.globalAlpha = 1;
+
+		// filled part
+		og.save(); og.beginPath(); og.rect(0, 0, DF, DH); og.clip();
+		og.fillStyle = 'rgba(0,0,0,1)'; og.fillRect(0, 0, DF, DH);
+		cfg.layers.forEach((L, i) => {
+			const sm = 1 + .45 * this.speedWob[i](this.clock);       // speed drifts, so the scroll never settles into a loop
+			const o = this.layerOff[i];
+			o.u += (L.su || 0) * sm * dt * settings.speed; o.v += (L.sv || 0) * dt * settings.speed * (1 + .3 * this.speedWob[i](this.clock + 9));
+			let a = 1;
+			if (L.a) a = L.a[0] + (L.a[1] - L.a[0]) * (.5 + .5 * this.wob[i](this.clock * (L.flicker ? 6 : 1)));
+			og.globalAlpha = a; og.globalCompositeOperation = L.add ? 'lighter' : 'source-over';
+			og.fillStyle = pattern(og, scaled(L.t, k), o.u, o.v); og.fillRect(0, 0, DF, DH);
+		});
+		// frost: the cut layers stacked over the plain ice make the facets
+		// (each cut: a navy wash deepens its shadow side, an additive layer brightens its lit side)
+		if (cfg.cuts) this.cutParams.forEach(cp => {
+			const key = cfg.cuts[cp.c];
+			og.globalAlpha = cp.w * (.7 + .3 * cp.wob(this.clock));   // weights drift: the light seems to move
+			for (const [suffix, op] of [['_lo', 'source-over'], ['_hi', 'lighter']]) {
+				og.globalCompositeOperation = op;
+				og.fillStyle = pattern(og, cutCanvas(key + suffix, k * cp.stretch, k, cp.flipH, cp.flipV), cp.u, 0); og.fillRect(0, 0, DF, DH);
+			}
+			og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
+		});
+		// veil: soft tinted shimmer
+		og.globalCompositeOperation = 'lighter'; og.globalAlpha = .35 + .2 * this.glowWob(this.clock + 3);
+		og.fillStyle = pattern(og, scaled('veil:' + this.key, k * 2, tinted('veil', cfg.veil)), this.clock * .015 * settings.speed, 0);
+		og.fillRect(0, 0, DF, DH);
+		og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
+		og.setTransform(dpr, 0, 0, dpr, 0, 0);
+		if (cfg.glyphs) { this.drawCircles(og, fillW, H, dt); this.drawGlyphs(og, fillW, H, dt); }
+		if (cfg.sweep) this.drawSweep(og, fillW, H, dt * settings.speed);
+		og.restore();
+		og.setTransform(dpr, 0, 0, dpr, 0, 0);
+		// frost traces the ice's cut lines up to the fill edge (inside the edge mask)
+		if (cfg.frost) this.drawFrost(og, fillW, H, dpr);
+
+		// interrupted: drain the colour out
+		if (this.state === 'interrupted') {
+			og.globalCompositeOperation = 'saturation'; og.fillStyle = 'hsl(0,0%,50%)'; og.fillRect(0, 0, W, H);
+			og.globalCompositeOperation = 'multiply'; og.fillStyle = 'rgb(255,110,110)'; og.fillRect(0, 0, W, H);
+			og.globalCompositeOperation = 'source-over';
+		}
+		// finished: a bright flash that fades
+		if (this.state === 'done') {
+			og.globalCompositeOperation = 'lighter'; og.globalAlpha = clamp01(1 - this.stateT / .35) * .8;
+			og.fillStyle = rgba(cfg.spark, 1); og.fillRect(0, 0, W, H);
+			og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
+		}
+
+		if (style === 'borderless') {
+			og.globalCompositeOperation = 'destination-in';
+			og.setTransform(1, 0, 0, 1, 0, 0); og.drawImage(edgeMask(W * dpr, H * dpr), 0, 0);
+			og.globalCompositeOperation = 'source-over';
+		}
+		g.drawImage(this.off, PAD, PAD, W, H);
+
+		// live elements drawn over the bar (free to spill past its edges)
+		if (this.vines) { if (this.state === 'cast') this.growVines(fillW, H); this.drawVines(g, PAD, PAD, fillW, H); }
+		if (cfg.twinkles) this.drawTwinkles(g, PAD, PAD, fillW, H, dt * settings.speed);
+
+		if (DEBUG) { g.fillStyle = 'red'; g.fillRect(PAD + fillW - 1, 0, 2, 8); g.fillStyle = 'lime'; for (const q of this.parts) g.fillRect(PAD + q.x - 1, PAD + q.y - 1, 2, 2); }
+		// leading-edge spark
+		if (this.state === 'cast' && p > 0 && p < 1) {
+			const sa = .75 + .25 * this.sparkWob(this.clock);
+			g.globalCompositeOperation = 'lighter'; g.globalAlpha = sa;
+			const sw = H * .9, sh = H * 1.7;
+			g.drawImage(tinted('spark', cfg.spark), PAD + fillW - sw / 2, PAD + H / 2 - sh / 2, sw, sh);
+			g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+		}
+
+		if (this.state === 'cast') this.emit(dt * settings.speed, fillW, H);
+		this.drawParts(g, PAD, PAD, dt * settings.speed);
+
+		if (style === 'framed') {
+			g.strokeStyle = 'rgba(0,0,0,.8)'; g.lineWidth = 3; g.strokeRect(PAD - 1, PAD - 1, W + 2, H + 2);
+			g.strokeStyle = rgba(cfg.border, 1); g.lineWidth = 1.5; g.strokeRect(PAD - .75, PAD - .75, W + 1.5, H + 1.5);
+		}
+
+		// text
+		const fs = Math.max(10, Math.round(H * .46));
+		g.font = `600 ${fs}px Georgia, "Times New Roman", serif`; g.textBaseline = 'middle';
+		g.shadowColor = 'rgba(0,0,0,.95)'; g.shadowBlur = 3; g.shadowOffsetY = 1;
+		g.fillStyle = '#fff'; g.textAlign = 'left';
+		const label = this.state === 'interrupted' ? 'Interrupted' : cfg.spell;
+		g.fillText(label, PAD + H * .4, PAD + H / 2 + 1);
+		if (this.state === 'cast') {
+			g.textAlign = 'right';
+			g.fillText(Math.max(0, this.dur - this.elapsed).toFixed(1), PAD + W - H * .4, PAD + H / 2 + 1);
+		}
+		g.shadowColor = 'transparent';
+	}
+}
+
+// ------------------------------------------------------------------ wiring
+const bars = [];
+function bind() {
+	const upd = () => {
+		settings.W = +$('w').value; settings.H = +$('h').value; settings.speed = +$('speed').value;
+		settings.style = $('style').value; settings.mode = $('mode').value; settings.freeze = $('freeze').checked; settings.hold = $('hold').value / 100;
+		document.body.className = 'bg-' + $('bg').value;
+	};
+	['w', 'h', 'speed', 'style', 'mode', 'freeze', 'hold', 'bg'].forEach(id => $(id).addEventListener('input', upd));
+	$('interrupt').addEventListener('click', () => bars.forEach(b => b.interrupt()));
+	upd();
+}
+
+loadAll().then(() => {
+	// URL options set the controls, e.g. ?style=framed&h=40&hold=70&sim=2 (sim: seconds to pre-run, for screenshots)
+	const q = new URLSearchParams(location.search);
+	for (const id of ['style', 'w', 'h', 'speed', 'mode', 'hold', 'bg']) if (q.has(id)) $(id).value = q.get(id);
+	if (q.has('hold')) $('freeze').checked = true;
+	bind();
+	const main = $('bars');
+	for (const k of Object.keys(EL)) if (!q.has('only') || q.get('only').split(',').includes(k)) bars.push(new Bar(k, main));
+	for (let i = 0; i < (+q.get('sim') || 0) * 60; i++) for (const b of bars) b.frame(1 / 60);
+	if (q.has('debug')) document.querySelector('footer').textContent = JSON.stringify({ settings, bars: bars.map(b => [b.key, b.state, +b.elapsed.toFixed(2), +b.dur.toFixed(2)]), frost: bars[0].parts.slice(0, 8).map(p => [p.e.t, +p.x.toFixed(1), +p.vx.toFixed(1), +p.age.toFixed(2)]), fillW: settings.W * bars[0].elapsed / bars[0].dur });
+	let last = performance.now();
+	const tick = now => {
+		const dt = Math.min(.05, (now - last) / 1000); last = now;
+		for (const b of bars) b.frame(dt);
+		requestAnimationFrame(tick);
+	};
+	requestAnimationFrame(tick);
+});
+</script>
+</body>
+</html>
