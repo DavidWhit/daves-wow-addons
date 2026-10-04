@@ -1,219 +1,108 @@
 -- daves_castbar / EditMode.lua
 -- Moving, sizing and setting up the bar in Blizzard's Edit Mode (or any time when unlocked).
---   drag the bar            move it; snaps to Edit Mode's grid when "Snap" is ticked (Shift: place freely)
---   drag the corner grip    resize it; the right and bottom edges snap to the grid too
---   click                   the bar's settings: size, scale, style, text, a preview of each element
+--   drag the bar            move it; with "Snap" ticked it pulls onto grid lines, the screen edges and
+--                           centre, and Edit Mode frames beside it, like Blizzard's own (Shift: place freely)
+--   drag the corner grip    resize it; the right and bottom edges snap the same way
+--   click                   the bar's settings (the kit's shared Edit Mode dialog, EditModeDialog.lua):
+--                           size, scale, style, text, a preview of each element
 --   right-click             reset position and size
 -- While Edit Mode is open the bar plays pretend casts so its look can be judged in place.
 --
--- EventRegistry "EditMode.Enter"/"EditMode.Exit", EditModeManagerFrameMixin:IsSnapEnabled and the
--- grid (EditModeGridMixin:UpdateGrid draws lines every Grid.gridSpacing out from the Grid frame's
--- centre) are in Blizzard_EditMode/Shared/EditModeManager.lua, forever branch.
+-- EventRegistry "EditMode.Enter"/"EditMode.Exit" are in Blizzard_EditMode/Shared/EditModeManager.lua,
+-- forever branch. Snapping and the settings dialog come from the kit's EditModeDialog.lua.
 
 local _, ns = ...
 
 local bar, selection, grip, dialog
 
+local function RefreshDialog()
+	if dialog and dialog:IsShown() then dialog:Refresh() end
+end
+
 ---------------------------------------------------------------------------
--- Grid snapping (screen pixels)
+-- Moving and resizing. Snapping is the kit's (EditModeDialog.lua): magnetic, like Blizzard's
+-- own frames, to grid lines, screen edges and centre, and Edit Mode frames beside the bar.
 ---------------------------------------------------------------------------
-local function GridSnapInfo()
-	local manager = EditModeManagerFrame
-	if not (ns.inEditMode and manager and manager.IsSnapEnabled and manager:IsSnapEnabled()) then return end
-	local grid = manager.Grid
-	if not (grid and grid:IsShown() and grid.gridSpacing) then return end
-	local gx, gy = grid:GetCenter()
-	if not gx then return end
-	local scale = grid:GetEffectiveScale()
-	return gx * scale, gy * scale, grid.gridSpacing * scale
-end
-
-local function SnapLine(p, gridCenter, spacing)
-	return gridCenter + math.floor((p - gridCenter) / spacing + .5) * spacing
-end
-
--- Snap the centre or either edge to the nearest grid line, whichever is closer.
-local function SnapAxis(center, half, gridCenter, spacing)
-	local best
-	for _, p in ipairs({ center, center - half, center + half }) do
-		local delta = SnapLine(p, gridCenter, spacing) - p
-		if not best or math.abs(delta) < math.abs(best) then best = delta end
-	end
-	return center + best
-end
-
--- Screen edges: within EDGE_SNAP pixels the bar sits flush against the edge.
-local EDGE_SNAP = 12
-local function SnapToEdge(center, half, size)
-	if math.abs(center - half) <= EDGE_SNAP then return half end
-	if math.abs(size - (center + half)) <= EDGE_SNAP then return size - half end
-end
-
 local function DragUpdate()
-	local scale = bar:GetEffectiveScale()
+	local scale, ui = bar:GetEffectiveScale(), UIParent:GetEffectiveScale()
 	local cx, cy = GetCursorPosition()
-	local x, y = cx - bar.grabX, cy - bar.grabY
+	local x, y = (cx - bar.grabX) / ui, (cy - bar.grabY) / ui       -- the bar's centre, UIParent units
 	if not IsShiftKeyDown() then
 		local w, h = ns:BarSize()
-		local hw, hh = w * scale / 2, h * scale / 2
-		local gx, gy, spacing = GridSnapInfo()
-		if gx then x, y = SnapAxis(x, hw, gx, spacing), SnapAxis(y, hh, gy, spacing) end
-		local uiScale = UIParent:GetEffectiveScale()
-		x = SnapToEdge(cx - bar.grabX, hw, UIParent:GetWidth() * uiScale) or x
-		y = SnapToEdge(cy - bar.grabY, hh, UIParent:GetHeight() * uiScale) or y
+		w, h = w * scale / ui, h * scale / ui
+		local left, bottom = ns.EditMode.SnapRect(bar, x - w / 2, y - h / 2, w, h)
+		x, y = left + w / 2, bottom + h / 2
 	end
 	bar:ClearAllPoints()
-	bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+	bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x * ui / scale, y * ui / scale)
 end
 
 -- Resizing keeps the top-left corner where it is.
 local MIN_W, MAX_W, MIN_H, MAX_H = 80, 800, 10, 80
 local function ResizeUpdate()
-	local scale = bar:GetEffectiveScale()
+	local scale, ui = bar:GetEffectiveScale(), UIParent:GetEffectiveScale()
 	local cx, cy = GetCursorPosition()
-	local right, bottom = cx - grip.offX, cy - grip.offY      -- where the bar's bottom-right corner should go
+	local right, bottom = (cx - grip.offX) / ui, (cy - grip.offY) / ui   -- where the bottom-right corner goes
 	if not IsShiftKeyDown() then
-		local gx, gy, spacing = GridSnapInfo()
-		if gx then right, bottom = SnapLine(right, gx, spacing), SnapLine(bottom, gy, spacing) end
+		right, bottom = ns.EditMode.SnapEdge(right, true), ns.EditMode.SnapEdge(bottom, false)
 	end
-	local w = math.max(MIN_W, math.min(MAX_W, (right - grip.left) / scale))
-	local h = math.max(MIN_H, math.min(MAX_H, (grip.top - bottom) / scale))
+	local w = math.max(MIN_W, math.min(MAX_W, (right * ui - grip.left) / scale))
+	local h = math.max(MIN_H, math.min(MAX_H, (grip.top - bottom * ui) / scale))
 	ns.db.width, ns.db.height = math.floor(w + .5), math.floor(h + .5)
 	ns:Layout()
-	if dialog and dialog:IsShown() then dialog:Refresh() end
+	if dialog and dialog:IsShown() then dialog:RefreshValues() end   -- the full refresh waits for mouse-up
 end
 
 ---------------------------------------------------------------------------
--- Settings dialog
+-- Settings dialog: the kit's shared Edit Mode dialog (EditModeDialog.lua)
 ---------------------------------------------------------------------------
-local function Slider(parent, label, y, min, max, step, fmt, get, set)
-	local text = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	text:SetPoint("TOPLEFT", 20, y)
-	text:SetText(label)
-	local slider = CreateFrame("Frame", nil, parent, "MinimalSliderWithSteppersTemplate")
-	slider:SetPoint("TOPLEFT", 100, y + 6)
-	slider:SetSize(190, 20)
-	local formatters = {
-		[MinimalSliderWithSteppersMixin.Label.Right] = CreateMinimalSliderFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(v) return fmt:format(v) end),
-	}
-	slider:Init(get(), min, max, (max - min) / step, formatters)
-	slider:RegisterCallback(MinimalSliderWithSteppersMixin.Event.OnValueChanged, function(_, value)
-		if parent.refreshing then return end
-		set(value)
-	end, parent)
-	slider.get = get
-	return slider
-end
-
-local function Check(parent, label, x, y, key, tooltip)
-	local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-	check:SetSize(26, 26)
-	check:SetPoint("TOPLEFT", x, y)
-	local text = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	text:SetPoint("LEFT", check, "RIGHT", 2, 0)
-	text:SetText(label)
-	check:SetScript("OnClick", function(self)
-		ns.db[key] = self:GetChecked() and true or false
-		ns:Apply()
-	end)
-	if tooltip then
-		check:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip:SetText(label)
-			GameTooltip:AddLine(tooltip, 1, 1, 1, true)
-			GameTooltip:Show()
-		end)
-		check:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	end
-	check.key = key
-	return check
-end
-
 local function CreateDialog()
-	dialog = CreateFrame("Frame", "DavesCastbarSettings", UIParent, "DefaultPanelTemplate")
-	dialog:SetSize(320, 380)
-	dialog:SetFrameStrata("DIALOG")
-	dialog:SetMovable(true)
-	dialog:EnableMouse(true)
-	dialog:RegisterForDrag("LeftButton")
-	dialog:SetScript("OnDragStart", dialog.StartMoving)
-	dialog:SetScript("OnDragStop", dialog.StopMovingOrSizing)
-	dialog:SetClampedToScreen(true)
-	table.insert(UISpecialFrames, dialog:GetName())   -- Escape closes it
-	if dialog.TitleContainer and dialog.TitleContainer.TitleText then
-		dialog.TitleContainer.TitleText:SetText("Dave's Cast Bar")
-	end
-	local close = CreateFrame("Button", nil, dialog, "UIPanelCloseButton")
-	close:SetPoint("TOPRIGHT", 1, 0)
+	dialog = ns.EditMode.CreateDialog("DavesCastbarSettings", "Dave's Cast Bar")
+	local db = ns.db
+	local function Number(key) return function() return db[key] end end
+	local function SetAndLayout(key) return function(v) db[key] = v; ns:Layout() end end
+	local function Flag(key) return function() return db[key] end end
+	local function SetFlag(key) return function(v) db[key] = v; ns:Apply() end end
 
-	local function SetAndLayout(key)
-		return function(v) ns.db[key] = v; ns:Layout() end
+	dialog:AddSlider({ label = "Width", min = MIN_W, max = MAX_W, step = 1, format = "%d", get = Number("width"), set = SetAndLayout("width") })
+	dialog:AddSlider({ label = "Height", min = MIN_H, max = MAX_H, step = 1, format = "%d", get = Number("height"), set = SetAndLayout("height") })
+	dialog:AddSlider({ label = "Scale", min = .5, max = 2, step = .05, format = "%.2f", get = Number("scale"), set = SetAndLayout("scale") })
+	dialog:AddCheckbox({ label = "Borderless (soft edges)", get = Flag("borderless"), set = SetFlag("borderless"),
+		tooltip = "On: the bar's edges fade out raggedly. Off: a thin frame in the element's colour." })
+	dialog:AddCheckbox({ label = "Show spell name", get = Flag("showName"), set = SetFlag("showName") })
+	dialog:AddCheckbox({ label = "Show time left", get = Flag("showTime"), set = SetFlag("showTime") })
+	dialog:AddCheckbox({ label = "Show spell icon", get = Flag("showIcon"), set = SetFlag("showIcon") })
+	dialog:AddSlider({ label = "Text size", min = .6, max = 2, step = .05,
+		format = function(v) return ("%d%%"):format(v * 100 + .5) end, get = Number("textScale"), set = SetAndLayout("textScale") })
+	dialog:AddCheckbox({ label = "Outline text", get = Flag("textOutline"), set = SetFlag("textOutline"),
+		tooltip = "A dark outline around the spell name and time, so they stand out against every element." })
+	local function Placement(label, key)
+		dialog:AddButtonGrid({ label = label, columns = 3,
+			buttons = { { key = "left", text = "Left" }, { key = "center", text = "Center" }, { key = "right", text = "Right" } },
+			onClick = function(pos) db[key] = pos; ns:Layout() end,
+			isActive = function(pos) return db[key] == pos end })
 	end
-	dialog.sliders = {
-		Slider(dialog, "Width", -40, MIN_W, MAX_W, 2, "%d", function() return ns.db.width end, SetAndLayout("width")),
-		Slider(dialog, "Height", -72, MIN_H, MAX_H, 1, "%d", function() return ns.db.height end, SetAndLayout("height")),
-		Slider(dialog, "Scale", -104, .5, 2, .05, "%.2f", function() return ns.db.scale end, SetAndLayout("scale")),
-	}
-	dialog.checks = {
-		Check(dialog, "Borderless (soft edges)", 14, -134, "borderless", "On: the bar's edges fade out raggedly. Off: a thin frame in the element's colour."),
-		Check(dialog, "Show spell name", 14, -160, "showName"),
-		Check(dialog, "Show time left", 14, -186, "showTime"),
-		Check(dialog, "Show spell icon", 14, -212, "showIcon"),
-		Check(dialog, "Hide Blizzard's cast bar", 14, -238, "hideBlizzard"),
-	}
+	Placement("Spell name", "namePos")
+	Placement("Time left", "timePos")
+	dialog:AddCheckbox({ label = "Hide Blizzard's cast bar", get = Flag("hideBlizzard"), set = SetFlag("hideBlizzard") })
 
-	-- preview buttons: loop one element, or all of them in turn
-	local label = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	label:SetPoint("TOPLEFT", 20, -272)
-	label:SetText("Preview")
-	local keys = { "all" }
-	for _, k in ipairs(ns.ELEMENT_ORDER) do keys[#keys + 1] = k end
-	dialog.previewButtons = {}
-	for i, key in ipairs(keys) do
-		local b = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-		b:SetSize(66, 20)
-		local col, row = (i - 1) % 4, math.floor((i - 1) / 4)
-		b:SetPoint("TOPLEFT", 20 + col * 70, -290 - row * 24)
-		b:SetText(key == "all" and "All" or ns.ELEMENTS[key].label)
-		b:SetScript("OnClick", function()
+	-- preview: loop one element, or all of them in turn
+	local buttons = { { key = "all", text = "All" } }
+	for _, k in ipairs(ns.ELEMENT_ORDER) do buttons[#buttons + 1] = { key = k, text = ns.ELEMENTS[k].label } end
+	dialog:AddButtonGrid({ label = "Preview", buttons = buttons, columns = 4,
+		onClick = function(key)
 			ns.editPreview = key ~= "all" and key or nil
 			ns:TestCast(ns.editPreview, ns.inEditMode)
-			dialog:Refresh()
-		end)
-		b.key = key
-		dialog.previewButtons[i] = b
-	end
+		end,
+		isActive = function(key) return (key == "all" and not ns.editPreview) or key == ns.editPreview end,
+	})
 
-	local reset = CreateFrame("Button", nil, dialog, "UIPanelButtonTemplate")
-	reset:SetSize(280, 22)
-	reset:SetPoint("BOTTOM", 0, 16)
-	reset:SetText("Reset position and size")
-	reset:SetScript("OnClick", function() ns:ResetPosition(); dialog:Refresh() end)
-
-	function dialog:Refresh()
-		self.refreshing = true
-		for _, s in ipairs(self.sliders) do s:SetValue(s.get()) end
-		for _, c in ipairs(self.checks) do c:SetChecked(ns.db[c.key]) end
-		for _, b in ipairs(self.previewButtons) do
-			local on = (b.key == "all" and not ns.editPreview) or b.key == ns.editPreview
-			b:SetAlpha(on and 1 or .75)
-		end
-		self.refreshing = nil
-	end
+	dialog:AddButton({ text = "Reset position and size", onClick = function() ns:ResetPosition() end })
 end
 
 function ns:OpenBarSettings()
 	if not dialog then CreateDialog() end
-	dialog:ClearAllPoints()
-	-- open above or below the bar, on whichever side has more room
-	local _, y = bar:GetCenter()
-	if y and y * bar:GetEffectiveScale() > UIParent:GetHeight() * UIParent:GetEffectiveScale() / 2 then
-		dialog:SetPoint("TOP", bar, "BOTTOM", 0, -12)
-	else
-		dialog:SetPoint("BOTTOM", bar, "TOP", 0, 24)
-	end
-	dialog:Refresh()
-	dialog:Show()
+	dialog:OpenFor(bar)
 end
 
 ---------------------------------------------------------------------------
@@ -248,23 +137,14 @@ end
 function ns.InitEditMode()   -- (a plain function: the handlers below have their own 'self')
 	bar = ns.bar
 
-	-- overlay shown while the bar can be moved
-	selection = CreateFrame("Frame", nil, bar)
-	selection:SetPoint("TOPLEFT", -3, 3)
-	selection:SetPoint("BOTTOMRIGHT", 3, -3)
-	selection:SetFrameLevel(bar:GetFrameLevel() + 20)
-	local tint = selection:CreateTexture(nil, "OVERLAY")
-	tint:SetAllPoints()
-	tint:SetColorTexture(.25, .6, 1, .22)
-	local name = selection:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	name:SetPoint("BOTTOM", selection, "TOP", 0, 2)
-	name:SetText("Dave's Cast Bar")
-	selection:Hide()
+	-- Edit Mode's selection art, shown while the bar can be moved
+	selection = ns.EditMode.CreateSelection(bar, "Dave's Cast Bar")
 
 	grip = CreateFrame("Button", nil, bar)
 	grip:SetSize(16, 16)
 	grip:SetPoint("BOTTOMRIGHT", 4, -4)
-	grip:SetFrameLevel(bar:GetFrameLevel() + 21)
+	grip:SetFrameLevel(selection:GetFrameLevel() + 5)
+	grip:SetIgnoreParentAlpha(true)   -- stays solid while preview casts fade the bar
 	grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 	grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
@@ -291,6 +171,7 @@ function ns.InitEditMode()   -- (a plain function: the handlers below have their
 		bar:ClearAllPoints()
 		bar:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
 		ns:SavePosition()
+		RefreshDialog()
 	end)
 	grip:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -320,7 +201,7 @@ function ns.InitEditMode()   -- (a plain function: the handlers below have their
 			ns:OpenBarSettings()
 		elseif button == "RightButton" then
 			ns:ResetPosition()
-			if dialog and dialog:IsShown() then dialog:Refresh() end
+			RefreshDialog()
 		end
 	end)
 	bar:SetScript("OnEnter", function(self)

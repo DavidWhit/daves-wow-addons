@@ -238,6 +238,55 @@ end
 ---------------------------------------------------------------------------
 -- Layout: size, style, text
 ---------------------------------------------------------------------------
+local JUSTIFY = { left = "LEFT", center = "CENTER", right = "RIGHT" }
+
+-- Spell name and time left: size (textScale), contrast outline (textOutline) and placement
+-- (namePos, timePos: "left", "center" or "right"). The time keeps a strip as wide as "88.8";
+-- the name gets the rest of the bar and is truncated inside it, so the two never overlap.
+-- With both centred they share one line: "Frostbolt  1.2" (OnBarUpdate).
+local function LayoutText()
+	local db = ns.db
+	local name, time = textFrame.name, textFrame.time
+	local size = math.max(6, math.floor(H * .46 * db.textScale + .5))
+	local flags = db.textOutline and "OUTLINE" or ""
+	for _, fs in ipairs({ name, time }) do
+		fs:SetFont("Fonts\\FRIZQT__.TTF", size, flags)
+		fs:SetShadowOffset(1, -1)
+		fs:SetShadowColor(0, 0, 0, db.textOutline and .9 or 1)
+	end
+	local timePos, namePos = JUSTIFY[db.timePos] and db.timePos or "right", JUSTIFY[db.namePos] and db.namePos or "left"
+	local showTime = db.showTime
+	textFrame.combined = showTime and db.showName and timePos == "center" and namePos == "center"
+
+	local shown = time:GetText()
+	time:SetText("88.8")
+	local tw = math.ceil(time:GetStringWidth()) + 2
+	time:SetText(shown or "")
+	local pad = H * .4
+	time:ClearAllPoints()
+	time:SetWidth(tw)
+	time:SetJustifyH(JUSTIFY[timePos])
+	if timePos == "left" then time:SetPoint("LEFT", pad, 0)
+	elseif timePos == "center" then time:SetPoint("CENTER")
+	else time:SetPoint("RIGHT", -pad, 0) end
+
+	-- the name's span, in offsets from the bar's left edge
+	local l, r = pad, W - pad
+	if showTime and not textFrame.combined then
+		if timePos == "left" then l = pad + tw + 6
+		elseif timePos == "right" then r = W - pad - tw - 6
+		elseif namePos == "right" then l = (W + tw) / 2 + 6
+		else r = (W - tw) / 2 - 6 end
+	end
+	r = math.max(r, l + 1)
+	name:ClearAllPoints()
+	name:SetPoint("LEFT", bar, "LEFT", l, 0)
+	name:SetPoint("RIGHT", bar, "LEFT", r, 0)
+	name:SetJustifyH(JUSTIFY[namePos])
+	name:SetShown(db.showName)
+	time:SetShown(showTime and not textFrame.combined)
+end
+
 function ns:Layout()
 	local db = ns.db
 	W, H = math.floor(db.width + .5), math.floor(db.height + .5)
@@ -271,14 +320,7 @@ function ns:Layout()
 	glowFrame.l:SetWidth(glowH / 2); glowFrame.r:SetWidth(glowH / 2)
 	fx.spark:SetSize(H * .9, H * 1.7)
 
-	local size = math.max(9, math.floor(H * .46 + .5))
-	textFrame.name:SetFont("Fonts\\FRIZQT__.TTF", size, "")
-	textFrame.time:SetFont("Fonts\\FRIZQT__.TTF", size, "")
-	textFrame.name:ClearAllPoints(); textFrame.name:SetPoint("LEFT", H * .4, 0)
-	textFrame.name:SetPoint("RIGHT", textFrame.time, "LEFT", -6, 0)
-	textFrame.time:ClearAllPoints(); textFrame.time:SetPoint("RIGHT", -H * .4, 0)
-	textFrame.name:SetShown(db.showName)
-	textFrame.time:SetShown(db.showTime)
+	LayoutText()
 	textFrame.icon:SetSize(H, H)
 	textFrame.icon:ClearAllPoints(); textFrame.icon:SetPoint("RIGHT", bar, "LEFT", -4, 0)
 	textFrame.icon:SetShown(db.showIcon)
@@ -350,6 +392,7 @@ local function ReadCast(kind)
 end
 
 local function ShowText(label, icon)
+	cast.label = label   -- may be secret: only ever handed to SetText/SetFormattedText
 	textFrame.name:SetText(label or "")
 	if icon then textFrame.icon:SetTexture(icon) end
 end
@@ -361,7 +404,7 @@ function ns:StartCast(kind)
 	local key = ns:ResolveElement(spellID, name, isTradeskill)
 	cast.kind, cast.channel = kind, kind == "channel"
 	cast.start, cast.finish, cast.castID, cast.test, cast.loop = start, finish, castID, nil, nil
-	cast.state, cast.t = "cast", 0
+	cast.state, cast.t, cast.shown, cast.easeT = "cast", 0, nil, nil
 	if spellID and not issecretvalue(spellID) then ns.lastSpell = { id = spellID, name = name } end
 	ActivateElement(key)
 	ShowText((text and not issecretvalue(text) and text ~= "" and text) or name, texture)
@@ -369,10 +412,18 @@ function ns:StartCast(kind)
 	bar:Show()
 end
 
+-- Pushback and channel updates move the fill. It glides from where it was shown to the new
+-- spot over EASE seconds instead of jumping (OnBarUpdate).
+local EASE = .25
+local INTERRUPT_FADE = .25   -- the interrupted tint fades in over this long
+
 local function Refresh(kind)
 	if cast.state ~= "cast" or cast.test then return end
 	local name, _, _, start, finish = ReadCast(kind)
-	if name then cast.start, cast.finish = start, finish end
+	if name then
+		cast.start, cast.finish = start, finish
+		if cast.shown then cast.easeFrom, cast.easeT = cast.shown, 0 end
+	end
 end
 
 local function Progress()
@@ -384,12 +435,15 @@ local function Finish(how)   -- "done" (flash and fade) or "interrupted"
 	cast.finishedAt = cast.channel and Progress() or 1   -- a channel ends where it stopped draining
 	if how == "interrupted" then cast.finishedAt = Progress() end
 	cast.state, cast.t = how, 0
-	if how == "interrupted" and active then
-		for _, layer in ipairs(active.layers) do
-			layer.tex:SetDesaturated(true)
-			layer.tex:SetVertexColor(1, .45, .45)
-		end
-		ShowText(INTERRUPTED or "Interrupted")
+	if how == "interrupted" then ShowText(INTERRUPTED or "Interrupted")   -- the tint fades in (OnBarUpdate)
+	elseif textFrame.combined then textFrame.name:SetText(cast.label or "") end   -- drop the shared time
+end
+
+-- k = 0..1: from the element's own colours to grey-red.
+local function TintInterrupted(k)
+	for _, layer in ipairs(active.layers) do
+		layer.tex:SetDesaturation(k)
+		layer.tex:SetVertexColor(1, 1 - .55 * k, 1 - .55 * k)
 	end
 end
 
@@ -398,6 +452,18 @@ local function SameCast(castID)
 	if castID == nil or cast.castID == nil or cast.kind ~= "cast" then return false end
 	if issecretvalue(castID) or issecretvalue(cast.castID) then return false end
 	return castID == cast.castID
+end
+
+-- Stopped well before its scheduled end.
+local function EndedEarly() return Now() < cast.finish - .25 end
+
+-- interruptedBy from a STOP event. Blizzard's bar treats nil as "finished" (CastingBarFrame.lua).
+-- In combat and other restricted moments the payload is secret (SecretWhenUnitSpellCastRestricted)
+-- and can't be read. A channel that finished normally then looked interrupted. A secret is judged
+-- by timing instead: stopping near the scheduled end means it finished.
+local function Interrupted(by)
+	if issecretvalue(by) then return EndedEarly() end
+	return by ~= nil and by ~= ""
 end
 
 -- Payloads (CastingBarFrame.lua, forever branch): most UNIT_SPELLCAST_* are (unit, castGUID, spellID, ...);
@@ -415,15 +481,12 @@ function ns:OnCastEvent(event, _, castID, _, arg4, arg5)
 	elseif event == "UNIT_SPELLCAST_INTERRUPTED" or event == "UNIT_SPELLCAST_FAILED" then
 		if SameCast(castID) then Finish("interrupted") end
 	elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
-		if cast.kind == "channel" then
-			local interrupted = issecretvalue(arg4) or arg4 ~= nil      -- interruptedBy, never compared while secret
-			Finish(interrupted and "interrupted" or "done")
-		end
+		if cast.kind == "channel" then Finish(Interrupted(arg4) and "interrupted" or "done") end
 	elseif event == "UNIT_SPELLCAST_EMPOWER_STOP" then
 		if cast.kind == "empower" then
-			local complete = not issecretvalue(arg4) and arg4
-			local interrupted = issecretvalue(arg5) or arg5 ~= nil
-			Finish((complete and not interrupted) and "done" or "interrupted")
+			local complete
+			if issecretvalue(arg4) then complete = not EndedEarly() else complete = arg4 end
+			Finish((complete and not Interrupted(arg5)) and "done" or "interrupted")
 		end
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		if UnitCastingInfo("player") then ns:StartCast("cast")
@@ -441,7 +504,7 @@ function ns:TestCast(key, loop)
 	local cfg = ns.ELEMENTS[key]
 	local now = Now()
 	cast.kind, cast.channel, cast.start, cast.finish, cast.castID = "cast", false, now, now + 2.6, nil
-	cast.state, cast.t, cast.test, cast.loop = "cast", 0, true, loop
+	cast.state, cast.t, cast.test, cast.loop, cast.shown, cast.easeT = "cast", 0, true, loop, nil, nil
 	ActivateElement(key)
 	ShowText(cfg.label .. " test", "Interface\\Icons\\INV_Misc_QuestionMark")
 	bar:SetAlpha(1)
@@ -475,7 +538,16 @@ function ns:OnBarUpdate(dt)
 	else
 		return
 	end
-	local fillW = W * (cast.channel and (1 - p) or p)
+	local f = cast.channel and (1 - p) or p
+	if cast.easeT then   -- gliding after a pushback or channel update, toward the moving target
+		cast.easeT = cast.easeT + dt
+		local k = math.min(1, cast.easeT / EASE)
+		k = k * k * (3 - 2 * k)
+		f = cast.easeFrom + (f - cast.easeFrom) * k
+		if k >= 1 then cast.easeT = nil end
+	end
+	cast.shown = f
+	local fillW = W * f
 	clip:SetWidth(math.max(.01, fillW))
 
 	-- fades
@@ -485,6 +557,7 @@ function ns:OnBarUpdate(dt)
 		bar:SetAlpha(a)
 		if a <= 0 then return ns:EndCast() end
 	elseif cast.state == "interrupted" then
+		if cast.t - dt < INTERRUPT_FADE then TintInterrupted(math.min(1, cast.t / INTERRUPT_FADE)) end
 		local a = cast.t < .7 and 1 or math.max(0, 1 - (cast.t - .7) / .5)
 		bar:SetAlpha(a)
 		if a <= 0 then return ns:EndCast() end
@@ -522,7 +595,12 @@ function ns:OnBarUpdate(dt)
 	ns.FX:Update(dt, clock, fillW, cast.state == "cast")
 
 	if cast.state == "cast" and ns.db.showTime then
-		textFrame.time:SetFormattedText("%.1f", math.max(0, cast.finish - Now()))
+		local left = math.max(0, cast.finish - Now())
+		if textFrame.combined then
+			textFrame.name:SetFormattedText("%s  %.1f", cast.label or "", left)
+		else
+			textFrame.time:SetFormattedText("%.1f", left)
+		end
 	elseif cast.state ~= "cast" then
 		textFrame.time:SetText("")
 	end

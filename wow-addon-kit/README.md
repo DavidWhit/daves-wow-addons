@@ -31,7 +31,7 @@ Windows PowerShell 5.1, no admin needed. Run them from `plugins/wow-forever-addo
 | Script | Purpose |
 | --- | --- |
 | `Find-WowInstall.ps1` | Lists installed clients with build, TOC Interface number and AddOns path (reads `.build.info`) |
-| `New-WowAddon.ps1 -Name X [-Flavor forever,retail]` | Scaffold from `templates/addon` |
+| `New-WowAddon.ps1 -Name X [-Flavor forever,retail] [-EditMode]` | Scaffold from `templates/addon`; `-EditMode` adds the shared Edit Mode behaviour and an `EditMode.lua` wired up with it |
 | `Test-WowAddon.ps1 -Path X [-Flavor ...] [-Json]` | Static validator; exit code 1 on errors |
 | `Find-WowApi.ps1 <name or pattern> [-Events] [-SecretOnly]` | Look up functions/events in the Forever API index |
 | `Deploy-WowAddon.ps1 -Path X [-Mode Link/Copy] [-Remove]` | Junction or copy into `Interface\AddOns`; never deletes real folders |
@@ -49,3 +49,14 @@ Self-test: `plugins/wow-forever-addons/tests/Invoke-KitSelfTest.ps1` checks that
 ## What the validator checks
 
 TOC name, Interface currency per flavor, missing or wrong-case files, `[Family]`/`[Game]` and `AllowLoadGameType` handling, XML includes, unloaded Lua files, unknown `C_` namespaces/functions, globals removed or moved into `C_` namespaces, deprecation-shim calls, unknown events, `COMBAT_LOG_EVENT_UNFILTERED` (errors on 12.x/Forever), comparisons/math/concatenation on secret values, slash-command wiring, unused SavedVariables, addon-comms lockdown, and luacheck (syntax, accidental globals, unused locals).
+
+The Edit Mode rule: an addon that joins Edit Mode must ship `templates/editmode/EditModeDialog.lua` unchanged and build no settings windows, sliders, checkboxes or grid snapping of its own (rules `editmode-dialog`, `editmode-ui`, `editmode-snap`).
+
+## Edit Mode settings (shared by every addon)
+
+`templates/editmode/EditModeDialog.lua` is the one Edit Mode behaviour for every addon frame placed in Edit Mode, modelled on Blizzard's own Edit Mode:
+- **Outline:** Blizzard's blue/yellow outline.
+- **Snapping:** magnetic, like Blizzard's frames. Within 8 px it pulls onto the grid, the screen edges and centre, and nearby Edit Mode frames.
+- **Settings dialog:** labels and slider numbers are measured, so they always fit. Only one dialog is open at a time, across Blizzard's and every addon's. It opens beside its frame, clear of that frame and of Edit Mode's window, and steps aside if a setting moves the frame under it.
+
+`ns.EditMode.Attach(frame, ...)` wires all of it up in one call. `New-WowAddon.ps1 -EditMode` adds the file plus an `EditMode.lua` that uses `Attach`. The `wow-forever-api` skill documents the API. To change it, edit the kit's file, then copy it into every addon that has one (`wowaddons/daves_balls`, `wowaddons/daves_castbar`). The validator warns about any copy that differs.

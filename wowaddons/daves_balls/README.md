@@ -17,4 +17,4 @@ Targets: forever (`## Interface: 16001`).
 | Link into the game | `Deploy-WowAddon.ps1 -Path . -Flavor forever` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
-Files: `daves_balls.toc` (manifest), `Core.lua` (startup, events, slash command), `Options.lua` (Settings panel).
+Files: `daves_balls.toc` (manifest), `Core.lua` (startup, events, slash command), `EditModeDialog.lua` (the kit's shared Edit Mode dialog and selection art; copied from `wow-addon-kit`, don't edit it here), `Options.lua` (Settings panel), `Orbs.lua` (the orbs), `OrbSettings.lua` (each orb's Edit Mode settings).

@@ -1,4 +1,4 @@
-# Dave's WoW Addons
+﻿# Dave's WoW Addons
 
 World of Warcraft addons for **WoW: Forever** (Interface 16001), plus the Claude Code tooling used to build them.
 
@@ -6,9 +6,9 @@ World of Warcraft addons for **WoW: Forever** (Interface 16001), plus the Claude
 
 | Folder | What it is |
 | --- | --- |
-| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs (v0.1.1) |
+| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs (v0.1.3) |
 | [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: an all-in-one bag with categories, search and quality borders (v1.7.6) |
-| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: an animated elemental cast bar (frost, fire, shadow, nature, arcane, holy), different every cast (v0.1.0) |
+| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: an animated elemental cast bar (frost, fire, shadow, nature, arcane, holy), different every cast (v0.1.4) |
 | [`wow-addon-kit`](wow-addon-kit) | Claude Code plugin (`wow-forever-addons`) for scaffolding, testing, reviewing and releasing addons, plus a `HelloForever` example |
 
 ## After cloning (or pulling)

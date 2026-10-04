@@ -54,6 +54,17 @@ if ($hasLuacheck) {
 	Assert (Has $r 'luacheck-E011' 'error') 'syntax error (luacheck)'
 } else { Write-Host '  SKIP  luacheck checks (run scripts\Install-WowDevTools.ps1)' -ForegroundColor DarkGray }
 
+Write-Host 'Edit Mode fixture (own settings window, no shared dialog):' -ForegroundColor Cyan
+$em = (Invoke-Check (Join-Path $PSScriptRoot 'fixtures\EditModeNoKit')).Result
+Assert (Has $em 'editmode-dialog' 'error') 'Edit Mode addon without EditModeDialog.lua'
+Assert (Has $em 'editmode-ui' 'error' 5) 'hand-built DefaultPanelTemplate window'
+Assert (Has $em 'editmode-ui' 'error' 6) 'hand-built MinimalSliderWithSteppers slider'
+Assert (Has $em 'editmode-ui' 'error' 7) 'hand-built UICheckButtonTemplate checkbox'
+Assert (-not (Has $em 'editmode-ui' 'error' 8)) "'-- editmode-ui: ok' marks a window that isn't Edit Mode settings"
+Assert (-not (Has $em 'editmode-ui' 'error' 12)) 'a template named only in a trailing comment is ignored'
+Assert (Has $em 'editmode-snap' 'error' 14) 'hand-rolled grid snapping'
+Assert (Has $em 'editmode-snap' 'warn') 'own dragging without the kit''s SnapRect'
+
 Write-Host 'Invoked the way the skills do (powershell -File, comma-separated flavors):' -ForegroundColor Cyan
 $json = powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $scripts 'Test-WowAddon.ps1') -Path (Join-Path $PSScriptRoot 'fixtures\BrokenAddon') -Flavor forever,retail -Json | Out-String
 $fileExit = $LASTEXITCODE
@@ -75,6 +86,23 @@ try {
 	Assert (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB)) 'TOC written without BOM'
 	$c = Invoke-Check $probe @('forever', 'retail', 'classic_era')
 	Assert ($c.Exit -eq 0 -and $c.Result.Errors -eq 0 -and $c.Result.Warnings -eq 0) "scaffold is clean ($($c.Result.Errors) errors, $($c.Result.Warnings) warnings)"
+
+	$core = Join-Path $probe 'Core.lua'
+	Add-Content -LiteralPath $core -Encoding ascii -Value '-- Edit Mode: EventRegistry "EditMode.Enter" could show something here'
+	Assert (-not (Has (Invoke-Check $probe).Result 'editmode-dialog' 'warn') -and -not (Has (Invoke-Check $probe).Result 'editmode-dialog' 'error')) 'Edit Mode mentioned only in a comment is ignored'
+	Add-Content -LiteralPath $core -Encoding ascii -Value 'EventRegistry:RegisterCallback("EditMode.Enter", function() end, ns)'
+	$c = Invoke-Check $probe
+	Assert ((Has $c.Result 'editmode-dialog' 'warn') -and $c.Exit -eq 0) 'Edit Mode listener with no settings: warning, not an error'
+
+	& (Join-Path $scripts 'New-WowAddon.ps1') -Name KitEdit -OutDir $tmp -Author selftest -Icon INV_Misc_Gear_01 -EditMode | Out-Null
+	$edit = Join-Path $tmp 'KitEdit'
+	Assert ((Get-Content (Join-Path $edit 'KitEdit.toc') -Raw) -match '(?m)^Core\.lua\r?\nEditModeDialog\.lua\r?\nEditMode\.lua') '-EditMode lists EditModeDialog.lua and EditMode.lua after Core.lua'
+	Assert ((Get-Content (Join-Path $edit 'EditMode.lua') -Raw) -match 'ns\.EditMode\.Attach' -and (Get-Content (Join-Path $edit 'EditMode.lua') -Raw) -notmatch '\{\{') '-EditMode adds EditMode.lua wired through ns.EditMode.Attach'
+	Add-Content -LiteralPath (Join-Path $edit 'Core.lua') -Encoding ascii -Value 'EventRegistry:RegisterCallback("EditMode.Enter", function() end, ns)'
+	$c = Invoke-Check $edit
+	Assert ($c.Exit -eq 0 -and $c.Result.Errors -eq 0 -and $c.Result.Warnings -eq 0) "-EditMode scaffold that joins Edit Mode is clean ($($c.Result.Errors) errors, $($c.Result.Warnings) warnings)"
+	Add-Content -LiteralPath (Join-Path $edit 'EditModeDialog.lua') -Encoding ascii -Value '-- local change'
+	Assert (Has (Invoke-Check $edit).Result 'editmode-dialog' 'warn') 'edited copy of EditModeDialog.lua flagged'
 } finally {
 	if (-not $KeepTemp) { Remove-Item -LiteralPath $tmp -Recurse -Force } else { Write-Host "  kept $tmp" }
 }

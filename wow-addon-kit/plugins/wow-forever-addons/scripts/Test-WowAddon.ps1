@@ -17,6 +17,9 @@
             SecretReturns / SecretWhen*                       [same API docs + Patch 12.0.0 notes]
     Lua     luacheck (syntax, accidental globals, unused vars) when installed; slash command wiring;
             SavedVariables actually used
+    EditMode an addon that joins Edit Mode ("EditMode.Enter"/"EditMode.Exit") ships the kit's
+            templates\editmode\EditModeDialog.lua unchanged and builds no settings windows,
+            sliders or checkboxes of its own, so every addon's Edit Mode settings match
   Exit code 1 when any error is found, so it can gate packaging or CI.
 
 .EXAMPLE
@@ -264,6 +267,28 @@ $renamedApi = @{
 }
 $hasDeps = @($validTocs | Where-Object { (Get-Content $_.FullName -Raw) -match '(?m)^##\s*(Dependencies|RequiredDeps|OptionalDeps|Dep)\s*:' }).Count -gt 0
 
+# Edit Mode settings UI: an addon that joins Edit Mode builds its settings with the kit's shared
+# dialog (templates\editmode\EditModeDialog.lua), so every addon looks and behaves the same.
+$kitDialogName = 'EditModeDialog.lua'
+$kitDialogPath = Join-Path (Get-WowKitRoot) "templates\editmode\$kitDialogName"
+# Comments are dropped first, so a file that only mentions Edit Mode in a comment doesn't count.
+function Remove-LuaComments([string]$text) { ($text -replace '(?s)--\[(=*)\[.*?\]\1\]', '') -replace '--[^\n]*', '' }
+$editModeFile = $null; $editModeClick = $false; $ownDrag = $null; $usesSnap = $false
+foreach ($f in $luaFiles) {
+	if ($f.Name -eq $kitDialogName -or (Rel $f.FullName) -match $libRx) { continue }
+	$code = Remove-LuaComments ([IO.File]::ReadAllText($f.FullName))
+	# Joins Edit Mode: listens for it, or uses the kit's ns.EditMode (whose Attach listens for it).
+	if (-not $editModeFile -and ($code -match '["'']EditMode\.(Enter|Exit)["'']' -or $code -match '\bEditMode\.(Attach|CreateSelection|CreateDialog)\b')) { $editModeFile = $f }
+	# A frame that opens something when clicked: the usual way into Edit Mode settings.
+	if ($code -match 'SetScript\s*\(\s*["'']On(MouseUp|MouseDown|Click)["'']') { $editModeClick = $true }
+	# Its own dragging code, which must snap through the kit (SnapRect) like every other frame.
+	if (-not $ownDrag -and $code -match 'SetScript\s*\(\s*["'']OnDragStart["'']') { $ownDrag = $f }
+	if ($code -match '\bEditMode\.(SnapRect|Attach)\b') { $usesSnap = $true }
+}
+# Templates for hand-built windows and controls; the shared dialog provides all of these.
+# Matched as a template argument inside the CreateFrame(...) call, so a comment after it doesn't count.
+$handBuiltUi = '\bCreateFrame\s*\([^)]*?["''](DefaultPanelTemplate|ButtonFrameTemplate|BasicFrameTemplate\w*|PortraitFrameTemplate\w*|DialogBorder\w*Template|MinimalSliderWithSteppersTemplate|OptionsSliderTemplate|UICheckButtonTemplate|InterfaceOptionsCheckButtonTemplate)["'']\s*[,)]'
+
 $allLuaText = New-Object System.Text.StringBuilder
 $slashDefs = @{}; $slashHandlers = @{}
 $usesAddonMsg = $null; $usesLockdownCheck = $false
@@ -358,6 +383,12 @@ foreach ($f in $luaFiles) {
 		foreach ($m in [regex]::Matches($c, '\bSLASH_([A-Za-z0-9_]+?)\d+\s*=')) { if (-not $slashDefs.ContainsKey($m.Groups[1].Value)) { $slashDefs[$m.Groups[1].Value] = "$rel`:$n" } }
 		foreach ($m in [regex]::Matches($r, 'SlashCmdList\s*(?:\[\s*["'']([A-Za-z0-9_]+)["'']\s*\]|\.([A-Za-z0-9_]+))\s*=')) { $slashHandlers[($m.Groups[1].Value + $m.Groups[2].Value)] = $true }
 
+		if ($editModeFile -and $f.Name -ne $kitDialogName -and $c -match '\bCreateFrame\s*\(' -and $r -match $handBuiltUi -and $r -notmatch '--\s*editmode-ui:\s*ok') {
+			Add-Finding error 'editmode-ui' $rel $n "Hand-built $($Matches[1]) in an addon that joins Edit Mode. Build its settings with ns.EditMode.CreateDialog (EditModeDialog.lua) so every addon's Edit Mode settings look and behave the same. For a window that isn't Edit Mode settings, end the line with '-- editmode-ui: ok'."
+		}
+		if ($editModeFile -and $f.Name -ne $kitDialogName -and $c -match '\bgridSpacing\b|:IsSnapEnabled\s*\(|\bEditModeMagnetismManager\b') {
+			Add-Finding error 'editmode-snap' $rel $n "Hand-rolled Edit Mode snapping. Snap with ns.EditMode.SnapRect / SnapEdge (or ns.EditMode.Attach), so every frame snaps the way Blizzard's do: magnetic within 8 px to the grid, screen edges and centre, and nearby Edit Mode frames."
+		}
 		if ($c -match '\bSendAddonMessage(Logged)?\s*\(' -and -not $usesAddonMsg) { $usesAddonMsg = "$rel`:$n" }
 		if ($c -match 'InChatMessagingLockdown') { $usesLockdownCheck = $true }
 	}
@@ -377,6 +408,24 @@ $luaAll = $allLuaText.ToString()
 # Every addon announces its version on load (PLAYER_LOGIN also fires on /reload).
 if ($luaAll.Length -and -not ($luaAll -match 'GetAddOnMetadata' -and $luaAll -match '"Version"')) {
 	Add-Finding warn 'load-version' '' 0 'The addon never reads its ## Version. Print it on PLAYER_LOGIN (see the template Core.lua) so every /reload shows which version is running.'
+}
+if ($editModeFile) {
+	$copy = $luaFiles | Where-Object Name -eq $kitDialogName | Select-Object -First 1
+	if (-not $copy) {
+		# An error when it has settings to open (a click handler, or hand-built settings UI);
+		# an addon that only shows or hides something in Edit Mode gets a warning.
+		$hasSettings = $editModeClick -or @($findings | Where-Object Rule -eq 'editmode-ui').Count -gt 0
+		$sev = if ($hasSettings) { 'error' } else { 'warn' }
+		Add-Finding $sev 'editmode-dialog' (Rel $editModeFile.FullName) 0 "Joins Edit Mode but has no $kitDialogName. Copy the kit's templates\editmode\$kitDialogName into the addon, list it in the TOC right after Core.lua, and build the frame's selection, snapping and settings with ns.EditMode (CreateSelection, SnapRect, CreateDialog)."
+	}
+	if ($ownDrag -and -not $usesSnap) {
+		Add-Finding warn 'editmode-snap' (Rel $ownDrag.FullName) 0 "Drags a frame without the kit's snapping. Use ns.EditMode.Attach (or call ns.EditMode.SnapRect from the drag's OnUpdate), so it snaps like Blizzard's frames: magnetic within 8 px to the grid, screen edges and centre, and nearby Edit Mode frames."
+	}
+}
+# Every copy must match the kit's, even in an addon that only uses part of it.
+$copy = $luaFiles | Where-Object Name -eq $kitDialogName | Select-Object -First 1
+if ($copy -and (Test-Path $kitDialogPath) -and ([IO.File]::ReadAllText($copy.FullName) -replace "`r`n", "`n") -ne ([IO.File]::ReadAllText($kitDialogPath) -replace "`r`n", "`n")) {
+	Add-Finding warn 'editmode-dialog' (Rel $copy.FullName) 0 "Differs from the kit's templates\editmode\$kitDialogName. Don't edit the copy: change the kit file and copy it into every addon, so all Edit Mode settings stay identical."
 }
 foreach ($sv in $savedVars.Keys) {
 	if ($luaAll -notmatch "\b$([regex]::Escape($sv))\b") { Add-Finding warn 'savedvariables-unused' $savedVars[$sv] 0 "SavedVariables '$sv' is declared but never referenced in Lua." }

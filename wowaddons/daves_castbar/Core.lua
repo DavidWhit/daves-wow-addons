@@ -22,6 +22,10 @@ local DEFAULTS = {
 	showName = true,
 	showTime = true,
 	showIcon = false,
+	textScale = 1.0,        -- size of the spell name and time left
+	textOutline = true,     -- dark outline so the text stands out against every element
+	namePos = "left",       -- "left", "center" or "right"
+	timePos = "right",
 	hideBlizzard = true,    -- hide Blizzard's player cast bar while ours is enabled
 	locked = true,          -- unlocked: drag the bar any time, not just in Edit Mode
 	point = "BOTTOM", relPoint = "BOTTOM", x = 0, y = 190,

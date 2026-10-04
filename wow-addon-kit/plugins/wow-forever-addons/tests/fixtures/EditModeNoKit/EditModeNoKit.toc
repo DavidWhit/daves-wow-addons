@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: Edit Mode No Kit
+## Version: 0.1.0
+## IconTexture: Interface\Icons\INV_Misc_Gear_01
+
+Core.lua

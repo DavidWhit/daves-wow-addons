@@ -2,12 +2,13 @@
 ## Title: Dave's Balls
 ## Notes: Diablo-style health and power orbs for WoW Forever
 ## Author: David
-## Version: 0.1.1
+## Version: 0.1.3
 ## SavedVariables: DavesBallsDB
 ## IconTexture: Interface\Icons\Spell_Priest_ShadowOrbs
 ## AddonCompartmentFunc: DavesBalls_OnAddonCompartmentClick
 
 Core.lua
+EditModeDialog.lua
 Options.lua
 Orbs.lua
 OrbSettings.lua

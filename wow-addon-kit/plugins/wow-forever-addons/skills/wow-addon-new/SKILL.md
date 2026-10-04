@@ -20,6 +20,7 @@ Take what you can from `$ARGUMENTS` and the conversation. Ask for the rest with 
 | **Where** | The repo's `wowaddons/` folder (recommended) / Another folder |
 | **Slash command** | `/<lowercased name>` (recommended) / a short custom one such as `/<abbreviation>` |
 | **Icon** | 2-3 stock `Interface\Icons\...` icons that fit (orbs → `Spell_Priest_ShadowOrbs`, bags → `INV_Misc_Bag_08`, maps → `INV_Misc_Map_01`) |
+| **Placed in Edit Mode?** (only for an on-screen element: bars, orbs, frames) | Yes, move and set it up in Edit Mode (recommended) / No |
 | **Link it into the game afterwards?** | Yes, link it (recommended) / No |
 
 If the user says "use defaults" (or skips), take the first option of each and don't ask again. With no purpose at all, scaffold the plain template as `daves_newaddon`. A "Yes" to linking is the go-ahead for the link step in step 4.
@@ -35,8 +36,12 @@ Rules behind the answers:
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/New-WowAddon.ps1" `
   -Name <Name> -OutDir "<repo>\wowaddons, or the chosen folder>" -Flavor forever[,retail,classic_era] `
-  -Notes "<one line>" -Author "<author>" -Icon <IconName> [-Slash <cmd>]
+  -Notes "<one line>" -Author "<author>" -Icon <IconName> [-Slash <cmd>] [-EditMode]
 ```
+
+Pass `-EditMode` when the answer to "Placed in Edit Mode?" was yes. It adds two files right after `Core.lua` in the TOC:
+- `EditModeDialog.lua`: the kit's shared Edit Mode behaviour. Copy it unchanged.
+- `EditMode.lua`: `ns:InitEditMode(frame)`, which attaches the addon's frame with `ns.EditMode.Attach`. That gives it the outline, Blizzard-style snapping, a settings dialog with Scale and Reset, and position saving. Call it once the frame exists, and add the frame's own settings to that dialog.
 
 The script reads the Interface number from the installed client (`.build.info`), so a patched client gets the right number. Then it runs the validator; expect `0 error(s), 0 warning(s)`.
 
@@ -56,6 +61,7 @@ You get:
 - New Lua files go in the TOC, in load order. Keep everything `local` and hang shared things off `ns`.
 - Add new events with `ns.events:RegisterEvent("EVENT")` and handle them with `function ns:EVENT(...)`.
 - Feed values that may be secret (health, power, auras, unit identity) straight into widget setters. Don't compare them or do math on them.
+- **Edit Mode:** a frame the player moves or sets up in Edit Mode goes through `ns.EditMode.Attach` and `ns.EditMode.CreateDialog` from `EditModeDialog.lua`: outline, dragging with Blizzard-style magnetic snapping, click for settings, right-click to reset. Never build that window, its sliders and checkboxes, or your own grid snapping by hand. It keeps every addon's Edit Mode settings identical, keeps numbers inside the dialog, and keeps dialogs from stacking. See "Edit Mode settings" in the **wow-forever-api** skill. Never edit the addon's copy of `EditModeDialog.lua`; change the kit's file and copy it to every addon.
 - `examples/HelloForever` in the kit repo is a complete worked example (panel, events, secret-safe health bar).
 
 ### On Windows: PowerShell traps

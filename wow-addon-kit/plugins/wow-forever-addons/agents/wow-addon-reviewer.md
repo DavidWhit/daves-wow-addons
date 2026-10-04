@@ -21,6 +21,7 @@ After the validator, read the code itself for what static rules can't see:
 4. **Events and performance:** `OnUpdate` doing work every frame, heavy work on frequent events (`BAG_UPDATE`, `UNIT_AURA`, `COMBAT_*`) without throttling or batching, frames or tables created per event instead of reused.
 5. **Lifecycle:** SavedVariables touched before `ADDON_LOADED`, defaults not merged, missing nil checks on item and spell info that loads asynchronously (`GET_ITEM_INFO_RECEIVED`, `ITEM_DATA_LOAD_RESULT`).
 6. **Cross-flavor:** feature detection (`C_X and C_X.Fn or OldFn`) where the TOC lists Classic, and Forever-only logic gated by `WOW_PROJECT_ID == WOW_PROJECT_CAMELOT`.
+7. **Edit Mode UI (house rule):** a frame placed in Edit Mode must use the kit's shared `EditModeDialog.lua` (`ns.EditMode.Attach`, or `CreateSelection` + `SnapRect` + `CreateDialog`), with the copy identical to the kit's. Flag any settings window, slider, checkbox or selection overlay built by hand. Flag dragging that doesn't snap through `SnapRect`/`SnapEdge`. Flag a secret event payload (e.g. `interruptedBy`) treated as a yes/no answer instead of deciding from readable data. Flag a dialog anchored to its frame instead of opened with `dialog:OpenFor(frame)` (it then covers the frame or follows it while dragged). Flag one left open when the frame stops being movable. Flag a fixed-width label or number that could run past the border.
 
 ## Advisor mode
 

@@ -208,18 +208,8 @@ local function CreateOrb(key, label)
 	text:SetShadowOffset(1, -1)
 	orb.text = text
 
-	-- Edit Mode overlay: shown only while Blizzard's Edit Mode is open.
-	local sel = CreateFrame("Frame", nil, orb)
-	sel:SetAllPoints()
-	sel:SetFrameLevel(art:GetFrameLevel() + 5)
-	sel:Hide()
-	local tint = sel:CreateTexture(nil, "OVERLAY")
-	tint:SetAllPoints()
-	tint:SetTexture(MEDIA .. "OrbMask")
-	tint:SetVertexColor(0.25, 0.6, 1.0, 0.35)
-	local name = sel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	name:SetPoint("BOTTOM", sel, "TOP", 0, 2)
-	name:SetText(label .. " Orb")
+	-- Edit Mode's selection art (the kit's EditModeDialog.lua), shown while the orb can be moved.
+	local sel = ns.EditMode.CreateSelection(orb, label .. " Orb")
 	orb.selection = sel
 
 	-- Player-frame clicks: a secure unit button over the glass. Left-click targets you,
@@ -274,7 +264,7 @@ local function CreateOrb(key, label)
 		if not ns:CanMoveOrbs() then return end
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText(self.label .. " Orb")
-		GameTooltip:AddLine("Click for colours. Drag to move (snaps to the Edit Mode grid; hold Shift to place freely). Right-click to reset position.", 1, 1, 1, true)
+		GameTooltip:AddLine("Click for colours. Drag to move (with Snap on in Edit Mode it pulls onto the grid, screen edges and nearby frames; hold Shift to place freely). Right-click to reset position.", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	orb:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -354,61 +344,21 @@ end
 ---------------------------------------------------------------------------
 -- Position, scale and visibility
 ---------------------------------------------------------------------------
+-- Dragging. Snapping is the kit's (EditModeDialog.lua): magnetic, like Blizzard's own frames, to
+-- grid lines, the screen edges and centre, Edit Mode frames beside the orb and the other orb.
+-- It uses the glass, not the halo.
 ---------------------------------------------------------------------------
--- Snap to Edit Mode's grid. Blizzard draws the grid lines every Grid.gridSpacing units out
--- from the Grid frame's centre, and snaps when the grid is shown and "Snap" is ticked
--- (EditModeManagerFrameMixin:IsSnapEnabled, EditModeGridMixin:UpdateGrid in
--- Blizzard_EditMode/Shared/EditModeManager.lua, forever branch). The orb's centre or
--- either edge of its glass snaps to the nearest line, whichever is closer.
----------------------------------------------------------------------------
-local function GridSnapInfo()
-	local manager = EditModeManagerFrame
-	if not (ns.inEditMode and manager and manager.IsSnapEnabled and manager:IsSnapEnabled()) then return end
-	local grid = manager.Grid
-	if not (grid and grid:IsShown() and grid.gridSpacing) then return end
-	local gx, gy = grid:GetCenter()
-	if not gx then return end
-	local scale = grid:GetEffectiveScale()
-	return gx * scale, gy * scale, grid.gridSpacing * scale
-end
-
-local function SnapAxis(center, radius, gridCenter, spacing)
-	local best
-	for _, p in ipairs({ center, center - radius, center + radius }) do
-		local line = gridCenter + math.floor((p - gridCenter) / spacing + 0.5) * spacing
-		local delta = line - p
-		if not best or math.abs(delta) < math.abs(best) then best = delta end
-	end
-	return center + best
-end
-
--- Screen edges: when the glass comes within EDGE_SNAP pixels of an edge it sits flush
--- against it. This wins over the grid, and works whenever the orbs are being dragged.
-local EDGE_SNAP = 16
-
-local function SnapToEdge(center, radius, size)
-	if math.abs(center - radius) <= EDGE_SNAP then return radius end
-	if math.abs(size - (center + radius)) <= EDGE_SNAP then return size - radius end
-end
-
 function ns.DragUpdate(orb)
-	local scale = orb:GetEffectiveScale()
+	local scale, ui = orb:GetEffectiveScale(), UIParent:GetEffectiveScale()
 	local cx, cy = GetCursorPosition()
-	local x, y = cx - orb.grabX, cy - orb.grabY
-	if not IsShiftKeyDown() then                 -- hold Shift to place freely
-		local radius = ORB_SIZE * GLASS_RADIUS * scale   -- the glass, not the halo
-		local gx, gy, spacing = GridSnapInfo()
-		if gx then
-			x = SnapAxis(x, radius, gx, spacing)
-			y = SnapAxis(y, radius, gy, spacing)
-		end
-		local uiScale = UIParent:GetEffectiveScale()
-		local rawX, rawY = cx - orb.grabX, cy - orb.grabY
-		x = SnapToEdge(rawX, radius, UIParent:GetWidth() * uiScale) or x
-		y = SnapToEdge(rawY, radius, UIParent:GetHeight() * uiScale) or y
+	local x, y = (cx - orb.grabX) / ui, (cy - orb.grabY) / ui     -- the orb's centre, UIParent units
+	if not IsShiftKeyDown() then                                    -- hold Shift to place freely
+		local r = ORB_SIZE * GLASS_RADIUS * scale / ui
+		local left, bottom = ns.EditMode.SnapRect(orb, x - r, y - r, 2 * r, 2 * r)
+		x, y = left + r, bottom + r
 	end
 	orb:ClearAllPoints()
-	orb:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / scale, y / scale)
+	orb:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x * ui / scale, y * ui / scale)
 end
 
 function ns:SaveOrbPosition(orb)

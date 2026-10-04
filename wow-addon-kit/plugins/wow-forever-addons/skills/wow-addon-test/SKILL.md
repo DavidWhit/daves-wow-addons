@@ -34,6 +34,9 @@ What each rule means and how to fix it:
 | `secret-value` | warn | Don't compare, do math on or concatenate the value. Pass it to `SetValue`/`SetText`/`SetFormattedText`, or check `issecretvalue()` |
 | `slash-handler` | error | Assign `SlashCmdList["NAME"]` for every `SLASH_NAME1` |
 | `savedvariables-unused` | warn | Use it, or drop it from the TOC |
+| `editmode-dialog` | error/warn | Error: the addon joins Edit Mode but has no `EditModeDialog.lua`. Copy the kit's `templates/editmode/EditModeDialog.lua` in, list it after `Core.lua`. Warn: the copy was edited. Restore the kit's version and make the change in the kit instead |
+| `editmode-snap` | error/warn | Error: hand-rolled grid snapping (`gridSpacing`, `IsSnapEnabled`, `EditModeMagnetismManager`). Warn: a frame dragged without the kit's snapping. Use `ns.EditMode.Attach`, or `ns.EditMode.SnapRect` / `SnapEdge` in the drag's OnUpdate, so it snaps like Blizzard's frames |
+| `editmode-ui` | error | A hand-built panel, slider or checkbox in an Edit Mode addon. Rebuild it with `ns.EditMode.CreateDialog` (see the **wow-forever-api** skill). For a window that isn't Edit Mode settings (a bag window, say), end the line with `-- editmode-ui: ok` |
 | `luacheck-E*` | error | Lua syntax error. The game would refuse to load the whole file |
 | `luacheck-W111/112` | warn | Accidental global: add `local`, or declare it in `.luacheckrc` `globals` if intentional |
 | `luacheck-W211/212/431...` | warn | Unused or shadowed locals. Tidy up |
@@ -59,7 +62,7 @@ Fixing the validator's own errors in step 1 doesn't need to wait. Design changes
 1. **First load / TOC or new-file changes:** fully restart the client. Otherwise `/reload`.
 2. At character select, open **AddOns**: the addon should be listed and not marked "out of date".
 3. In game, turn on errors: `/console scriptErrors 1`. Optionally install BugSack + BugGrabber to collect them.
-4. Exercise every feature, then repeat **in combat and in an instance**. Secret values and addon-comms lockdown only show up there.
+4. Exercise every feature, then repeat **in combat and in an instance**. For an Edit Mode addon, open Edit Mode and click each of its frames, plus one of Blizzard's: only one settings dialog should be open at a time, none should cover its frame or Edit Mode's window, every number should sit inside the dialog at its widest value, and Escape should close it. With Snap ticked, drag each frame slowly past grid lines, the screen centre and a Blizzard frame. It should move freely and pull on only within a few pixels, the same as Blizzard's own frames. For a cast bar, check a channel (e.g. Blizzard) ending normally in combat: it must not show as interrupted. Secret values and addon-comms lockdown only show up there.
 5. Taint: `/console taintLog 1`, reproduce, `/reload`, then read `Logs\taint.log` in the client folder (e.g. `_classic_beta_\Logs`). Lines naming the addon mean it touched secure code.
 6. Useful commands: `/dump <expr>` prints a value, `/fstack` identifies the frame under the mouse, `/etrace` shows live events, `/run <lua>` runs a line.
 

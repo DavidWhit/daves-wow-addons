@@ -50,6 +50,7 @@ Files:
 | `FrostCuts.lua` | Generated: the frost cut lines, so the bar can trace them |
 | `Bar.lua` | The bar, casting states, fill, glow, spark, text, borderless masks, hiding Blizzard's bar |
 | `Effects.lua` | Particles and each element's live effects |
-| `EditMode.lua` | Moving, resizing, grid snapping, the settings dialog |
+| `EditModeDialog.lua` | The kit's shared Edit Mode settings dialog and selection art (copied from `wow-addon-kit`; don't edit it here) |
+| `EditMode.lua` | Moving, resizing, grid snapping, what the settings dialog holds |
 | `Options.lua` | Settings panel |
 | `Media/` | Generated textures (`tools/Make-CastbarMedia.ps1`) |

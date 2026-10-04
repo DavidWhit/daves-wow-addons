@@ -6,11 +6,13 @@
   Writes <OutDir>\<Name>\ with a TOC (Interface numbers for every chosen flavor, taken
   from the installed clients when present), Core.lua (events, SavedVariables, slash
   command, Forever detection), Options.lua (Blizzard Settings panel), .luacheckrc,
-  .pkgmeta, VS Code settings and a README. Then runs Test-WowAddon.ps1 on it.
+  .pkgmeta, VS Code settings and a README. With -EditMode it also adds the shared Edit Mode
+  settings dialog (templates\editmode\EditModeDialog.lua). Then runs Test-WowAddon.ps1 on it.
 
 .EXAMPLE
   .\New-WowAddon.ps1 -Name CampTracker -OutDir C:\dev\addons
   .\New-WowAddon.ps1 -Name CampTracker -Flavor forever,retail -Slash camp -Deploy
+  .\New-WowAddon.ps1 -Name ManaTicker -EditMode
 #>
 [CmdletBinding()]
 param(
@@ -25,6 +27,8 @@ param(
 	# Icon for the AddOns list and minimap addon menu: an Interface\Icons path or a bare icon name.
 	[string]$Icon = 'Interface\Icons\INV_Misc_QuestionMark',
 	[ValidatePattern('^[a-z][a-z0-9]{1,15}$')][string]$Slash,
+	# The addon has a frame people place in Edit Mode: adds the shared Edit Mode settings dialog.
+	[switch]$EditMode,
 	[switch]$Deploy,
 	[switch]$Force
 )
@@ -73,6 +77,19 @@ foreach ($src in (Get-ChildItem $template -Recurse -File -Force)) {
 	$text = [IO.File]::ReadAllText($src.FullName)
 	foreach ($k in $tokens.Keys) { $text = $text.Replace($k, $tokens[$k]) }
 	[IO.File]::WriteAllText($target, $text, $utf8)
+}
+
+if ($EditMode) {
+	# Copied unchanged: Test-WowAddon.ps1 checks every addon's copy matches the kit's.
+	Copy-Item -LiteralPath (Join-Path (Get-WowKitRoot) 'templates\editmode\EditModeDialog.lua') -Destination $dest -Force
+	# EditMode.lua: the frame's Edit Mode wiring (ns.EditMode.Attach), filled in like the other templates.
+	$text = [IO.File]::ReadAllText((Join-Path (Get-WowKitRoot) 'templates\editmode\EditMode.lua'))
+	foreach ($k in $tokens.Keys) { $text = $text.Replace($k, $tokens[$k]) }
+	[IO.File]::WriteAllText((Join-Path $dest 'EditMode.lua'), $text, $utf8)
+	$tocPath = Join-Path $dest "$Name.toc"
+	$toc = [IO.File]::ReadAllText($tocPath)
+	$toc = [regex]::Replace($toc, '(?m)^Core\.lua(\r?)$', "Core.lua`$1`nEditModeDialog.lua`$1`nEditMode.lua`$1")
+	[IO.File]::WriteAllText($tocPath, $toc, $utf8)
 }
 
 Write-Host "Created $dest" -ForegroundColor Green
