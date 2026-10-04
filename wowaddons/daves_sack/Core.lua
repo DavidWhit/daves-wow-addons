@@ -275,9 +275,17 @@ local DEFAULTS = {
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot
 }
 
+local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
+
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")
-loader:SetScript("OnEvent", function(self, _, name)
+loader:RegisterEvent("PLAYER_LOGIN")
+loader:SetScript("OnEvent", function(self, event, name)
+	if event == "PLAYER_LOGIN" then   -- also fires on /reload
+		print(("|cffd4a94eDave's Sack|r v%s loaded. Type /sack options for settings."):format(ns.VERSION))
+		return
+	end
 	if name ~= ADDON then return end
 	self:UnregisterEvent("ADDON_LOADED")
 	DavesSackDB = DavesSackDB or {}

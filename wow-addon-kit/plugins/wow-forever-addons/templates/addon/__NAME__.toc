@@ -4,7 +4,7 @@
 ## Author: {{AUTHOR}}
 ## Version: {{VERSION}}
 ## SavedVariables: {{DB}}
-## IconTexture: Interface\Icons\INV_Misc_QuestionMark
+## IconTexture: {{ICON}}
 ## AddonCompartmentFunc: {{NAME}}_OnAddonCompartmentClick
 
 Core.lua

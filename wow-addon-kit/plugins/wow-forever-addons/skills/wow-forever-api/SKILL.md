@@ -125,4 +125,4 @@ The Addon Compartment (minimap addon menu) loads on the mainline family, which i
 - Keep everything `local` and share state through the addon namespace (`local ADDON, ns = ...`). Accidental globals cause taint and name clashes.
 - Use plain color textures or your own `.tga` files for art. Blizzard texture paths move between clients.
 - Initialise SavedVariables in your own `ADDON_LOADED` (when `name == ADDON`).
-- Run `/wow-forever-addons:wow-addon-test` after every change.
+- Run the **wow-addon-test** skill after every change to addon code. It validates, then has the **wow-addon-reviewer** agent review the code in advisor mode. Show the user its findings and wait for their go-ahead before applying any.

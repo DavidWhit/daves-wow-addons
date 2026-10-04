@@ -106,7 +106,7 @@ foreach ($t in $validTocs) {
 	$suffix = $null
 	if ($t.BaseName -ne $folder) { $suffix = $t.BaseName.Substring($folder.Length + 1) }
 	$lines = [IO.File]::ReadAllLines($t.FullName)
-	$interfaces = @(); $hasTitle = $false
+	$interfaces = @(); $hasTitle = $false; $icon = $null; $hasVersion = $false
 	for ($i = 0; $i -lt $lines.Count; $i++) {
 		$line = $lines[$i]; $n = $i + 1
 		if ($line.Length -gt 1024) { Add-Finding error 'toc-line-length' $t.Name $n 'Line is longer than 1024 characters; WoW reads only the first 1024.' }
@@ -116,6 +116,8 @@ foreach ($t in $validTocs) {
 			if ($key -match '^X-') { continue }
 			if ($baseKey -eq 'Interface') { $interfaces += @($val -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
 			elseif ($baseKey -eq 'Title') { $hasTitle = $true }
+			elseif ($baseKey -eq 'Version') { $hasVersion = [bool]$val }
+			elseif ($baseKey -in 'IconTexture', 'IconAtlas') { $icon = $val }
 			elseif ($baseKey -match '^SavedVariables') { foreach ($v in ($val -split ',')) { if ($v.Trim()) { $savedVars[$v.Trim()] = $t.Name } } }
 			elseif ($knownDirectives -notcontains $baseKey) { Add-Finding info 'toc-directive' $t.Name $n "Unknown directive '## $key' (custom metadata should start with X-)." }
 			continue
@@ -153,6 +155,9 @@ foreach ($t in $validTocs) {
 	}
 
 	if (-not $hasTitle) { Add-Finding warn 'toc-title' $t.Name 0 'No ## Title; the AddOns list will show the folder name.' }
+	if (-not $hasVersion) { Add-Finding warn 'toc-version' $t.Name 0 'No ## Version; the addon cannot report its version on load.' }
+	if (-not $icon) { Add-Finding warn 'toc-icon' $t.Name 0 'No ## IconTexture; the AddOns list and minimap addon menu show a blank icon. Pick an icon that fits the addon.' }
+	elseif ($icon -match 'INV_Misc_QuestionMark') { Add-Finding warn 'toc-icon' $t.Name 0 "## IconTexture is still the template's question mark; pick an icon that fits the addon." }
 	if ($interfaces.Count -eq 0) { Add-Finding error 'toc-interface' $t.Name 0 'Missing ## Interface; the addon will be flagged out of date on every client.'; continue }
 	foreach ($iv in $interfaces) { if ($iv -notmatch '^\d{5,6}$') { Add-Finding error 'toc-interface' $t.Name 0 "Interface value '$iv' is not a number like 16001." } }
 
@@ -369,6 +374,10 @@ if ($usesAddonMsg -and $modern -and -not $usesLockdownCheck) {
 	Add-Finding info 'addon-comms' $file ([int]$line) 'Addon messages are restricted in instances on 12.x/Forever; check C_ChatInfo.InChatMessagingLockdown() before sending.'
 }
 $luaAll = $allLuaText.ToString()
+# Every addon announces its version on load (PLAYER_LOGIN also fires on /reload).
+if ($luaAll.Length -and -not ($luaAll -match 'GetAddOnMetadata' -and $luaAll -match '"Version"')) {
+	Add-Finding warn 'load-version' '' 0 'The addon never reads its ## Version. Print it on PLAYER_LOGIN (see the template Core.lua) so every /reload shows which version is running.'
+}
 foreach ($sv in $savedVars.Keys) {
 	if ($luaAll -notmatch "\b$([regex]::Escape($sv))\b") { Add-Finding warn 'savedvariables-unused' $savedVars[$sv] 0 "SavedVariables '$sv' is declared but never referenced in Lua." }
 }

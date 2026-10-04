@@ -18,11 +18,11 @@ After editing the plugin, bump `version` in `plugins/wow-forever-addons/.claude-
 | Command | What it does |
 | --- | --- |
 | `/wow-forever-addons:wow-addon-new [Name] [idea]` | Scaffold an addon (TOC, events, SavedVariables, slash command, Settings panel), validate it, link it into the game |
-| `/wow-forever-addons:wow-addon-test [folder]` | Validate against the real Forever API, then walk through the in-game test checklist |
+| `/wow-forever-addons:wow-addon-test [folder]` | Validate against the real Forever API, run the advisor code review (fixes wait for your approval), then walk through the in-game test checklist |
 | `/wow-forever-addons:wow-addon-setup` | Find the game and Interface numbers, install luacheck and the API index, link/unlink addons |
 | `/wow-forever-addons:wow-addon-release [folder] [version]` | Version bump, clean zip, BigWigsMods/packager setup |
 | `wow-forever-api` (loaded automatically) | Forever facts, secret values, restrictions, removed-API table, Settings API |
-| `@agent-wow-forever-addons:wow-addon-reviewer` | Read-only code review for Forever/Midnight compatibility, taint and performance |
+| `@agent-wow-forever-addons:wow-addon-reviewer` | Advisor-mode code review for Forever/Midnight compatibility, taint and performance: numbered findings and proposed fixes, never edits. Runs automatically from `wow-addon-test` and `wow-addon-new` |
 
 ## Scripts (usable without Claude)
 

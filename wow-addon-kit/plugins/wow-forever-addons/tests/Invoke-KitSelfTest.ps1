@@ -64,7 +64,7 @@ Write-Host 'Scaffold (forever, retail, classic_era):' -ForegroundColor Cyan
 $tmp = Join-Path ([IO.Path]::GetTempPath()) ("wowkit-selftest-" + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $tmp | Out-Null
 try {
-	& (Join-Path $scripts 'New-WowAddon.ps1') -Name KitProbe -OutDir $tmp -Flavor forever, retail, classic_era -Author selftest | Out-Null
+	& (Join-Path $scripts 'New-WowAddon.ps1') -Name KitProbe -OutDir $tmp -Flavor forever, retail, classic_era -Author selftest -Icon INV_Misc_Gear_01 | Out-Null
 	$probe = Join-Path $tmp 'KitProbe'
 	Assert (Test-Path (Join-Path $probe 'KitProbe.toc')) 'TOC named after the folder'
 	$toc = Get-Content (Join-Path $probe 'KitProbe.toc') -Raw

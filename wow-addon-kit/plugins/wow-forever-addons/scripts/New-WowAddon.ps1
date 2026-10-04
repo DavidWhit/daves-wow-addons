@@ -22,6 +22,8 @@ param(
 	[string]$Notes = 'A WoW: Forever addon.',
 	[string]$Author = $env:USERNAME,
 	[string]$Version = '0.1.0',
+	# Icon for the AddOns list and minimap addon menu: an Interface\Icons path or a bare icon name.
+	[string]$Icon = 'Interface\Icons\INV_Misc_QuestionMark',
 	[ValidatePattern('^[a-z][a-z0-9]{1,15}$')][string]$Slash,
 	[switch]$Deploy,
 	[switch]$Force
@@ -42,6 +44,7 @@ if (-not $Slash) { $Slash = ($Name.ToLower() -replace '[^a-z0-9]', ''); if ($Sla
 $installs = Get-WowInstall
 $interfaces = @($Flavor | ForEach-Object { Get-WowInterfaceFor $_ $installs } | Where-Object { $_ } | Select-Object -Unique)
 $db = "${Name}DB"
+if ($Icon -notmatch '[\\/]') { $Icon = "Interface\Icons\$Icon" }
 
 $tokens = [ordered]@{
 	'{{NAME}}'        = $Name
@@ -50,6 +53,7 @@ $tokens = [ordered]@{
 	'{{NOTES}}'       = $Notes
 	'{{AUTHOR}}'      = $Author
 	'{{VERSION}}'     = $Version
+	'{{ICON}}'        = $Icon
 	'{{DB}}'          = $db
 	'{{SLASH}}'       = $Slash
 	'{{SLASHUPPER}}'  = $Name.ToUpper()

@@ -4,7 +4,7 @@
 ## Author: davidwhit5
 ## Version: 0.1.0
 ## SavedVariables: HelloForeverDB
-## IconTexture: Interface\Icons\INV_Misc_QuestionMark
+## IconTexture: Interface\Icons\INV_Misc_Note_01
 ## AddonCompartmentFunc: HelloForever_OnAddonCompartmentClick
 
 Core.lua

@@ -1,6 +1,6 @@
 ---
 name: wow-addon-test
-description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck) plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, or when asked to check, lint, verify or debug a WoW addon.
+description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck), an advisor-mode code review whose fixes wait for the user's approval, plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, or when asked to check, lint, verify or debug a WoW addon.
 argument-hint: "[addon folder] [flavors]"
 ---
 
@@ -42,7 +42,19 @@ Fix errors first, re-run until clean, then fix warnings. Info notes are context;
 
 If it says the API index or luacheck is missing, run `scripts/Install-WowDevTools.ps1` (see the **wow-addon-setup** skill).
 
-## 2. In-game test (tell the user these steps; you can't run the client)
+## 2. Code review (always, advisor mode)
+
+The validator only catches what static rules can see. After it runs, launch the reviewer agent with the Agent tool, `subagent_type: "wow-forever-addons:wow-addon-reviewer"`. Give it the addon folder, the flavors, and what changed this session.
+
+The reviewer is read-only and returns numbered findings with proposed fixes. Then:
+
+1. Show the user the findings: the numbered list, the recommendation and any questions. Keep them verbatim or tightly condensed, and never drop a finding.
+2. **Stop and wait for the user's answer.** Don't apply any reviewer finding until the user says which ones to apply ("apply 1, 3", "all", "none").
+3. Apply exactly what they approved, re-run step 1, and say what changed.
+
+Fixing the validator's own errors in step 1 doesn't need to wait. Design changes, behaviour trade-offs and anything marked suspect always do.
+
+## 3. In-game test (tell the user these steps; you can't run the client)
 
 1. **First load / TOC or new-file changes:** fully restart the client. Otherwise `/reload`.
 2. At character select, open **AddOns**: the addon should be listed and not marked "out of date".
@@ -53,6 +65,6 @@ If it says the API index or luacheck is missing, run `scripts/Install-WowDevTool
 
 When the user pastes an error, find the file:line, explain the cause in one sentence, fix it, and re-run step 1.
 
-## 3. Report
+## 4. Report
 
-Say what was checked (flavors, API commit shown in the first line of output), the error/warning counts before and after, what you fixed, and which in-game steps still need the user.
+Say what was checked (flavors, API commit shown in the first line of output), the error/warning counts before and after, which reviewer findings were applied, skipped or are still waiting on the user, and which in-game steps still need the user.

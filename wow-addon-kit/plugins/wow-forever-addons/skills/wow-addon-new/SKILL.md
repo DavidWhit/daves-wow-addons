@@ -14,13 +14,14 @@ Arguments: `$ARGUMENTS` (addon name and/or what it should do; may be empty).
 - **Flavors**: default `forever`. Add `retail` (Midnight) and `classic_era` only if the user wants them. `forever` and `retail` share one API; `classic_era` needs feature-detected fallbacks.
 - **Where**: default to a dev folder such as `%USERPROFILE%\Documents\WowAddons\`, not straight into the game folder. The deploy step links it in.
 - **Slash command**: default is the lowercased name.
+- **Icon** (always settle this before scaffolding): the `## IconTexture` shown in the AddOns list and the minimap addon menu. Pick a stock `Interface\Icons\...` icon that fits what the addon does (orbs → `Spell_Priest_ShadowOrbs`, bags → `INV_Misc_Bag_08`, maps → `INV_Misc_Map_01`), propose it, and confirm it with the user. Never ship the template's `INV_Misc_QuestionMark`; the validator warns about it.
 
 ## 2. Scaffold
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/New-WowAddon.ps1" `
   -Name <Name> -OutDir "<dev folder>" -Flavor forever[,retail,classic_era] `
-  -Notes "<one line>" -Author "<author>" [-Slash <cmd>]
+  -Notes "<one line>" -Author "<author>" -Icon <IconName> [-Slash <cmd>]
 ```
 
 The script reads the Interface number from the installed client (`.build.info`), so a patched client gets the right number. Then it runs the validator; expect `0 error(s), 0 warning(s)`.
@@ -29,14 +30,15 @@ You get:
 
 | File | Purpose |
 | --- | --- |
-| `<Name>.toc` | Interface list, Title, Notes, Version, SavedVariables `<Name>DB`, Addon Compartment hook |
-| `Core.lua` | `local ADDON, ns = ...` namespace, `ns:EVENT()` dispatch, defaults merged into SavedVariables on `ADDON_LOADED`, slash command, `ns.IS_FOREVER` |
+| `<Name>.toc` | Interface list, Title, Notes, Version, IconTexture, SavedVariables `<Name>DB`, Addon Compartment hook |
+| `Core.lua` | `local ADDON, ns = ...` namespace, `ns:EVENT()` dispatch, defaults merged into SavedVariables on `ADDON_LOADED`, version printed on `PLAYER_LOGIN`, slash command, `ns.IS_FOREVER` |
 | `Options.lua` | Blizzard Settings panel (checkbox and slider), `ns:OpenOptions()` |
 | `.luacheckrc`, `.pkgmeta`, `.vscode/settings.json`, `.gitignore`, `README.md` | Lint, packaging and editor config |
 
 ## 3. Build the feature
 
 - Load the **wow-forever-api** skill before writing feature code, and check every API you use with `Find-WowApi.ps1`. Don't trust memory: many classic globals are gone on Forever.
+- Keep the version announcement: `ns.VERSION` comes from `## Version`, and `ns:PLAYER_LOGIN()` prints `v<version> loaded`. `PLAYER_LOGIN` also fires on `/reload`, so every reload shows which build is running. Bump `## Version` with every change the user will test, so a stale build is obvious. The validator warns (`load-version`) if the addon never reads its version.
 - New Lua files go in the TOC, in load order. Keep everything `local` and hang shared things off `ns`.
 - Add new events with `ns.events:RegisterEvent("EVENT")` and handle them with `function ns:EVENT(...)`.
 - Feed values that may be secret (health, power, auras, unit identity) straight into widget setters. Don't compare them or do math on them.
@@ -56,10 +58,11 @@ The kit runs on Windows PowerShell 5.1. Watch for these when writing helper scri
 - **No Python by default.** Use `System.Drawing` (`Add-Type -AssemblyName System.Drawing`) for image previews. It can't read `.tga`, so decode the 18-byte header and BGRA pixels yourself.
 - **Check art before asking for a restart:** render a quick PNG composite of the layers and look at it. New or changed textures need a full client restart, so each art round-trip costs the user a restart.
 
-## 4. Validate, then put it in the game
+## 4. Validate and review, then put it in the game
+
+Once the feature code is written, run the **wow-addon-test** skill on the addon, not just the validator script. It runs the validator and then the **wow-addon-reviewer** agent in advisor mode. Show the user the reviewer's numbered findings and **wait for them to choose** which to apply before changing anything. Deploy only after that round is settled.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.ps1" -Path "<addon folder>" -Flavor forever
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Deploy-WowAddon.ps1" -Path "<addon folder>" -Flavor forever
 ```
 
@@ -69,4 +72,5 @@ Deploy creates a junction in the client's `Interface\AddOns`, so later edits are
 
 - Where the addon lives, and that it's linked into the game (or how to link it).
 - How to try it: fully restart the client the first time (new TOC), enable it in the AddOns list, then use `/<slash>`.
-- Next step: describe the feature, then run `/wow-forever-addons:wow-addon-test` after changes.
+- What the review found, and which findings they approved, skipped or still need to decide.
+- Next step: describe the feature. After each change, **wow-addon-test** runs again (validator plus advisor review).
