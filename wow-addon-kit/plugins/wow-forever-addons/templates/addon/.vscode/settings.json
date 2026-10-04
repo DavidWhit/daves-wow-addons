@@ -1,0 +1,5 @@
+{
+	"Lua.runtime.version": "Lua 5.1",
+	"Lua.diagnostics.globals": ["{{DB}}", "{{NAME}}_OnAddonCompartmentClick"],
+	"files.encoding": "utf8"
+}

@@ -1,0 +1,32 @@
+# .github/workflows/release.yml - package and upload on every pushed tag.
+# Based on the BigWigsMods/packager wiki example (GitHub-Actions-workflow page),
+# checked 2026-10-03: packager v2.6.1, actions/checkout v7.
+# The packager auto-detects WoW: Forever from "## Interface: 16xxx" (game type "forever").
+name: Package and release
+
+on:
+  push:
+    tags:
+      - '**'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    env:
+      CF_API_KEY: ${{ secrets.CF_API_KEY }}
+      WOWI_API_TOKEN: ${{ secrets.WOWI_API_TOKEN }}
+      WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
+      GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Clone project
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # full history for the changelog
+
+      - name: Package and release
+        uses: BigWigsMods/packager@v2

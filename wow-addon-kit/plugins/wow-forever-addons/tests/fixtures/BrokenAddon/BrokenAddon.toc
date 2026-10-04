@@ -1,0 +1,8 @@
+## Interface: 11508
+## Title: Broken Addon
+## SavedVariables: BrokenAddonDB, NeverUsedDB
+## Colour: red
+
+Core.lua
+missing.lua
+core2.LUA

@@ -1,0 +1,8 @@
+# Build output
+*.zip
+.release/
+
+# OS / editor
+Thumbs.db
+.DS_Store
+desktop.ini

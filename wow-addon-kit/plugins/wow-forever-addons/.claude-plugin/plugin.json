@@ -1,0 +1,9 @@
+{
+  "name": "wow-forever-addons",
+  "displayName": "WoW Forever Addon Kit",
+  "version": "1.0.1",
+  "description": "Create, set up, test and release World of Warcraft addons for WoW: Forever (and Retail/Classic): scaffolding, a validator backed by Blizzard's real Forever API, install/link tooling, and API skills.",
+  "author": { "name": "davidwhit5" },
+  "license": "MIT",
+  "keywords": ["world-of-warcraft", "wow", "addon", "wow-forever", "lua", "midnight"]
+}

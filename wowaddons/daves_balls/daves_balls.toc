@@ -1,0 +1,13 @@
+## Interface: 16001
+## Title: Dave's Balls
+## Notes: Diablo-style health and power orbs for WoW Forever
+## Author: David
+## Version: 0.1.0
+## SavedVariables: DavesBallsDB
+## IconTexture: Interface\Icons\INV_Misc_QuestionMark
+## AddonCompartmentFunc: DavesBalls_OnAddonCompartmentClick
+
+Core.lua
+Options.lua
+Orbs.lua
+OrbSettings.lua

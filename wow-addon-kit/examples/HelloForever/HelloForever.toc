@@ -1,0 +1,12 @@
+## Interface: 16001, 120100, 11509
+## Title: Hello Forever
+## Notes: Kit test addon: a small character panel with a secret-safe health bar.
+## Author: davidwhit5
+## Version: 0.1.0
+## SavedVariables: HelloForeverDB
+## IconTexture: Interface\Icons\INV_Misc_QuestionMark
+## AddonCompartmentFunc: HelloForever_OnAddonCompartmentClick
+
+Core.lua
+Options.lua
+Panel.lua

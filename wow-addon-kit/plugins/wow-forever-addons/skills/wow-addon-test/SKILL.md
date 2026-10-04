@@ -1,0 +1,58 @@
+---
+name: wow-addon-test
+description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck) plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, or when asked to check, lint, verify or debug a WoW addon.
+argument-hint: "[addon folder] [flavors]"
+---
+
+# Test a WoW addon
+
+Arguments: `$ARGUMENTS` (addon folder and optional flavors, e.g. `C:\dev\CampTracker forever,retail`). Without a folder, use the addon you're working on, or ask.
+
+## 1. Static validation (always)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.ps1" -Path "<addon folder>" -Flavor forever[,retail,classic_era]
+```
+
+Add `-Json` for machine-readable output. The exit code is 1 when there are errors.
+
+What each rule means and how to fix it:
+
+| Rule | Severity | Fix |
+| --- | --- | --- |
+| `toc-name` | error | Rename the TOC to `<Folder>.toc` (or `<Folder>_Camelot.toc`) |
+| `toc-interface` / `toc-flavor` | error/warn | Put the number `Find-WowInstall.ps1` reports (Forever: 16001) in `## Interface:` |
+| `toc-missing-file` / `xml-missing-file` | error | Fix the path or add the file. `[Family]` is Mainline and `[Game]` is Camelot on Forever |
+| `file-case` | warn | Match case exactly (macOS clients are case-sensitive) |
+| `unloaded-file` | warn | Add the file to the TOC, or delete it |
+| `cleu-removed` | error | Combat log isn't available on 12.x/Forever. Redesign around unit events and widget setters |
+| `unknown-event` | error | The event doesn't exist on this client. Look it up: `Find-WowApi.ps1 <part> -Events` |
+| `unknown-namespace` / `unknown-function` | error/warn | Look it up with `Find-WowApi.ps1`. Feature-detect (`C_X and C_X.Fn`) if it's flavor-specific |
+| `moved-api` | warn | Use the `C_*` replacement it names, with a fallback if you also target Classic |
+| `unknown-global` | warn | The global doesn't exist on Forever (e.g. `UnitAura`). Use the suggested replacement |
+| `deprecated-api` | warn | Only Blizzard's deprecation shim provides it, and it will be removed. Migrate now |
+| `secret-value` | warn | Don't compare, do math on or concatenate the value. Pass it to `SetValue`/`SetText`/`SetFormattedText`, or check `issecretvalue()` |
+| `slash-handler` | error | Assign `SlashCmdList["NAME"]` for every `SLASH_NAME1` |
+| `savedvariables-unused` | warn | Use it, or drop it from the TOC |
+| `luacheck-E*` | error | Lua syntax error. The game would refuse to load the whole file |
+| `luacheck-W111/112` | warn | Accidental global: add `local`, or declare it in `.luacheckrc` `globals` if intentional |
+| `luacheck-W211/212/431...` | warn | Unused or shadowed locals. Tidy up |
+
+Fix errors first, re-run until clean, then fix warnings. Info notes are context; for example, "feature-detected, OK" means the code already guards the call.
+
+If it says the API index or luacheck is missing, run `scripts/Install-WowDevTools.ps1` (see the **wow-addon-setup** skill).
+
+## 2. In-game test (tell the user these steps; you can't run the client)
+
+1. **First load / TOC or new-file changes:** fully restart the client. Otherwise `/reload`.
+2. At character select, open **AddOns**: the addon should be listed and not marked "out of date".
+3. In game, turn on errors: `/console scriptErrors 1`. Optionally install BugSack + BugGrabber to collect them.
+4. Exercise every feature, then repeat **in combat and in an instance**. Secret values and addon-comms lockdown only show up there.
+5. Taint: `/console taintLog 1`, reproduce, `/reload`, then read `Logs\taint.log` in the client folder (e.g. `_classic_beta_\Logs`). Lines naming the addon mean it touched secure code.
+6. Useful commands: `/dump <expr>` prints a value, `/fstack` identifies the frame under the mouse, `/etrace` shows live events, `/run <lua>` runs a line.
+
+When the user pastes an error, find the file:line, explain the cause in one sentence, fix it, and re-run step 1.
+
+## 3. Report
+
+Say what was checked (flavors, API commit shown in the first line of output), the error/warning counts before and after, what you fixed, and which in-game steps still need the user.

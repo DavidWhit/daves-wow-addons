@@ -1,0 +1,11 @@
+## Interface: {{INTERFACES}}
+## Title: {{TITLE}}
+## Notes: {{NOTES}}
+## Author: {{AUTHOR}}
+## Version: {{VERSION}}
+## SavedVariables: {{DB}}
+## IconTexture: Interface\Icons\INV_Misc_QuestionMark
+## AddonCompartmentFunc: {{NAME}}_OnAddonCompartmentClick
+
+Core.lua
+Options.lua

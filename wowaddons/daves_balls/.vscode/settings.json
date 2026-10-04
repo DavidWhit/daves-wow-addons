@@ -1,0 +1,5 @@
+{
+	"Lua.runtime.version": "Lua 5.1",
+	"Lua.diagnostics.globals": ["DavesBallsDB", "DavesBalls_OnAddonCompartmentClick"],
+	"files.encoding": "utf8"
+}

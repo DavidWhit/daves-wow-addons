@@ -1,0 +1,10 @@
+# BigWigsMods/packager config (https://github.com/BigWigsMods/packager)
+# Builds the release zip; run locally with release.sh or in GitHub Actions
+# via BigWigsMods/packager@v2.
+package-as: {{NAME}}
+
+ignore:
+  - README.md
+  - .luacheckrc
+  - .vscode
+  - tests
