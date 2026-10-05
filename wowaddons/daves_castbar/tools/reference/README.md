@@ -5,7 +5,7 @@ self-contained (textures embedded), so open it in any browser to see how each lo
 
 ## `approved-preview-2026-10-04-professions.html` (current)
 
-- **Frost**: a level band of water flows ahead of the cast and freezes into a cloudy, cracked ice slab behind it; a frosty freeze front at the edge sheds flakes; a light glint sweeps across the ice now and then.
+- **Frost**: a level band of water flows ahead of the cast and freezes into a cloudy, cracked ice slab behind it; a frosty freeze front at the edge sheds flakes; a light glint sweeps across the ice now and then. In Channel mode the roles swap: what is left of the channel is water, the drained part is ice, and the front faces right, so the ice grows over the water as the channel runs.
 - **Fire**: the original scrolling flames, rising up the bar (the first preview scrolled them downward by mistake); embers rise from the bottom and more carry on off the top.
 - **Shadow**, **Nature**, **Arcane**, **Holy**: as in the first preview below.
 - **Fishing**: a pond the length of the bar; lily pads drift on the surface (some with a blossom), fish swim below and turn at random; the red-and-white bobber rides the cast edge on its line, sending out ripples.

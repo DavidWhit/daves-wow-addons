@@ -303,6 +303,20 @@ local function UpdateFrost(dt, fillW)
 	end
 end
 
+-- Frost while channelling: the freeze front faces right, into the ice the drained part has become.
+-- It lies outside the fill's clip, so it is drawn on the fx frame, mirrored.
+local function UpdateFrontReverse(fillW)
+	local front = fx.frontRev
+	front:SetShown(fillW < W - 2)
+	if fillW >= W - 2 then return end
+	front:ClearAllPoints()
+	front:SetPoint("LEFT", fx, "BOTTOMLEFT", fillW, H / 2)
+	local w = math.min(H * 1.4, W - fillW)
+	front:SetSize(w, H)
+	front:SetTexCoord(1, 1 - w / (H * 1.4), 0, 1)   -- near the bar's end, keep the edge and trim the feathered side
+	front:SetAlpha(.75 + .2 * math.sin(clock * 7))
+end
+
 ---------------------------------------------------------------------------
 -- Fishing: lily pads drifting on the surface, fish swimming below, the bobber at the cast edge
 -- (on the fx frame, so the pond covers the whole bar, not just the filled part)
@@ -605,6 +619,11 @@ function FX:Init(frame)
 	particlePool = Pool(function() return Smooth(fx:CreateTexture(nil, "ARTWORK", nil, 7)) end)
 	linePool = Pool(function() return fx:CreateLine(nil, "ARTWORK") end)
 	spritePool = Pool(function() return Smooth(fx:CreateTexture(nil, "ARTWORK")) end)
+	fx.frontRev = Smooth(fx:CreateTexture(nil, "ARTWORK", nil, -1))
+	fx.frontRev:SetTexture(MEDIA .. "frost_front")
+	fx.frontRev:SetTexCoord(1, 0, 0, 1)   -- strongest at the edge, feathering to the right
+	fx.frontRev:SetBlendMode("ADD")
+	fx.frontRev:Hide()
 end
 
 -- Pieces that live inside an element's content frame (clipped by the fill, masked when borderless).
@@ -654,6 +673,7 @@ function FX:Begin(c, w, h)
 	if cfg.pond then MakePond() end
 	if cfg.mine then MakeMine() end
 	if cfg.skin then MakeSkin() end
+	fx.frontRev:Hide()
 	if c.sweepTex then c.sweepT, c.sweep = rand(.4, 1.5), nil; c.sweepTex:Hide() end
 	if cfg.glyphs then
 		c.arcanePool:ReleaseAll()
@@ -675,11 +695,13 @@ function FX:Update(dt, t, fillW, casting)
 	if pond then UpdatePond(dt, fillW, casting) end
 	if mine then UpdateMine(dt, fillW, casting) end
 	if skin then UpdateSkin(dt, fillW, casting) end
+	if cfg.freezeReverse then UpdateFrontReverse(fillW) end
 	if cfg.glyphs then UpdateArcane(dt, fillW, casting) end
 	if cfg.twinkles then UpdateTwinkles(dt, fillW, casting) end
 end
 
 function FX:End()
 	ClearAll()
+	fx.frontRev:Hide()
 	if content and content.arcanePool then content.arcanePool:ReleaseAll() end
 end

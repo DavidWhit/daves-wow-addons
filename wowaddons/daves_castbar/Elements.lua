@@ -25,8 +25,23 @@ ns.ELEMENTS = {
 		layers = { { tex = "frost_ice" } },
 		track = { tex = "frost_water", su = .05, a = .95, hi = "frost_water_hi", su2 = .09 },
 		freeze = true, sweep = true,        -- the freeze front at the fill edge; a glint sweeps across the ice
+		channelLook = "frost_channel",      -- channels drain, so they use the reversed look below
 		emit = {
 			{ tex = "p_flake", rate = 5, colors = { C(220, 240, 255) }, size = { .25, .45 }, life = { .8, 1.6 }, vx = { -24, -6 }, vy = { -8, 8 }, spin = { -1.5, 1.5 }, from = "edge", add = true },
+			{ tex = "p_star", rate = 7, colors = { C(225, 245, 255) }, size = { .15, .3 }, life = { .3, .7 }, twinkle = true, add = true },
+		},
+	},
+	-- Frost while channelling (Blizzard, ...): the bar drains from the right, so the roles swap. What is
+	-- left of the channel is flowing water, the drained part behind the edge is ice, and the freeze front
+	-- faces right, so the water still freezes as the channel runs instead of seeming to thaw.
+	-- Not in ELEMENT_ORDER: StartCast picks it for frost channels.
+	frost_channel = {
+		label = "Frost", border = C(190, 225, 255), glow = C(110, 180, 255), spark = C(225, 245, 255), veil = C(140, 200, 255),
+		layers = { { tex = "frost_water", su = .05, a = { .95, .95 } }, { tex = "frost_water_hi", su = .09, a = { .8, .8 }, add = true } },
+		track = { tex = "frost_ice", a = .95 },
+		freezeReverse = true,
+		emit = {
+			{ tex = "p_flake", rate = 5, colors = { C(220, 240, 255) }, size = { .25, .45 }, life = { .8, 1.6 }, vx = { 6, 24 }, vy = { -8, 8 }, spin = { -1.5, 1.5 }, from = "edge", add = true },
 			{ tex = "p_star", rate = 7, colors = { C(225, 245, 255) }, size = { .15, .3 }, life = { .3, .7 }, twinkle = true, add = true },
 		},
 	},

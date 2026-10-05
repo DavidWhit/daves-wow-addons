@@ -419,6 +419,7 @@ function ns:StartCast(kind)
 	local name, text, texture, start, finish, isTradeskill, castID, spellID = ReadCast(kind)
 	if not name then return end
 	local key = ns:ResolveElement(spellID, name, isTradeskill)
+	if kind == "channel" and ns.ELEMENTS[key].channelLook then key = ns.ELEMENTS[key].channelLook end   -- e.g. frost freezes the other way
 	cast.kind, cast.channel = kind, kind == "channel"
 	cast.start, cast.finish, cast.castID, cast.test, cast.loop = start, finish, castID, nil, nil
 	cast.state, cast.t, cast.shown, cast.easeT = "cast", 0, nil, nil

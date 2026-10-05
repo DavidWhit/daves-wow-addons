@@ -105,6 +105,7 @@ const EL = {
 		layers: [{ t: 'frost_ice', su: 0 }],
 		track: { t: 'frost_water', su: .05, a: .95, hi: 'frost_water_hi', su2: .09 },
 		freeze: true, sweep: true,
+		channelLook: 'frost_channel',
 		emit: [
 			P({ t: 'p_flake', rate: 5, color: [[220, 240, 255]], size: [.25, .45], life: [.8, 1.6], vx: [-24, -6], vy: [-8, 8], spin: [-1.5, 1.5], from: 'edge' }),
 			P({ t: 'p_star', rate: 7, color: [[225, 245, 255]], size: [.15, .3], life: [.3, .7], twinkle: true }),
@@ -183,6 +184,18 @@ const EL = {
 		],
 	},
 };
+// Frost while channelling: what is left is water, the drained part is ice (not a row of its own)
+EL.frost_channel = {
+	hidden: true, label: 'Frost',
+	spell: 'Blizzard', border: [190, 225, 255], glow: [110, 180, 255], spark: [225, 245, 255], veil: [140, 200, 255],
+	layers: [{ t: 'frost_water', su: .05, a: [.95, .95] }, { t: 'frost_water_hi', su: .09, a: [.8, .8], add: true }],
+	track: { t: 'frost_ice', a: .95 },
+	freezeReverse: true,
+	emit: [
+		P({ t: 'p_flake', rate: 5, color: [[220, 240, 255]], size: [.25, .45], life: [.8, 1.6], vx: [6, 24], vy: [-8, 8], spin: [-1.5, 1.5], from: 'edge' }),
+		P({ t: 'p_star', rate: 7, color: [[225, 245, 255]], size: [.15, .3], life: [.3, .7], twinkle: true }),
+	],
+};
 EL.skinning = {
 	// a pasture of cows and pigs; the cleaver chops at the cast edge and each animal it reaches becomes bones on a blood stain
 	spell: 'Skinning', border: [150, 40, 40], glow: [200, 50, 40], spark: [255, 190, 170], veil: [150, 60, 50],
@@ -228,9 +241,10 @@ class Bar {
 		this.cv = document.createElement('canvas'); row.appendChild(this.cv); parent.appendChild(row);
 		this.g = this.cv.getContext('2d');
 		this.off = document.createElement('canvas'); this.og = this.off.getContext('2d');
-		this.layerOff = this.cfg.layers.map(L => ({ u: rand(0, 1), v: L.sv ? rand(0, 1) : 0 }));   // only layers that scroll vertically tile vertically
-		this.wob = this.cfg.layers.map(() => wobble());
-		this.speedWob = this.cfg.layers.map(() => wobble(.7));
+		// three slots, enough for any look (a channel can swap in a look with more layers)
+		this.layerOff = [0, 1, 2].map(i => ({ u: rand(0, 1), v: (this.cfg.layers[i] || {}).sv ? rand(0, 1) : 0 }));   // only layers that scroll vertically tile vertically
+		this.wob = [0, 1, 2].map(() => wobble());
+		this.speedWob = [0, 1, 2].map(() => wobble(.7));
 		this.glowWob = wobble(1.5); this.sparkWob = wobble(6);
 		this.parts = []; this.emitAcc = this.cfg.emit.map(() => 0);
 		this.clock = rand(0, 100);
@@ -342,6 +356,18 @@ class Bar {
 		g.save(); g.globalCompositeOperation = 'lighter';
 		g.globalAlpha = .75 + .2 * Math.sin(this.clock * 7);
 		g.drawImage(imgs.frost_front, fillW - w, 0, w, H);
+		g.restore();
+	}
+
+	// ---- frost while channelling: the front faces right, into the ice the drained part has become
+	drawFreezeReverse(g, fillW, H) {
+		const W = settings.W, w = Math.min(H * 1.4, W - fillW);
+		if (w < 2) return;
+		g.save(); g.globalCompositeOperation = 'lighter';
+		g.globalAlpha = .75 + .2 * Math.sin(this.clock * 7);
+		g.translate(fillW + w, 0); g.scale(-1, 1);
+		const img = imgs.frost_front, sw = img.width * w / (H * 1.4);
+		g.drawImage(img, img.width - sw, 0, sw, img.height, 0, 0, w, H);
 		g.restore();
 	}
 
@@ -507,7 +533,7 @@ class Bar {
 		});
 	}
 	emit(dt, fillW, H) {
-		this.cfg.emit.forEach((e, i) => {
+		(this.cur || this.cfg).emit.forEach((e, i) => {
 			this.emitAcc[i] += e.rate * dt * (fillW > 2 ? 1 : 0);
 			while (this.emitAcc[i] >= 1) {
 				this.emitAcc[i]--;
@@ -600,7 +626,10 @@ class Bar {
 	}
 
 	frame(dt) {
-		const { W, H, style } = settings, cfg = this.cfg;
+		const { W, H, style } = settings;
+		// a channel drains, so some looks swap to a reversed version (frost freezes the other way)
+		const cfg = (settings.mode === 'channel' && this.cfg.channelLook) ? EL[this.cfg.channelLook] : this.cfg;
+		this.cur = cfg;
 		const PAD = Math.round(H * 0.9);
 		const dpr = window.devicePixelRatio || 1;
 		const cw = W + PAD * 2, ch = H + PAD * 2;
@@ -672,6 +701,7 @@ class Bar {
 		if (cfg.freeze) this.drawFreeze(og, fillW, H);
 		og.restore();
 		og.setTransform(dpr, 0, 0, dpr, 0, 0);
+		if (cfg.freezeReverse) this.drawFreezeReverse(og, fillW, H);   // outside the fill's clip, over the ice
 
 		// interrupted: drain the colour out
 		if (this.state === 'interrupted') {
@@ -753,7 +783,7 @@ loadAll().then(() => {
 	if (q.has('hold')) $('freeze').checked = true;
 	bind();
 	const main = $('bars');
-	for (const k of Object.keys(EL)) if (!q.has('only') || q.get('only').split(',').includes(k)) bars.push(new Bar(k, main));
+	for (const k of Object.keys(EL)) if (!EL[k].hidden && (!q.has('only') || q.get('only').split(',').includes(k))) bars.push(new Bar(k, main));
 	for (let i = 0; i < (+q.get('sim') || 0) * 60; i++) for (const b of bars) b.frame(1 / 60);
 	if (q.has('debug')) document.querySelector('footer').textContent = JSON.stringify({ settings, bars: bars.map(b => [b.key, b.state, +b.elapsed.toFixed(2), +b.dur.toFixed(2)]), frost: bars[0].parts.slice(0, 8).map(p => [p.e.t, +p.x.toFixed(1), +p.vx.toFixed(1), +p.age.toFixed(2)]), fillW: settings.W * bars[0].elapsed / bars[0].dur });
 	let last = performance.now();

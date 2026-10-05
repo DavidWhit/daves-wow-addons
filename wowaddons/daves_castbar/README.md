@@ -5,7 +5,7 @@ and four gathering professions), and every cast is different:
 
 | Element | Look |
 | --- | --- |
-| Frost | Water flows ahead of the cast and freezes into ice behind it, with a frosty freeze front; a glint sweeps across the ice |
+| Frost | Water flows ahead of the cast and freezes into ice behind it, with a frosty freeze front; a glint sweeps across the ice. Channels (Blizzard) freeze the other way: the ice grows in from the right as the channel drains |
 | Fire | Scrolling flames rising up the bar; embers rise from the bottom and carry on off the top |
 | Shadow | Black smoke with purple seams, dark wisps drifting up |
 | Nature | Vines that grow with the cast, twisting around each other, with leaves and thorns |
