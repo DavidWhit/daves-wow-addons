@@ -43,7 +43,6 @@
 
 <script>
 const TEX = /*TEXTURES*/{};
-const FROST_CUTS = /*FROSTCUTS*/[];
 
 const $ = id => document.getElementById(id);
 const DEBUG = new URLSearchParams(location.search).has('debug');
@@ -91,16 +90,6 @@ function scaled(key, k, src) {
 	const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high'; g.drawImage(im, 0, 0, w, h);
 	return scaledCache[id] = cv;
 }
-function cutCanvas(key, kx, ky, flipH, flipV) {   // a cut layer stretched and mirrored for this cast
-	const id = 'cut|' + key + '|' + kx.toFixed(3) + '|' + ky.toFixed(3) + '|' + flipH + '|' + flipV;
-	if (scaledCache[id]) return scaledCache[id];
-	const im = imgs[key], cv = document.createElement('canvas');
-	cv.width = Math.max(1, Math.round(im.width * kx)); cv.height = Math.max(1, Math.round(im.height * ky));
-	const g = cv.getContext('2d'); g.imageSmoothingQuality = 'high';
-	g.translate(flipH ? cv.width : 0, flipV ? cv.height : 0); g.scale(flipH ? -1 : 1, flipV ? -1 : 1);
-	g.drawImage(im, 0, 0, cv.width, cv.height);
-	return scaledCache[id] = cv;
-}
 function pattern(g, cv, du, dv) {
 	const pat = g.createPattern(cv, 'repeat');
 	pat.setTransform(new DOMMatrix().translate(-Math.round((((du % 1) + 1) % 1) * cv.width), -Math.round((((dv % 1) + 1) % 1) * cv.height)));
@@ -111,19 +100,23 @@ function pattern(g, cv, du, dv) {
 const P = (o) => Object.assign({ rate: 5, size: [.2, .4], life: [.6, 1.2], vx: [-5, 5], vy: [-5, 5], spin: [0, 0], add: true, from: 'fill', alpha: 1 }, o);
 const EL = {
 	frost: {
-		spell: 'Frostbolt', border: [190, 225, 255], glow: [110, 180, 255], spark: [200, 235, 255], veil: [140, 200, 255],
+		// a ribbon of water flows ahead of the cast (the track) and freezes into ice behind the edge
+		spell: 'Frostbolt', border: [190, 225, 255], glow: [110, 180, 255], spark: [225, 245, 255], veil: [140, 200, 255],
 		layers: [{ t: 'frost_ice', su: 0 }],
-		frost: true, sweep: true, cuts: ['frost_cut0', 'frost_cut1', 'frost_cut2', 'frost_cut3', 'frost_cut4'],
+		track: { t: 'frost_water', su: .05, a: .95, hi: 'frost_water_hi', su2: .09 },
+		freeze: true, sweep: true,
 		emit: [
-			P({ t: 'p_flake', rate: 3, color: [[210, 235, 255]], size: [.3, .5], life: [1.2, 2.2], vx: [-30, -8], vy: [-6, 10], spin: [-1.2, 1.2], from: 'edge' }),
-			P({ t: 'p_star', rate: 9, color: [[225, 245, 255]], size: [.15, .32], life: [.3, .7], twinkle: true }),
+			P({ t: 'p_flake', rate: 5, color: [[220, 240, 255]], size: [.25, .45], life: [.8, 1.6], vx: [-24, -6], vy: [-8, 8], spin: [-1.5, 1.5], from: 'edge' }),
+			P({ t: 'p_star', rate: 7, color: [[225, 245, 255]], size: [.15, .3], life: [.3, .7], twinkle: true }),
 		],
 	},
 	fire: {
 		spell: 'Fireball', border: [220, 100, 30], glow: [255, 110, 20], spark: [255, 210, 140], veil: [255, 120, 30],
-		layers: [{ t: 'fire_base', su: .02 }, { t: 'fire_flow', su: .025, sv: -.55, a: [.5, .95], add: true, flicker: true }],
+		// sv > 0 scrolls the flames upward (the pattern is translated by -v)
+		layers: [{ t: 'fire_base', su: .02 }, { t: 'fire_flow', su: .025, sv: .55, a: [.5, .95], add: true, flicker: true }],
 		emit: [
 			P({ t: 'p_ember', rate: 24, color: [[255, 170, 60], [255, 120, 30], [255, 220, 120]], size: [.12, .26], life: [.5, 1.2], vx: [-8, 8], vy: [-45, -15], from: 'bottom', swirl: 20 }),
+			P({ t: 'p_ember', rate: 16, color: [[255, 190, 80], [255, 140, 40]], size: [.08, .18], life: [.8, 1.6], vx: [-10, 10], vy: [-55, -25], from: 'top', swirl: 25 }),
 		],
 	},
 	shadow: {
@@ -158,7 +151,51 @@ const EL = {
 			P({ t: 'p_soft', rate: 12, color: [[255, 225, 150], [255, 245, 210]], size: [.08, .18], life: [1, 2], vx: [-5, 5], vy: [-18, -6] }),
 		],
 	},
+	// ---- gathering professions
+	fishing: {
+		// a pond the length of the bar: lily pads on top, fish below, the bobber riding the cast edge
+		spell: 'Fishing', border: [70, 170, 190], glow: [80, 190, 220], spark: [210, 245, 255], veil: [90, 190, 210],
+		channel: true,
+		layers: [{ t: 'fish_water', su: .004 }, { t: 'fish_caustic', su: .012, a: [.3, .6], add: true }],
+		track: { t: 'fish_water', su: .004, a: .6 },
+		pond: true,
+		emit: [
+			P({ t: 'p_soft', rate: 3, color: [[220, 245, 255]], size: [.06, .12], life: [1, 1.8], vx: [-2, 2], vy: [-12, -5], from: 'bottom', alpha: .7 }),
+		],
+	},
+	herbalism: {
+		// the nature vines, with herbs and flowers blooming along them
+		spell: 'Herb Gathering', border: [110, 170, 60], glow: [130, 210, 80], spark: [230, 255, 180], veil: [140, 210, 90],
+		layers: [{ t: 'nature_base', su: .004 }, { t: 'nature_flow', su: .02, a: [.35, .8], add: true }],
+		vines: true, flowers: true,
+		emit: [
+			P({ t: 'p_soft', rate: 8, color: [[255, 230, 120], [230, 255, 160]], size: [.06, .13], life: [1.2, 2.2], vx: [-5, 5], vy: [-10, -3] }),
+		],
+	},
+	mining: {
+		// rails along a rock wall: the cart rolls to the cast edge while a pickaxe strikes the outcrop at the end
+		spell: 'Mining', border: [190, 140, 80], glow: [255, 170, 80], spark: [255, 220, 150], veil: [200, 140, 70],
+		layers: [{ t: 'mine_rails', su: 0 }, { t: 'mine_flow', su: .01, a: [.4, .9], add: true, flicker: true }],
+		track: { t: 'mine_rails', a: .35 },
+		mine: true,
+		emit: [
+			P({ t: 'p_soft', rate: 4, color: [[150, 130, 110]], size: [.25, .5], life: [1.2, 2], vx: [-4, 4], vy: [-6, -1], add: false, alpha: .35 }),
+		],
+	},
 };
+EL.skinning = {
+	// a pasture of cows and pigs; the cleaver chops at the cast edge and each animal it reaches becomes bones on a blood stain
+	spell: 'Skinning', border: [150, 40, 40], glow: [200, 50, 40], spark: [255, 190, 170], veil: [150, 60, 50],
+	layers: [{ t: 'skin_base', su: 0 }, { t: 'skin_blood', su: 0 }],
+	track: { t: 'skin_base', a: .55 },
+	skin: true,
+	emit: [],
+};
+const BLOOD = P({ t: 'p_soft', color: [[110, 8, 10], [150, 15, 15]], size: [.07, .14], life: [.5, .9], vx: [-25, 25], vy: [-35, -10], add: false, gravity: 160 });
+const FLOWER_TINTS =[[230, 60, 60], [90, 140, 255], [170, 110, 230], [255, 210, 70], [150, 130, 240], [80, 200, 190]];
+const FISH_TINTS = [[255, 150, 60], [205, 218, 228], [110, 130, 140], [255, 205, 120]];
+const CHIP = P({ t: 'p_chip', color: [[120, 115, 110], [150, 140, 130], [205, 120, 60]], size: [.12, .24], life: [.5, .9], vx: [-40, -12], vy: [-40, -14], spin: [-8, 8], add: false, gravity: 140 });
+const SPARK = P({ t: 'p_star', color: [[255, 220, 140], [255, 250, 220]], size: [.15, .3], life: [.15, .35], vx: [-30, 10], vy: [-30, 5] });
 
 const settings = { W: 320, H: 28, speed: 1, style: 'borderless', mode: 'cast', freeze: false, hold: .7 };
 
@@ -202,9 +239,11 @@ class Bar {
 	newCast() {
 		this.dur = rand(1.6, 3.2); this.elapsed = 0; this.state = 'cast'; this.stateT = 0;
 		this.vines = this.cfg.vines ? this.makeVines() : null;
-		this.sweepT = rand(.4, 1.5); this.sweep = null; this.traceCuts = [pick([0, 1, 2, 3, 5])];   // frost: one of this cast's edge-to-edge cut lines to trace (not the girdle, 4)
-		const nCuts = this.cfg.cuts ? 6 : 0;
-		this.cutParams = Array.from({ length: nCuts }, (_, i) => ({ c: i < 5 ? i : Math.floor(rand(0, 4)), u: rand(0, 1), stretch: rand(.7, 1.5), flipH: Math.random() < .5, flipV: Math.random() < .5, w: rand(.55, 1), wob: wobble(1.3) }));
+		this.sweepT = rand(.4, 1.5); this.sweep = null;
+		this.trackU = rand(0, 1); this.trackU2 = rand(0, 1);
+		if (this.cfg.pond) this.makePond();
+		if (this.cfg.mine) { this.swingT = rand(0, .8); this.lastSwing = 0; }
+		if (this.cfg.skin) this.makeSkin();
 		this.glyphs = []; this.glyphT = 0; this.twinkles = []; this.twinkleAcc = 0; this.circles = []; this.circleNext = rand(.2, 1.2) * settings.H;
 		this.cv.style.opacity = 1; this.parts = [];
 	}
@@ -237,6 +276,7 @@ class Bar {
 					v.leaves.push({ x: v.x, y, thorn: true, ang: tang + v.thornSide * (Math.PI / 2 - rand(.25, .6)), side: v.thornSide,
 						size: H * v.w * rand(2.8, 3.6), born: this.clock, d: Math.cos(v.ph) });
 				}
+				if (this.cfg.flowers && p0 && Math.random() < .045) this.addFlower(v, v.x, y);
 				if (Math.random() < .008) {   // a leaf lets go and falls
 					this.spawn(P({ t: 'p_leaf', color: [pick([[110, 165, 60], [150, 170, 70], [170, 140, 60]])], size: [.3, .42], life: [1.2, 2], vx: [-14, -4], vy: [10, 26], spin: [-3, 3], add: false }), v.x, y);
 				}
@@ -269,6 +309,12 @@ class Bar {
 				if (l.x > fillW || (l.d >= 0) !== front) continue;
 				const s = easeOutBack(clamp01((this.clock - l.born) / .45)) * l.size;
 				const shade = front ? 1 : .6;
+				if (l.flower) {   // herbalism: a blossom sitting on the vine
+					const c = l.tint.map(x => Math.round(x * shade));
+					g.save(); g.translate(ox + l.x, oy + l.y); g.rotate(l.rot);
+					g.drawImage(tinted('p_flower', c), -s / 2, -s / 2, s, s);
+					g.restore(); continue;
+				}
 				g.save(); g.translate(ox + l.x, oy + l.y); g.rotate(l.ang);
 				if (l.thorn) {
 					// sprite points up with its base on the bottom edge: turn "up" to the thorn's angle
@@ -289,51 +335,152 @@ class Bar {
 		for (const v of this.vines) leaves(v, true);
 	}
 
-	// ---- frost: two of the cut lines baked into the ice texture (random ones each cast) are traced live.
-	// FROST_CUTS is the generator's geometry (texture pixels); the bright heads run along the cuts at the
-	// fill edge and what it has passed settles into a softer glow.
-	drawFrost(g, fillW, H, dpr) {
-		const head = fillW, fade = H * 1.6, k = H * dpr / 64;
-		g.globalCompositeOperation = 'lighter'; g.lineCap = 'round';
-		const tips = [];
-		for (const ci of this.traceCuts) {
-			const cp = this.cutParams[ci], cv = cutCanvas(this.cfg.cuts[cp.c] + '_hi', k * cp.stretch, k, cp.flipH, cp.flipV);
-			const tw = cv.width / dpr, sx = tw / 512, sy = cv.height / dpr / 64;
-			const x0 = -(((cp.u % 1) + 1) % 1) * tw;                                 // where texture x = 0 lands on the bar
-			// the cut as placed this cast: mirrored like its layer
-			const cut = FROST_CUTS[cp.c].map(([x, y]) => [cp.flipH ? 512 - x : x, cp.flipV ? 64 - y : y]);
-			if (cp.flipH) cut.reverse();
-			for (let rep = x0 - 2 * tw; rep < fillW; rep += tw) {
-				for (let i = 1; i < cut.length; i++) {
-					{
-						let ax = rep + cut[i - 1][0] * sx, ay = cut[i - 1][1] * sy;
-						let bx = rep + cut[i][0] * sx, by = cut[i][1] * sy;
-						if (bx < 0 || ax > head) continue;
-						if (bx > head) { const t = (head - ax) / (bx - ax); bx = head; by = ay + (by - ay) * t; tips.push([bx, by]); }
-						// draw in short pieces so brightness can fall off behind the head
-						const len = Math.hypot(bx - ax, by - ay), steps = Math.max(1, Math.ceil(len / 6));
-						for (let s = 0; s < steps; s++) {
-							const t1 = s / steps, t2 = (s + 1) / steps;
-							const px = ax + (bx - ax) * t1, py = ay + (by - ay) * t1, qx = ax + (bx - ax) * t2, qy = ay + (by - ay) * t2;
-							const glow = Math.exp(-Math.max(0, head - qx) / fade);
-							g.strokeStyle = `rgba(150,210,255,${.05 + .25 * glow})`; g.lineWidth = Math.max(1.2, H * (.04 + .04 * glow));
-							g.beginPath(); g.moveTo(px, py); g.lineTo(qx, qy); g.stroke();
-							g.strokeStyle = `rgba(235,248,255,${.22 + .7 * glow})`; g.lineWidth = Math.max(.5, H * .018);
-							g.beginPath(); g.moveTo(px, py); g.lineTo(qx, qy); g.stroke();
-						}
-					}
-				}
-			}
-		}
-		// a bright point where each cut meets the fill edge
-		for (const [x, y] of tips) {
-			const s = H * .5;
-			g.drawImage(tinted('p_star', [220, 242, 255]), x - s / 2, y - s / 2, s, s);
-		}
-		g.globalCompositeOperation = 'source-over';
+	// ---- frost: the freeze front at the fill edge, where the flowing water turns to ice
+	drawFreeze(g, fillW, H) {
+		if (fillW < 2) return;
+		const w = H * 1.4;
+		g.save(); g.globalCompositeOperation = 'lighter';
+		g.globalAlpha = .75 + .2 * Math.sin(this.clock * 7);
+		g.drawImage(imgs.frost_front, fillW - w, 0, w, H);
+		g.restore();
 	}
 
-	// light catching the cut ice: a soft diagonal band sweeps across at random moments
+	// ---- fishing: lily pads drifting on the surface, fish swimming below, the bobber at the cast edge
+	makePond() {
+		const W = settings.W, H = settings.H;
+		this.lilies = Array.from({ length: 2 + Math.floor(rand(0, 3)) }, () => ({ x: rand(.08, .92) * W, s: rand(.75, 1.05), drift: rand(-2.5, 2.5), ph: rand(0, 6.283), flower: Math.random() < .3 }));
+		this.fish = Array.from({ length: 2 + Math.floor(rand(0, 2)) }, () => ({ x: rand(.1, .9) * W, y: rand(.45, .82), dir: Math.random() < .5 ? -1 : 1, speed: rand(5, 13), s: rand(.6, .85), c: pick(FISH_TINTS), ph: rand(0, 6.283), turnT: rand(2, 6) }));
+		this.ripples = []; this.rippleT = 0;
+	}
+	drawPond(g, ox, oy, fillW, H, dt) {
+		const W = settings.W, k = H / 28, surf = H * .13;
+		// fish, faint under the water
+		for (const f of this.fish) {
+			f.turnT -= dt;
+			f.x += f.dir * f.speed * k * dt;
+			if (f.x < H * .6 || f.x > W - H * .6 || f.turnT <= 0) { f.dir = f.x < H * .6 ? 1 : f.x > W - H * .6 ? -1 : -f.dir; f.turnT = rand(2, 6); }
+			const s = H * f.s, y = H * f.y + Math.sin(this.clock * 2 + f.ph) * H * .04;
+			g.save(); g.globalAlpha = .55; g.translate(ox + f.x, oy + y); g.scale(f.dir, 1); g.rotate(Math.sin(this.clock * 9 + f.ph) * .06);
+			g.drawImage(tinted('p_fish', f.c), -s / 2, -s / 2, s, s);
+			g.restore();
+		}
+		// lily pads on the surface
+		for (const l of this.lilies) {
+			l.x += l.drift * k * dt;
+			if (l.x < H * .5) l.drift = Math.abs(l.drift); else if (l.x > W - H * .5) l.drift = -Math.abs(l.drift);
+			const s = H * l.s, y = surf + Math.sin(this.clock * 1.6 + l.ph) * H * .02;
+			g.drawImage(imgs.p_lily, ox + l.x - s / 2, oy + y - s / 2, s, s);
+			if (l.flower) { const fs = s * .45; g.drawImage(tinted('p_flower', [255, 170, 200]), ox + l.x - fs / 2 + s * .08, oy + y - fs * .75, fs, fs); }
+		}
+		if (fillW < 1) return;
+		// ripples spreading from the bobber
+		this.rippleT -= dt;
+		if (this.state === 'cast' && this.rippleT <= 0) { this.rippleT = rand(.7, 1.1); this.ripples.push({ x: fillW, age: 0 }); }
+		this.ripples = this.ripples.filter(r => (r.age += dt) < 1.4);
+		g.save(); g.globalCompositeOperation = 'lighter';
+		for (const r of this.ripples) {
+			const t = r.age / 1.4, w = H * (.4 + 1.4 * t);
+			g.globalAlpha = (1 - t) * .6;
+			g.drawImage(imgs.p_ripple, ox + r.x - w / 2, oy + surf - w * .15, w, w * .3);
+		}
+		g.restore();
+		// the line and the bobber
+		const by = surf + Math.sin(this.clock * 3.2) * H * .05, bs = H * .95;
+		g.strokeStyle = 'rgba(230,240,240,.45)'; g.lineWidth = 1;
+		g.beginPath(); g.moveTo(ox + fillW, oy + by - bs * .45); g.quadraticCurveTo(ox + fillW - H * .3, oy - H * .4, ox + fillW - H * .9, oy - H * .85); g.stroke();
+		g.drawImage(imgs.p_bobber, ox + fillW - bs / 2, oy + by - bs * .55, bs, bs);
+	}
+
+	// ---- mining: the cart rolls along the rail to the cast edge; a pickaxe strikes the wall at the end
+	drawMine(g, ox, oy, fillW, H, dt) {
+		const W = settings.W, railY = H * .80;
+		// the pickaxe swings from a pivot above the bar: raise slowly, strike fast
+		const P = H * 1.1, L = P * .76, cycle = .8;
+		this.swingT = (this.swingT + dt) % cycle;
+		const t = this.swingT / cycle, deg = Math.PI / 180;
+		let th;
+		if (t < .62) th = (100 - 92 * Math.sin(t / .62 * Math.PI / 2)) * deg;          // raise
+		else if (t < .72) th = (8 + 92 * ((t - .62) / .1) ** 2) * deg;                 // strike
+		else th = (100 - 8 * Math.sin((t - .72) / .28 * Math.PI)) * deg;              // recoil
+		const hx = W + H * .05, hy = H * .5;                                             // the head lands on the wall at the bar's end
+		const px = hx - L * Math.sin(100 * deg), py = hy + L * Math.cos(100 * deg);
+		g.save(); g.translate(ox + px, oy + py); g.rotate(th);
+		g.drawImage(imgs.p_pickaxe, -P / 2, -P / 2 - P * .45, P, P);
+		g.restore();
+		if (this.state === 'cast' && t >= .72 && this.lastSwing < .72) {                 // impact: chips and sparks
+			for (let i = 0; i < 5; i++) this.spawn(CHIP, hx + rand(-2, 2), hy + rand(-2, 2));
+			for (let i = 0; i < 4; i++) this.spawn(SPARK, hx, hy);
+		}
+		this.lastSwing = t;
+		// the cart: its front at the fill edge, wheels on the rail, lantern glowing
+		const C = H * 1.25, wr = C * .14;
+		const cx = Math.max(-C * .2, fillW - C * .94), cy = railY - wr * 1.15 - C * .80;
+		for (const u of [.27, .73]) {
+			const wx = cx + C * u, wy = railY - wr;
+			g.save(); g.translate(ox + wx, oy + wy); g.rotate(fillW / wr);
+			g.drawImage(imgs.p_wheel, -wr, -wr, wr * 2, wr * 2);
+			g.restore();
+		}
+		g.drawImage(imgs.p_cart, ox + cx, oy + cy, C, C);
+		const lx = cx + C * .80, ly = cy + C * .60, ls = H * (.9 + .1 * Math.sin(this.clock * 11));
+		g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = .55;
+		g.drawImage(tinted('p_soft', [255, 190, 90]), ox + lx - ls / 2, oy + ly - ls / 2, ls, ls);
+		g.restore();
+	}
+
+	// ---- skinning: cows and pigs along the bar; the cleaver chops at the cast edge, and each animal
+	// the edge reaches turns into a bone pile on a blood stain
+	makeSkin() {
+		const W = settings.W, H = settings.H;
+		this.animals = [];
+		for (let x = H * rand(.6, 1.1); x < W - H * .5; x += H * rand(1.1, 1.6))
+			this.animals.push({ x, kind: Math.random() < .5 ? 'p_cow' : 'p_pig', s: H * rand(.85, 1.0), flip: Math.random() < .5, ph: rand(0, 6.283), dead: null });
+		this.chopT = rand(0, .55); this.lastChop = 0; this.skinDoneAt = null;
+	}
+	drawSkin(g, ox, oy, fillW, H, dt) {
+		const ground = H * .90;
+		for (const a of this.animals) {
+			if (!a.dead && fillW >= a.x && this.state === 'cast') {
+				a.dead = this.clock;
+				for (let i = 0; i < 6; i++) this.spawn(BLOOD, a.x, ground - a.s * .35);
+			}
+			if (a.dead) {
+				const s = a.s * .9 * easeOutBack(clamp01((this.clock - a.dead) / .3));
+				g.drawImage(imgs.p_bones, ox + a.x - s / 2, oy + ground - s * .9, s, s);
+			} else {
+				const hop = Math.abs(Math.sin(this.clock * 6 + a.ph)) * H * .03;
+				g.save(); g.translate(ox + a.x, oy + ground - a.s * .4 - hop); if (a.flip) g.scale(-1, 1);
+				g.drawImage(imgs[a.kind], -a.s / 2, -a.s / 2, a.s, a.s);
+				g.restore();
+			}
+		}
+		// once the last animal is chopped the cleaver is done: it fades out instead of chopping the empty end
+		const alive = this.animals.some(a => !a.dead);
+		if (!alive) this.skinDoneAt = this.skinDoneAt ?? this.clock;
+		const cleaverA = alive ? 1 : clamp01(1 - (this.clock - this.skinDoneAt) / .2);
+		// the cleaver: same swing as the pickaxe, chopping at the cast edge
+		const P = H * 1.1, L = P * .76, cycle = .55, deg = Math.PI / 180;
+		this.chopT = (this.chopT + dt) % cycle;
+		const t = this.chopT / cycle;
+		let th;
+		if (t < .62) th = (100 - 92 * Math.sin(t / .62 * Math.PI / 2)) * deg;
+		else if (t < .72) th = (8 + 92 * ((t - .62) / .1) ** 2) * deg;
+		else th = (100 - 8 * Math.sin((t - .72) / .28 * Math.PI)) * deg;
+		const hx = fillW + H * .12, hy = ground - H * .62;   // the handle lands here; the blade hangs down to the ground
+		const px = hx - L * Math.sin(100 * deg), py = hy + L * Math.cos(100 * deg);
+		g.save(); g.globalAlpha = cleaverA; g.translate(ox + px, oy + py); g.rotate(th);
+		g.drawImage(imgs.p_cleaver, -P / 2, -P / 2 - P * .45, P, P);
+		g.restore();
+		if (this.state === 'cast' && alive && t >= .72 && this.lastChop < .72) for (let i = 0; i < 2; i++) this.spawn(BLOOD, hx, ground - H * .1);
+		this.lastChop = t;
+	}
+
+	// ---- herbalism: flowers bloom on the vines (drawn with the leaves)
+	addFlower(v, x, y) {
+		v.leaves.push({ x, y, flower: true, size: settings.H * rand(.35, .55), born: this.clock, d: Math.cos(v.ph), tint: pick(FLOWER_TINTS), rot: rand(0, 6.283) });
+	}
+
+	// light catching the ice: a soft diagonal band sweeps across at random moments
 	drawSweep(g, fillW, H, dt) {
 		this.sweepT -= dt;
 		if (!this.sweep && this.sweepT <= 0) this.sweep = { t: 0, dur: rand(.45, .8) };
@@ -367,6 +514,7 @@ class Bar {
 				let x, y;
 				if (e.from === 'edge') { x = fillW + rand(-4, 1); y = rand(0, H); }
 				else if (e.from === 'bottom') { x = rand(0, fillW); y = H * rand(.35, 1); }
+				else if (e.from === 'top') { x = rand(0, fillW); y = H * rand(0, .3); }   // embers carrying on off the top
 				else { x = rand(0, fillW); y = rand(0, H); }
 				this.spawn(e, x, y);
 			}
@@ -376,6 +524,7 @@ class Bar {
 		this.parts = this.parts.filter(p => (p.age += dt) < p.life);
 		for (const p of this.parts) {
 			if (p.e.swirl) p.vx += Math.sin(p.age * 6 + p.sw) * p.e.swirl * dt;
+			if (p.e.gravity) p.vy += p.e.gravity * settings.H / 28 * dt;
 			p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.spin * dt;
 			const t = p.age / p.life;
 			let a = Math.min(1, t / .15) * Math.min(1, (1 - t) / .4) * p.e.alpha;
@@ -472,7 +621,7 @@ class Bar {
 			if (this.stateT > total + .4) this.newCast();
 		}
 		const p = clamp01(this.elapsed / this.dur);
-		const channel = settings.mode === 'channel';
+		const channel = settings.mode === 'channel' || !!cfg.channel;   // Fishing always drains, like the real channel
 		const fillW = W * (channel ? 1 - p : p);
 
 		const g = this.g, og = this.og;
@@ -489,7 +638,16 @@ class Bar {
 		og.fillStyle = style === 'framed' ? 'rgba(6,6,10,.85)' : 'rgba(6,6,10,.45)'; og.fillRect(0, 0, W, H);
 		og.setTransform(1, 0, 0, 1, 0, 0);
 		const k = H * dpr / 64, DW = W * dpr, DH = H * dpr, DF = fillW * dpr;
-		og.globalAlpha = .16; og.fillStyle = pattern(og, scaled(cfg.layers[0].t, k), this.layerOff[0].u, 0); og.fillRect(0, 0, DW, DH); og.globalAlpha = 1;
+		if (cfg.track) {
+			// this element's own track: what lies ahead of the cast (flowing water, a pond, dim rails)
+			const T = cfg.track;
+			this.trackU += (T.su || 0) * dt * settings.speed; this.trackU2 += (T.su2 || 0) * dt * settings.speed;
+			og.globalAlpha = T.a; og.fillStyle = pattern(og, scaled(T.t, k), this.trackU, 0); og.fillRect(0, 0, DW, DH);
+			if (T.hi) { og.globalCompositeOperation = 'lighter'; og.globalAlpha = .8; og.fillStyle = pattern(og, scaled(T.hi, k), this.trackU2, 0); og.fillRect(0, 0, DW, DH); og.globalCompositeOperation = 'source-over'; }
+			og.globalAlpha = 1;
+		} else {
+			og.globalAlpha = .16; og.fillStyle = pattern(og, scaled(cfg.layers[0].t, k), this.layerOff[0].u, 0); og.fillRect(0, 0, DW, DH); og.globalAlpha = 1;
+		}
 
 		// filled part
 		og.save(); og.beginPath(); og.rect(0, 0, DF, DH); og.clip();
@@ -503,17 +661,6 @@ class Bar {
 			og.globalAlpha = a; og.globalCompositeOperation = L.add ? 'lighter' : 'source-over';
 			og.fillStyle = pattern(og, scaled(L.t, k), o.u, o.v); og.fillRect(0, 0, DF, DH);
 		});
-		// frost: the cut layers stacked over the plain ice make the facets
-		// (each cut: a navy wash deepens its shadow side, an additive layer brightens its lit side)
-		if (cfg.cuts) this.cutParams.forEach(cp => {
-			const key = cfg.cuts[cp.c];
-			og.globalAlpha = cp.w * (.7 + .3 * cp.wob(this.clock));   // weights drift: the light seems to move
-			for (const [suffix, op] of [['_lo', 'source-over'], ['_hi', 'lighter']]) {
-				og.globalCompositeOperation = op;
-				og.fillStyle = pattern(og, cutCanvas(key + suffix, k * cp.stretch, k, cp.flipH, cp.flipV), cp.u, 0); og.fillRect(0, 0, DF, DH);
-			}
-			og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
-		});
 		// veil: soft tinted shimmer
 		og.globalCompositeOperation = 'lighter'; og.globalAlpha = .35 + .2 * this.glowWob(this.clock + 3);
 		og.fillStyle = pattern(og, scaled('veil:' + this.key, k * 2, tinted('veil', cfg.veil)), this.clock * .015 * settings.speed, 0);
@@ -522,10 +669,9 @@ class Bar {
 		og.setTransform(dpr, 0, 0, dpr, 0, 0);
 		if (cfg.glyphs) { this.drawCircles(og, fillW, H, dt); this.drawGlyphs(og, fillW, H, dt); }
 		if (cfg.sweep) this.drawSweep(og, fillW, H, dt * settings.speed);
+		if (cfg.freeze) this.drawFreeze(og, fillW, H);
 		og.restore();
 		og.setTransform(dpr, 0, 0, dpr, 0, 0);
-		// frost traces the ice's cut lines up to the fill edge (inside the edge mask)
-		if (cfg.frost) this.drawFrost(og, fillW, H, dpr);
 
 		// interrupted: drain the colour out
 		if (this.state === 'interrupted') {
@@ -548,6 +694,9 @@ class Bar {
 		g.drawImage(this.off, PAD, PAD, W, H);
 
 		// live elements drawn over the bar (free to spill past its edges)
+		if (cfg.pond) this.drawPond(g, PAD, PAD, fillW, H, dt * settings.speed);
+		if (cfg.mine) this.drawMine(g, PAD, PAD, fillW, H, dt * settings.speed);
+		if (cfg.skin) this.drawSkin(g, PAD, PAD, fillW, H, dt * settings.speed);
 		if (this.vines) { if (this.state === 'cast') this.growVines(fillW, H); this.drawVines(g, PAD, PAD, fillW, H); }
 		if (cfg.twinkles) this.drawTwinkles(g, PAD, PAD, fillW, H, dt * settings.speed);
 

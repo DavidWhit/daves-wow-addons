@@ -1,16 +1,20 @@
 # Dave's Cast Bar (daves_castbar)
 
-An animated, elemental player cast bar for WoW Forever. Each spell gets one of six looks, and every
-cast is different:
+An animated, elemental player cast bar for WoW Forever. Each spell gets one of ten looks (six elements
+and four gathering professions), and every cast is different:
 
 | Element | Look |
 | --- | --- |
-| Frost | Diamond-cut ice, re-cut at random every cast; two cuts traced to the fill edge; a glint sweeps across |
-| Fire | Scrolling flames, embers rising |
+| Frost | Water flows ahead of the cast and freezes into ice behind it, with a frosty freeze front; a glint sweeps across the ice |
+| Fire | Scrolling flames rising up the bar; embers rise from the bottom and carry on off the top |
 | Shadow | Black smoke with purple seams, dark wisps drifting up |
 | Nature | Vines that grow with the cast, twisting around each other, with leaves and thorns |
 | Arcane | Rune circles at random heights and sizes, each turning its own way; glyphs flare up |
 | Holy | Soft gold with four-point stars twinkling in and out |
+| Fishing | A pond: lily pads drift on top, fish swim below, the bobber rides the cast edge with ripples |
+| Herbalism | The nature vines, with flowers blooming along them |
+| Mining | Rails along a rock wall: a gem cart rolls to the cast edge while a pickaxe strikes the wall at the end |
+| Skinning | Cows and pigs along a pasture: a cleaver chops at the cast edge, turning each one into a bone pile on a blood stain |
 
 Targets: forever (`## Interface: 16001`).
 
@@ -35,7 +39,7 @@ specialization, then the "Other casts" setting.
 | --- | --- |
 | Check the addon | `Test-WowAddon.ps1 -Path . -Flavor forever` |
 | Link into the game | `Deploy-WowAddon.ps1 -Path . -Flavor forever` |
-| Rebuild the art (and `FrostCuts.lua`) | `& .\tools\Make-CastbarMedia.ps1` |
+| Rebuild the art | `& .\tools\Make-CastbarMedia.ps1` |
 | Animated preview in the browser | `& .\tools\Show-Preview.ps1` |
 | Reload after editing Lua | `/reload` in game (new files, textures or TOC changes need a full restart) |
 
@@ -46,8 +50,7 @@ Files:
 | File | What it does |
 | --- | --- |
 | `Core.lua` | Startup, saved settings, slash command |
-| `Elements.lua` | The six looks and which spell gets which |
-| `FrostCuts.lua` | Generated: the frost cut lines, so the bar can trace them |
+| `Elements.lua` | The ten looks and which spell gets which (Fishing, Mining, Herb Gathering and Skinning get theirs by name) |
 | `Bar.lua` | The bar, casting states, fill, glow, spark, text, borderless masks, hiding Blizzard's bar |
 | `Effects.lua` | Particles and each element's live effects |
 | `EditModeDialog.lua` | The kit's shared Edit Mode settings dialog and selection art (copied from `wow-addon-kit`; don't edit it here) |

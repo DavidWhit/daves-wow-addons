@@ -38,6 +38,13 @@ local bar, track, clip, fx, textFrame, glowFrame, border
 local contents = {}                -- [element] = content frame
 local W, H = 300, 26
 
+-- The track's layers at their scroll offsets, keeping the texture's proportions on any bar size.
+local function TrackCoords()
+	local span = W / (TEX_W * H / 64)
+	track.tex:SetTexCoord(track.u, track.u + span, 0, 1)
+	track.hi:SetTexCoord(track.u2, track.u2 + span, 0, 1)
+end
+
 ---------------------------------------------------------------------------
 -- Masks (borderless style)
 ---------------------------------------------------------------------------
@@ -177,6 +184,10 @@ function ns:InitBar()
 	track.tex = ns.Maskable(track, track:CreateTexture(nil, "ARTWORK"))
 	track.tex:SetAllPoints()
 	track.tex:SetAlpha(.16)
+	track.hi = ns.Maskable(track, track:CreateTexture(nil, "ARTWORK", nil, 1))   -- an element's own track can add a bright layer
+	track.hi:SetAllPoints()
+	track.hi:SetBlendMode("ADD")
+	track.hi:Hide()
 
 	clip = CreateFrame("Frame", nil, bar)
 	clip:SetPoint("TOPLEFT"); clip:SetPoint("BOTTOMLEFT")
@@ -310,7 +321,7 @@ function ns:Layout()
 		ApplyMasks(content, db.borderless)
 	end
 	track.bg:SetAlpha(db.borderless and .45 or .85)
-	if track.u then track.tex:SetTexCoord(track.u, track.u + W / (TEX_W * H / 64), 0, 1) end
+	if track.u then TrackCoords() end
 	border:SetShown(not db.borderless)
 
 	local glowH = H * 2.2
@@ -355,9 +366,15 @@ local function ActivateElement(key)
 	content.veilU = rand(0, 1)
 	content.flash:SetAlpha(0)
 
-	track.tex:SetTexture(MEDIA .. cfg.layers[1].tex, "REPEAT", "REPEAT")
-	track.u = rand(0, 1)
-	track.tex:SetTexCoord(track.u, track.u + W / (TEX_W * H / 64), 0, 1)
+	-- the track: a dim copy of the element, or the element's own (water flowing ahead of frost, the pond, rails)
+	local T = cfg.track
+	track.cfg = T
+	track.tex:SetTexture(MEDIA .. (T and T.tex or cfg.layers[1].tex), "REPEAT", "REPEAT")
+	track.tex:SetAlpha(T and T.a or .16)
+	track.hi:SetShown(T and T.hi ~= nil or false)
+	if T and T.hi then track.hi:SetTexture(MEDIA .. T.hi, "REPEAT", "REPEAT") end
+	track.u, track.u2 = rand(0, 1), rand(0, 1)
+	TrackCoords()
 	for _, t in ipairs({ glowFrame.l, glowFrame.m, glowFrame.r }) do SetColor(t, cfg.glow) end
 	SetColor(fx.spark, cfg.spark)
 	for _, t in ipairs(border.lit) do SetColor(t, cfg.border) end
@@ -503,7 +520,9 @@ function ns:TestCast(key, loop)
 	end
 	local cfg = ns.ELEMENTS[key]
 	local now = Now()
-	cast.kind, cast.channel, cast.start, cast.finish, cast.castID = "cast", false, now, now + 2.6, nil
+	-- a look whose real spell is a channel (Fishing) previews as one, draining instead of filling
+	cast.kind, cast.channel = cfg.channel and "channel" or "cast", cfg.channel or false
+	cast.start, cast.finish, cast.castID = now, now + 2.6, nil
 	cast.state, cast.t, cast.test, cast.loop, cast.shown, cast.easeT = "cast", 0, true, loop, nil, nil
 	ActivateElement(key)
 	ShowText(cfg.label .. " test", "Interface\\Icons\\INV_Misc_QuestionMark")
@@ -576,6 +595,11 @@ function ns:OnBarUpdate(dt)
 			local w = layer.wob(clock * (L.flicker and 6 or 1))
 			layer.tex:SetAlpha(L.a[1] + (L.a[2] - L.a[1]) * (.5 + .5 * w))
 		end
+	end
+	if track.cfg and (track.cfg.su or track.cfg.su2) then   -- water flowing ahead of the cast
+		track.u = (track.u + (track.cfg.su or 0) * dt) % 1
+		track.u2 = (track.u2 + (track.cfg.su2 or 0) * dt) % 1
+		TrackCoords()
 	end
 	active.veilU = (active.veilU + .015 * dt) % 1
 	active.veil:SetTexCoord(active.veilU, active.veilU + W / (512 * k), 0, 1)

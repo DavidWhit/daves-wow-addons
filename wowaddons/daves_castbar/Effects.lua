@@ -1,10 +1,13 @@
 -- daves_castbar / Effects.lua
 -- Everything that moves on its own: particles, and each element's live pieces.
---   frost   six cut layers placed at random each cast (a new ice bar every time), one cut
---           traced up to the fill edge, and a glint of light sweeping across now and then
---   nature  vines that grow with the cast, twisting around each other, with leaves and thorns
---   arcane  rune circles at random heights and sizes, each turning its own way; glyphs flare up
---   holy    four-point stars twinkling in and out
+--   frost      the freeze front where the water ahead turns to ice, and a glint sweeping across
+--   nature     vines that grow with the cast, twisting around each other, with leaves and thorns
+--   herbalism  the same vines, with flowers blooming along them
+--   fishing    lily pads and fish in the pond, the bobber and its ripples at the cast edge
+--   mining     the gem cart rolling to the cast edge, a pickaxe striking the wall at the end
+--   skinning   cows and pigs that a cleaver at the cast edge turns into bone piles on blood stains
+--   arcane     rune circles at random heights and sizes, each turning its own way; glyphs flare up
+--   holy       four-point stars twinkling in and out
 -- Positions are in bar pixels from the bottom-left corner, y up. Effects drawn on the fx frame
 -- can spill past the bar; those on an element's content frame are clipped by the fill and
 -- masked in the borderless style.
@@ -24,6 +27,17 @@ local clock = 0
 
 local function easeOutBack(t) local c = 1.7; t = t - 1; return 1 + t * t * ((c + 1) * t + c) end
 local function pick(list) return list[math.random(#list)] end
+
+-- Sprites that turn, grow or drift every frame must not snap to the pixel grid: each corner would
+-- jump to a different pixel every frame and the sprite would shake. Blizzard turns snapping off the
+-- same way on its animated textures (snapToPixelGrid="false" texelSnappingBias="0.0", e.g.
+-- Blizzard_ActionBar/Shared/ActionButtonComponentTemplate.xml, forever branch).
+local function Smooth(tex)
+	tex:SetSnapToPixelGrid(false)
+	tex:SetTexelSnappingBias(0)
+	return tex
+end
+ns.SmoothTexture = Smooth
 
 -- Texture and line pools, so nothing is created during play after the first few casts.
 local function Pool(make)
@@ -67,6 +81,11 @@ local function Spawn(e, x, y)
 		tw = e.twinkle and rand(8, 16) or 0, sw = rand(0, 6.283),
 	}
 	tex:SetSize(p.size, p.size)
+	-- hidden and in place until UpdateParticles draws it, so a recycled texture never flashes
+	-- for a frame where its previous particle was
+	tex:SetAlpha(0)
+	tex:ClearAllPoints()
+	tex:SetPoint("CENTER", fx, "BOTTOMLEFT", x, y)
 	particles[#particles + 1] = p
 	return p
 end
@@ -80,6 +99,7 @@ local function UpdateParticles(dt)
 			table.remove(particles, i)
 		else
 			if p.e.swirl then p.vx = p.vx + math.sin(p.age * 6 + p.sw) * p.e.swirl * dt end
+			if p.e.gravity then p.vy = p.vy - p.e.gravity * (H / 28) * dt end   -- rock chips fall back down
 			p.x, p.y, p.rot = p.x + p.vx * dt, p.y + p.vy * dt, p.rot + p.spin * dt
 			local t = p.age / p.life
 			local a = math.min(1, t / .15) * math.min(1, (1 - t) / .4) * (p.e.alpha or 1)
@@ -101,6 +121,7 @@ local function Emit(dt, fillW)
 			local x, y
 			if e.from == "edge" then x, y = fillW + rand(-4, 1), rand(0, H)
 			elseif e.from == "bottom" then x, y = rand(0, fillW), H * rand(0, .65)
+			elseif e.from == "top" then x, y = rand(0, fillW), H * rand(.7, 1)   -- embers carrying on off the top
 			else x, y = rand(0, fillW), rand(0, H) end
 			Spawn(e, x, y)
 		end
@@ -115,6 +136,7 @@ end
 local vines, linePool, spritePool
 local LEAF_TINTS = { { .35, .65, .24 }, { .24, .53, .2 }, { .49, .69, .27 }, { .22, .45, .24 }, { .59, .73, .31 }, { .31, .59, .18 } }
 local FALL_TINTS = { { .43, .65, .24 }, { .59, .67, .27 }, { .67, .55, .24 } }
+local FLOWER_TINTS = { { .9, .24, .24 }, { .35, .55, 1 }, { .67, .43, .9 }, { 1, .82, .27 }, { .59, .51, .94 }, { .31, .78, .75 } }
 local STEP = 3
 
 local function MakeVines()
@@ -150,6 +172,7 @@ local function Sprite(name, sub, blend)
 	tex:SetTexCoord(0, 1, 0, 1)
 	tex:SetRotation(0)
 	tex:SetAlpha(1)
+	tex:SetVertexColor(1, 1, 1, 1)   -- a recycled sprite may still carry another look's tint
 	return tex
 end
 
@@ -174,10 +197,10 @@ local function GrowVines(fillW)
 				local front = d >= 0
 				local lit = front and (.72 + .28 * d) or (.42 + .18 * (1 + d))
 				local seg = { x = v.x, d = d, front = front, outline = VineLine(front, true), bark = VineLine(front, false) }
-				for _, line in ipairs({ seg.outline, seg.bark }) do
-					line:SetStartPoint("BOTTOMLEFT", fx, prev.x, prev.y)
-					line:SetEndPoint("BOTTOMLEFT", fx, v.x, y)
-				end
+				seg.outline:SetStartPoint("BOTTOMLEFT", fx, prev.x, prev.y)
+				seg.outline:SetEndPoint("BOTTOMLEFT", fx, v.x, y)
+				seg.bark:SetStartPoint("BOTTOMLEFT", fx, prev.x, prev.y)
+				seg.bark:SetEndPoint("BOTTOMLEFT", fx, v.x, y)
 				if v.moss then seg.bark:SetVertexColor(.62 * lit, .82 * lit, .5 * lit) else seg.bark:SetVertexColor(lit, lit, lit) end
 				v.segs[#v.segs + 1] = seg
 
@@ -199,6 +222,13 @@ local function GrowVines(fillW)
 					thorn.tex:SetVertexColor(shade, shade, shade)
 					if v.thornSide < 0 then thorn.tex:SetTexCoord(1, 0, 0, 1) end
 					v.growing[#v.growing + 1] = thorn
+				end
+				if cfg.flowers and math.random() < .045 then    -- herbalism: a flower blooms on the vine
+					local flower = { x = v.x, y = y, kind = "flower", ang = 0, size = H * rand(.35, .55), born = clock, rot = rand(0, 6.283),
+						tex = Sprite("p_flower", front and 5 or 2) }
+					local c, shade = pick(FLOWER_TINTS), front and 1 or .6
+					flower.tex:SetVertexColor(c[1] * shade, c[2] * shade, c[3] * shade)
+					v.growing[#v.growing + 1] = flower
 				end
 				if math.random() < .008 then              -- a leaf lets go and falls
 					Spawn({ tex = "p_leaf", colors = FALL_TINTS, size = { .3, .42 }, life = { 1.2, 2 }, vx = { -14, -4 }, vy = { -26, -10 }, spin = { -3, 3 } }, v.x, y)
@@ -227,7 +257,9 @@ local function UpdateVines(fillW)
 			local g = math.min(1, (clock - s.born) / .45)
 			local size = easeOutBack(g) * s.size
 			local dx, dy = math.cos(s.ang), math.sin(s.ang)
-			if s.kind == "leaf" then
+			if s.kind == "flower" then
+				PlaceSprite(s.tex, s.x, s.y, size, s.rot)
+			elseif s.kind == "leaf" then
 				PlaceSprite(s.tex, s.x + dx * size * .5, s.y + dy * size * .5, size, s.ang + PI / 4)
 			else
 				PlaceSprite(s.tex, s.x + dx * (size / 2 + s.off), s.y + dy * (size / 2 + s.off), size, s.ang - PI / 2)
@@ -238,138 +270,20 @@ local function UpdateVines(fillW)
 end
 
 ---------------------------------------------------------------------------
--- Frost: cut layers, traced cuts, light sweep
+-- Frost: the freeze front at the fill edge, and a glint sweeping across the ice
 ---------------------------------------------------------------------------
-local N_CUTS = 6
-
-local function FrostCutCoords(cp)
-	-- the texture coordinates that place cut layer c as this cast wants it
-	local tw = 512 * (H / 64) * cp.stretch
-	local span = W / tw
-	local l, r = cp.u, cp.u + span
-	if cp.flipH then l, r = r, l end
-	local t, b = 0, 1
-	if cp.flipV then t, b = 1, 0 end
-	return l, r, t, b, tw, span
-end
-
--- The cut as placed this cast, as bar-pixel segments from left to right.
-local function CutSegments(cp)
-	local cut = ns.FROST_CUTS[cp.c]
-	local _, _, _, _, tw, span = FrostCutCoords(cp)
-	local k = H / 64
-	local segs = {}
-	local function X(tx, n)
-		if cp.flipH then return (cp.u + span - tx / 512 - n) * tw end
-		return (tx / 512 + n - cp.u) * tw
-	end
-	local function Y(ty) return cp.flipV and ty * k or H - ty * k end
-	for n = math.floor(cp.u) - 2, math.floor(cp.u + span) + 2 do
-		for i = 2, #cut do
-			local ax, bx = X(cut[i - 1][1], n), X(cut[i][1], n)
-			local ay, by = Y(cut[i - 1][2]), Y(cut[i][2])
-			if ax > bx then ax, bx, ay, by = bx, ax, by, ay end
-			if bx > 0 and ax < W then segs[#segs + 1] = { ax, ay, bx, by } end
-		end
-	end
-	table.sort(segs, function(p, q) return p[1] < q[1] end)
-	return segs
-end
-
-local function BuildTraces()
-	content.traceLines:ReleaseAll()
-	content.traces = {}
-	for _, ci in ipairs(content.traceCuts) do
-		local trace = { pieces = {} }
-		for _, s in ipairs(CutSegments(content.cutParams[ci])) do
-			local ax, ay, bx, by = s[1], s[2], s[3], s[4]
-			local steps = math.max(1, math.ceil(math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2) / 8))
-			for j = 0, steps - 1 do
-				local t1, t2 = j / steps, (j + 1) / steps
-				local piece = { x1 = ax + (bx - ax) * t1, y1 = ay + (by - ay) * t1, x2 = ax + (bx - ax) * t2, y2 = ay + (by - ay) * t2 }
-				piece.glow = content.traceLines:Get(); piece.glow:SetDrawLayer("ARTWORK", 4)
-				piece.core = content.traceLines:Get(); piece.core:SetDrawLayer("ARTWORK", 5)
-				piece.core:SetThickness(math.max(.5, H * .018))
-				for _, line in ipairs({ piece.glow, piece.core }) do
-					line:SetStartPoint("BOTTOMLEFT", content, piece.x1, piece.y1)
-					line:SetEndPoint("BOTTOMLEFT", content, piece.x2, piece.y2)
-				end
-				trace.pieces[#trace.pieces + 1] = piece
-			end
-		end
-		content.traces[#content.traces + 1] = trace
-	end
-end
-
-local function LayoutFrost()
-	for i, cp in ipairs(content.cutParams) do
-		local l, r, t, b = FrostCutCoords(cp)
-		content.cutLo[i]:SetTexCoord(l, r, t, b)
-		content.cutHi[i]:SetTexCoord(l, r, t, b)
-		content.cutLo[i]:SetTexture(MEDIA .. "frost_cut" .. (cp.c - 1) .. "_lo", "REPEAT", "REPEAT")
-		content.cutHi[i]:SetTexture(MEDIA .. "frost_cut" .. (cp.c - 1) .. "_hi", "REPEAT", "REPEAT")
-	end
-	BuildTraces()
-	content.sweepTex:SetSize(H * 1.0, H * 1.8)
-end
-
-local function BeginFrost()
-	content.cutParams = {}
-	for i = 1, N_CUTS do
-		-- the four edge-to-edge cuts and the girdle (5) once each, then one more edge-to-edge
-		content.cutParams[i] = { c = i <= 5 and i or math.random(4), u = rand(0, 1), stretch = rand(.7, 1.5),
-			flipH = math.random() < .5, flipV = math.random() < .5, w = rand(.55, 1), wob = ns.Wobble(1.3) }
-	end
-	-- one of this cast's edge-to-edge cuts gets traced (not the girdle, 5)
-	local candidates = { 1, 2, 3, 4, 6 }
-	content.traceCuts = { candidates[math.random(#candidates)] }
-	content.sweepT, content.sweep = rand(.4, 1.5), nil
-	LayoutFrost()
-end
-
 local function UpdateFrost(dt, fillW)
-	for i, cp in ipairs(content.cutParams) do
-		local a = cp.w * (.7 + .3 * cp.wob(clock))   -- the weights drift: the light seems to move
-		content.cutLo[i]:SetAlpha(a); content.cutHi[i]:SetAlpha(a)
-	end
-	-- traces: bright where the head is, settling into a soft glow behind it. Only the piece crossing
-	-- the fill edge moves every frame; the glow falloff behind it is refreshed about 15 times a second,
-	-- and pieces are shown or hidden only when that changes.
-	local fade = H * 1.6
-	local tip = 0
-	content.traceTick = (content.traceTick or 0) + dt
-	local refresh = content.traceTick >= 1 / 15
-	if refresh then content.traceTick = 0 end
-	for _, trace in ipairs(content.traces) do
-		for _, piece in ipairs(trace.pieces) do
-			local state = piece.x1 >= fillW and "hidden" or (piece.x2 > fillW and "head" or "full")
-			if state ~= piece.state then
-				piece.glow:SetShown(state ~= "hidden"); piece.core:SetShown(state ~= "hidden")
-				if state == "full" then   -- it just finished: run it to its own end point
-					piece.glow:SetEndPoint("BOTTOMLEFT", content, piece.x2, piece.y2)
-					piece.core:SetEndPoint("BOTTOMLEFT", content, piece.x2, piece.y2)
-				end
-			end
-			if state == "head" then
-				local t = (fillW - piece.x1) / (piece.x2 - piece.x1)
-				local x2, y2 = fillW, piece.y1 + (piece.y2 - piece.y1) * t
-				piece.glow:SetEndPoint("BOTTOMLEFT", content, x2, y2)
-				piece.core:SetEndPoint("BOTTOMLEFT", content, x2, y2)
-				tip = tip + 1
-				local star = content.tips[tip]
-				if star then star:Show(); star:ClearAllPoints(); star:SetPoint("CENTER", content, "BOTTOMLEFT", x2, y2) end
-			end
-			if state ~= "hidden" and (refresh or state ~= piece.state) then
-				local g = math.exp(-math.max(0, fillW - math.min(fillW, piece.x2)) / fade)
-				piece.glow:SetThickness(math.max(1.2, H * (.04 + .04 * g)))
-				piece.glow:SetVertexColor(.59, .82, 1, .05 + .25 * g)
-				piece.core:SetVertexColor(.92, .97, 1, .22 + .7 * g)
-			end
-			piece.state = state
+	if content.front then
+		local front = content.front
+		front:SetShown(fillW > 2)
+		if fillW > 2 then
+			front:ClearAllPoints()
+			front:SetPoint("RIGHT", content, "LEFT", fillW, 0)
+			front:SetSize(H * 1.4, H)
+			front:SetAlpha(.75 + .2 * math.sin(clock * 7))
 		end
 	end
-	for i = tip + 1, #content.tips do content.tips[i]:Hide() end
-
+	if not content.sweepTex then return end
 	-- light sweeping across the ice at random moments
 	content.sweepT = content.sweepT - dt
 	if not content.sweep and content.sweepT <= 0 then content.sweep = { t = 0, dur = rand(.45, .8) } end
@@ -387,6 +301,140 @@ local function UpdateFrost(dt, fillW)
 			content.sweepTex:SetAlpha(math.sin(p * PI) * .55)
 		end
 	end
+end
+
+---------------------------------------------------------------------------
+-- Fishing: lily pads drifting on the surface, fish swimming below, the bobber at the cast edge
+-- (on the fx frame, so the pond covers the whole bar, not just the filled part)
+---------------------------------------------------------------------------
+local FISH_TINTS = { { 1, .59, .24 }, { .8, .85, .89 }, { .43, .51, .55 }, { 1, .8, .47 } }
+local pond
+
+local function MakePond()
+	pond = { lilies = {}, fish = {}, ripples = {}, rippleT = 0 }
+	for i = 1, 2 + math.random(0, 2) do
+		local l = { x = rand(.08, .92) * W, s = rand(.75, 1.05), drift = rand(-2.5, 2.5), ph = rand(0, 6.283), tex = Sprite("p_lily", 2) }
+		if math.random() < .3 then
+			l.flower = Sprite("p_flower", 3)
+			l.flower:SetVertexColor(1, .67, .78)
+		end
+		pond.lilies[i] = l
+	end
+	for i = 1, 2 + math.random(0, 1) do
+		local f = { x = rand(.1, .9) * W, y = rand(.18, .55), dir = math.random() < .5 and -1 or 1, speed = rand(5, 13), s = rand(.6, .85),
+			ph = rand(0, 6.283), turnT = rand(2, 6), tex = Sprite("p_fish", 0) }
+		local c = pick(FISH_TINTS)
+		f.tex:SetVertexColor(c[1], c[2], c[3])
+		f.tex:SetAlpha(.55)
+		pond.fish[i] = f
+	end
+	pond.bobber = Sprite("p_bobber", 5)
+	pond.line = linePool:Get()
+	pond.line:SetDrawLayer("ARTWORK", 4)
+	pond.line:SetColorTexture(.9, .94, .94, .45)
+	pond.line:SetVertexColor(1, 1, 1, 1)
+	pond.line:SetThickness(1)
+	if pond.line.SetSnapToPixelGrid then   -- it moves with the bobber every frame; snapping would make it shimmer
+		pond.line:SetSnapToPixelGrid(false)    -- (lines are texture-based, but their docs don't list these, so guard)
+		pond.line:SetTexelSnappingBias(0)
+	end
+end
+
+local function UpdatePond(dt, fillW, casting)
+	local k, surf = H / 28, H * .87
+	for _, f in ipairs(pond.fish) do
+		f.turnT = f.turnT - dt
+		f.x = f.x + f.dir * f.speed * k * dt
+		if f.x < H * .6 then f.dir, f.turnT = 1, rand(2, 6)
+		elseif f.x > W - H * .6 then f.dir, f.turnT = -1, rand(2, 6)
+		elseif f.turnT <= 0 then f.dir, f.turnT = -f.dir, rand(2, 6) end
+		if f.dir < 0 then f.tex:SetTexCoord(1, 0, 0, 1) else f.tex:SetTexCoord(0, 1, 0, 1) end
+		PlaceSprite(f.tex, f.x, H * f.y + math.sin(clock * 2 + f.ph) * H * .04, H * f.s, math.sin(clock * 9 + f.ph) * .06 * f.dir)
+	end
+	for _, l in ipairs(pond.lilies) do
+		l.x = l.x + l.drift * k * dt
+		if l.x < H * .5 then l.drift = math.abs(l.drift) elseif l.x > W - H * .5 then l.drift = -math.abs(l.drift) end
+		local s, y = H * l.s, surf + math.sin(clock * 1.6 + l.ph) * H * .02
+		PlaceSprite(l.tex, l.x, y, s, 0)
+		if l.flower then PlaceSprite(l.flower, l.x + s * .08, y + s * .11, s * .45, 0) end
+	end
+	local show = fillW >= 1
+	pond.bobber:SetShown(show); pond.line:SetShown(show)
+	-- ripples spreading from the bobber
+	pond.rippleT = pond.rippleT - dt
+	if casting and show and pond.rippleT <= 0 then
+		pond.rippleT = rand(.7, 1.1)
+		local tex = Sprite("p_ripple", 3, "ADD")
+		pond.ripples[#pond.ripples + 1] = { x = fillW, age = 0, tex = tex }
+	end
+	for i = #pond.ripples, 1, -1 do
+		local r = pond.ripples[i]
+		r.age = r.age + dt
+		if r.age >= 1.4 then
+			spritePool:Release(r.tex)
+			table.remove(pond.ripples, i)
+		else
+			local t = r.age / 1.4
+			local w = H * (.4 + 1.4 * t)
+			r.tex:SetAlpha((1 - t) * .6)
+			r.tex:ClearAllPoints()
+			r.tex:SetPoint("CENTER", fx, "BOTTOMLEFT", r.x, surf)
+			r.tex:SetSize(w, w * .3)
+		end
+	end
+	if not show then return end
+	-- the bobber rides the surface at the cast edge, on its line
+	local bs = H * .95
+	local by = surf - math.sin(clock * 3.2) * H * .05
+	PlaceSprite(pond.bobber, fillW, by + bs * .05, bs, 0)
+	pond.line:SetStartPoint("BOTTOMLEFT", fx, fillW, by + bs * .45)
+	pond.line:SetEndPoint("BOTTOMLEFT", fx, fillW - H * .9, H * 1.85)
+end
+
+---------------------------------------------------------------------------
+-- Mining: the gem cart rolls along the rail to the cast edge; a pickaxe strikes the wall at the end
+---------------------------------------------------------------------------
+local mine
+local WHEEL_U = { .27, .73 }   -- the wheels, as fractions of the cart's width
+local CHIP = { tex = "p_chip", colors = { { .47, .45, .43 }, { .59, .55, .51 }, { .8, .47, .24 } }, size = { .12, .24 }, life = { .5, .9 },
+	vx = { -40, -12 }, vy = { 14, 40 }, spin = { -8, 8 }, gravity = 140 }
+local SPARK = { tex = "p_star", colors = { { 1, .86, .55 }, { 1, .98, .86 } }, size = { .15, .3 }, life = { .15, .35 }, vx = { -30, 10 }, vy = { -5, 30 }, add = true }
+
+local function MakeMine()
+	mine = { swingT = rand(0, .8), last = 0, cart = Sprite("p_cart", 2), wheels = { Sprite("p_wheel", 1), Sprite("p_wheel", 1) },
+		lantern = Sprite("p_soft", 3, "ADD"), pick = Sprite("p_pickaxe", 4) }
+	mine.lantern:SetVertexColor(1, .75, .35)
+	mine.lantern:SetAlpha(.55)
+end
+
+local function UpdateMine(dt, fillW, casting)
+	local railY = H * .20
+	-- the pickaxe swings from a pivot above the bar's end: raise slowly, strike fast, recoil
+	local P = H * 1.1
+	local L, cycle, deg = P * .76, .8, PI / 180
+	mine.swingT = (mine.swingT + dt) % cycle
+	local t, th = mine.swingT / cycle
+	if t < .62 then th = (100 - 92 * math.sin(t / .62 * PI / 2)) * deg
+	elseif t < .72 then th = (8 + 92 * ((t - .62) / .1) ^ 2) * deg
+	else th = (100 - 8 * math.sin((t - .72) / .28 * PI)) * deg end
+	local hx, hy = W + H * .05, H * .5                                   -- where the head lands
+	local px, py = hx - L * math.sin(100 * deg), hy - L * math.cos(100 * deg)
+	PlaceSprite(mine.pick, px + P * .45 * math.sin(th), py + P * .45 * math.cos(th), P, -th)
+	if casting and t >= .72 and mine.last < .72 then                    -- impact: chips and sparks
+		for _ = 1, 5 do Spawn(CHIP, hx + rand(-2, 2), hy + rand(-2, 2)) end
+		for _ = 1, 4 do Spawn(SPARK, hx, hy) end
+	end
+	mine.last = t
+	-- the cart: its front at the fill edge, wheels on the rail, lantern glowing
+	local C = H * 1.25
+	local wr = C * .14
+	local cx = math.max(-C * .2, fillW - C * .94)
+	for i, u in ipairs(WHEEL_U) do
+		PlaceSprite(mine.wheels[i], cx + C * u, railY + wr, wr * 2, -fillW / wr)
+	end
+	local cy = railY + 1.15 * wr + .30 * C                               -- the cart's centre
+	PlaceSprite(mine.cart, cx + C / 2, cy, C, 0)
+	PlaceSprite(mine.lantern, cx + C * .80, cy - C * .10, H * (.9 + .1 * math.sin(clock * 11)), 0)
 end
 
 ---------------------------------------------------------------------------
@@ -428,6 +476,7 @@ local function UpdateArcane(dt, fillW, casting)
 		content.glyphT = rand(.25, .6)
 		local q = { x = rand(H * .3, fillW - H * .2), y = H / 2 + rand(-.12, .12) * H, s = H * rand(.6, .95), age = 0, life = rand(.9, 1.7),
 			tex = ArcaneTexture("p_glyphs", 5) }
+		q.tex:ClearAllPoints(); q.tex:SetPoint("CENTER", content, "BOTTOMLEFT", q.x, q.y)   -- it never moves; only its size changes
 		local i = math.random(16) - 1
 		local col, row = i % 8, math.floor(i / 8)
 		q.tex:SetTexCoord(col / 8, (col + 1) / 8, row / 2, (row + 1) / 2)
@@ -447,7 +496,6 @@ local function UpdateArcane(dt, fillW, casting)
 			local s = q.s * (.75 + .25 * easeOutBack(math.min(1, t * 2.5)))
 			q.tex:SetAlpha(math.sin(PI * t) ^ 1.5)
 			q.tex:SetSize(s, s)
-			q.tex:ClearAllPoints(); q.tex:SetPoint("CENTER", content, "BOTTOMLEFT", q.x, q.y)
 		end
 	end
 end
@@ -485,56 +533,104 @@ local function UpdateTwinkles(dt, fillW, casting)
 end
 
 ---------------------------------------------------------------------------
+-- Skinning: cows and pigs along the bar; the cleaver chops at the cast edge (the same swing as the
+-- pickaxe), and each animal the edge reaches turns into a bone pile on a blood stain
+---------------------------------------------------------------------------
+local skin
+local BLOOD = { tex = "p_soft", colors = { { .43, .03, .04 }, { .59, .06, .06 } }, size = { .07, .14 }, life = { .5, .9 },
+	vx = { -25, 25 }, vy = { 10, 35 }, gravity = 160 }
+
+local function MakeSkin()
+	skin = { animals = {}, chopT = rand(0, .55), last = 0, cleaver = Sprite("p_cleaver", 4) }
+	local x = H * rand(.6, 1.1)
+	while x < W - H * .5 do
+		local a = { x = x, s = H * rand(.85, 1), ph = rand(0, 6.283), tex = Sprite(math.random() < .5 and "p_cow" or "p_pig", 2) }
+		if math.random() < .5 then a.tex:SetTexCoord(1, 0, 0, 1) end   -- facing left
+		skin.animals[#skin.animals + 1] = a
+		x = x + H * rand(1.1, 1.6)
+	end
+end
+
+local function UpdateSkin(dt, fillW, casting)
+	local ground = H * .10
+	for _, a in ipairs(skin.animals) do
+		if not a.dead and casting and fillW >= a.x then   -- chopped: bones on a blood stain, and a spray of blood
+			a.dead = clock
+			spritePool:Release(a.tex)
+			a.tex = Sprite("p_bones", 1)
+			for _ = 1, 6 do Spawn(BLOOD, a.x, ground + a.s * .35) end
+		end
+		if a.dead then
+			local s = a.s * .9 * easeOutBack(math.min(1, (clock - a.dead) / .3))
+			PlaceSprite(a.tex, a.x, ground + s * .4, s, 0)
+		else
+			local hop = math.abs(math.sin(clock * 6 + a.ph)) * H * .03
+			local x, y, s = a.x, ground + a.s * .4 + hop, a.s
+			a.tex:ClearAllPoints()
+			a.tex:SetPoint("CENTER", fx, "BOTTOMLEFT", x, y)
+			a.tex:SetSize(s, s)                                -- no SetRotation, so a left-facing flip always holds
+		end
+	end
+	-- once the last animal is chopped the cleaver is done: it fades out instead of chopping the empty end
+	local alive = false
+	for _, a in ipairs(skin.animals) do if not a.dead then alive = true; break end end
+	if not alive then
+		skin.doneAt = skin.doneAt or clock
+		local fade = 1 - (clock - skin.doneAt) / .2
+		skin.cleaver:SetAlpha(math.max(0, fade))
+		if fade <= 0 then return end
+	end
+	-- the cleaver: raise slowly, chop fast, recoil; its blade lands on the ground at the cast edge
+	local P = H * 1.1
+	local L, cycle, deg = P * .76, .55, PI / 180
+	skin.chopT = (skin.chopT + dt) % cycle
+	local t, th = skin.chopT / cycle
+	if t < .62 then th = (100 - 92 * math.sin(t / .62 * PI / 2)) * deg
+	elseif t < .72 then th = (8 + 92 * ((t - .62) / .1) ^ 2) * deg
+	else th = (100 - 8 * math.sin((t - .72) / .28 * PI)) * deg end
+	local hx, hy = fillW + H * .12, ground + H * .62   -- the handle lands here; the blade hangs down to the ground
+	local px, py = hx - L * math.sin(100 * deg), hy - L * math.cos(100 * deg)
+	PlaceSprite(skin.cleaver, px + P * .45 * math.sin(th), py + P * .45 * math.cos(th), P, -th)
+	if casting and alive and t >= .72 and skin.last < .72 then
+		for _ = 1, 2 do Spawn(BLOOD, hx, ground + H * .1) end
+	end
+	skin.last = t
+end
+
+---------------------------------------------------------------------------
 -- Hooks called by Bar.lua
 ---------------------------------------------------------------------------
 function FX:Init(frame)
 	fx = frame
-	particlePool = Pool(function() return fx:CreateTexture(nil, "ARTWORK", nil, 7) end)
+	particlePool = Pool(function() return Smooth(fx:CreateTexture(nil, "ARTWORK", nil, 7)) end)
 	linePool = Pool(function() return fx:CreateLine(nil, "ARTWORK") end)
-	spritePool = Pool(function() return fx:CreateTexture(nil, "ARTWORK") end)
+	spritePool = Pool(function() return Smooth(fx:CreateTexture(nil, "ARTWORK")) end)
 end
 
 -- Pieces that live inside an element's content frame (clipped by the fill, masked when borderless).
 function FX:CreateContent(c)
 	local ccfg = c.cfg
-	if ccfg.frostCuts then
-		c.cutLo, c.cutHi = {}, {}
-		for i = 1, N_CUTS do
-			c.cutLo[i] = ns.Maskable(c, c:CreateTexture(nil, "ARTWORK", nil, 1))
-			c.cutLo[i]:SetAllPoints(c)
-			c.cutHi[i] = ns.Maskable(c, c:CreateTexture(nil, "ARTWORK", nil, 2))
-			c.cutHi[i]:SetAllPoints(c)
-			c.cutHi[i]:SetBlendMode("ADD")
-		end
-		c.traceLines = Pool(function()
-			local line = c:CreateLine(nil, "ARTWORK", nil, 5)
-			line:SetColorTexture(1, 1, 1, 1)
-			return line
-		end)
-		c.tips = {}
-		for i = 1, 4 do
-			local star = c:CreateTexture(nil, "OVERLAY", nil, 6)
-			star:SetTexture(MEDIA .. "p_star"); star:SetBlendMode("ADD")
-			star:SetVertexColor(.86, .95, 1)
-			star:Hide()
-			c.tips[i] = star
-		end
-		c.sweepTex = ns.Maskable(c, c:CreateTexture(nil, "ARTWORK", nil, 7))
+	if ccfg.freeze then   -- the freeze front: rime feathering in from the fill edge
+		c.front = ns.Maskable(c, Smooth(c:CreateTexture(nil, "ARTWORK", nil, 6)))
+		c.front:SetTexture(MEDIA .. "frost_front"); c.front:SetBlendMode("ADD")
+		c.front:Hide()
+	end
+	if ccfg.sweep then
+		c.sweepTex = ns.Maskable(c, Smooth(c:CreateTexture(nil, "ARTWORK", nil, 7)))
 		c.sweepTex:SetTexture(MEDIA .. "sweep"); c.sweepTex:SetBlendMode("ADD")
 		c.sweepTex:SetVertexColor(.86, .96, 1)
 		c.sweepTex:SetRotation(-.55)
 		c.sweepTex:Hide()
-		c.cutParams, c.traces, c.traceCuts = {}, {}, {}
 	end
 	if ccfg.glyphs then
-		c.arcanePool = Pool(function() return ns.Maskable(c, c:CreateTexture(nil, "ARTWORK")) end)
+		c.arcanePool = Pool(function() return ns.Maskable(c, Smooth(c:CreateTexture(nil, "ARTWORK"))) end)
 		c.circles, c.glyphs = {}, {}
 	end
 end
 
 function FX:LayoutContent(c, w, h)
 	W, H = w, h
-	if c.cfg.frostCuts and c == content and #c.cutParams > 0 then LayoutFrost() end
+	if c.sweepTex then c.sweepTex:SetSize(H * 1.0, H * 1.8) end
 end
 
 function FX:Layout(w, h) W, H = w, h end
@@ -546,7 +642,7 @@ local function ClearAll()
 	spritePool:ReleaseAll()
 	wipe(twinkles)
 	wipe(emitAcc)
-	vines = nil
+	vines, pond, mine, skin = nil, nil, nil, nil
 end
 
 function FX:Begin(c, w, h)
@@ -555,7 +651,10 @@ function FX:Begin(c, w, h)
 	if content and content.arcanePool then content.arcanePool:ReleaseAll() end
 	content, cfg = c, c.cfg
 	if cfg.vines then MakeVines() end
-	if cfg.frostCuts then BeginFrost() end
+	if cfg.pond then MakePond() end
+	if cfg.mine then MakeMine() end
+	if cfg.skin then MakeSkin() end
+	if c.sweepTex then c.sweepT, c.sweep = rand(.4, 1.5), nil; c.sweepTex:Hide() end
 	if cfg.glyphs then
 		c.arcanePool:ReleaseAll()
 		wipe(c.circles); wipe(c.glyphs)
@@ -572,7 +671,10 @@ function FX:Update(dt, t, fillW, casting)
 		if casting then GrowVines(fillW) end
 		UpdateVines(fillW)
 	end
-	if cfg.frostCuts then UpdateFrost(dt, fillW) end
+	if cfg.freeze or cfg.sweep then UpdateFrost(dt, fillW) end
+	if pond then UpdatePond(dt, fillW, casting) end
+	if mine then UpdateMine(dt, fillW, casting) end
+	if skin then UpdateSkin(dt, fillW, casting) end
 	if cfg.glyphs then UpdateArcane(dt, fillW, casting) end
 	if cfg.twinkles then UpdateTwinkles(dt, fillW, casting) end
 end

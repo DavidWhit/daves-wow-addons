@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Generates daves_castbar's art: tiling elemental bar layers, particles, spark and glow.
+  Generates daves_castbar's art: tiling elemental and profession bar layers, sprites, particles, spark and glow.
 
 .DESCRIPTION
   Everything is procedural (periodic noise, Voronoi cells, simple shapes), so the layers tile
@@ -126,88 +126,307 @@ public static class CastbarArt
 	// Bar layers are 512x64: 8 square cells across per cell down keeps noise round, not stretched.
 	const int W = 512, H = 64;
 
-	// ================================================================ FROST: diamond-cut ice, new every cast
-	// The facets are built live from layers. frost_ice is the plain ice (deep blue, frost feathers, lit
-	// top rim). Each frost_cutN pair holds one straight zigzag cut running edge to edge: a brighter tone on
-	// one side, a deeper one on the other, and a bevelled line on the cut. Stacked, every facet's
-	// tone is the sum of the sides it falls on, so neighbouring facets always differ. The addon gives
-	// each layer a random offset, stretch, mirror and weight per cast (a new ice bar every time), drifts
-	// the weights during the cast (the light moves), and traces two of the cuts.
-	static readonly double[][] CUTS = {
-		//          centre  amp    period(px) phase
-		new double[]{ 0.50,  0.50,  512,      0.00 },
-		new double[]{ 0.50,  0.50,  256,      0.25 },
-		new double[]{ 0.50,  0.50,  512.0/3,  0.10 },
-		new double[]{ 0.50, -0.50,  512,      0.37 },
-		new double[]{ 0.50,  0.07,  256,      0.10 },   // a shallow girdle through the middle
-	};
-	static double Tri(double x, double p, double ph) { return 1 - 2*Math.Abs(Frac(x/p + ph)*2 - 1); }
-	static double CutDist(int i, double x, double y)   // signed pixel distance, positive below the cut
+	// ================================================================ FROST: a liquid that freezes as the cast moves across
+	// Ahead of the cast (drawn on the track) a level band of water flows: frost_water, with bright
+	// streaks in frost_water_hi. Behind the fill edge it is frozen into a slab: frost_ice. The freeze
+	// front (frost_front) sits at the fill edge: feathery white rime, strongest at the edge itself.
+	// A level band of water, the same shape as the ice slab, with only a slight ripple on its surface.
+	static double RibbonCover(double u, double v, out double depth)
 	{
-		var c = CUTS[i];
-		double ly = (c[0] + c[1]*Tri(x, c[2], c[3])) * H;
-		double slope = 4*Math.Abs(c[1])*H / c[2];
-		return (y - ly) / Math.Sqrt(1 + slope*slope);
+		double top = 0.07 + 0.012*Math.Sin(2*Math.PI*(u*16)) + 0.01*Fbm(u, 0.5, 24, 1, 2, 301);
+		double bot = 0.95;
+		depth = Clamp((v - top) / (bot - top));
+		double spray = 0.03*Fbm(u, v, 48, 6, 2, 303);
+		return Smooth(top - 0.02 + spray, top + 0.03 + spray, v) * Smooth(bot + 0.03, bot - 0.02, v);
 	}
-
-	// Cut geometry for the addon (and the preview) to trace: [[x,y],...] per cut in texture pixels,
-	// from the first corner at or after x = 0 to that corner + W.
-	public static string FrostCutsJson()
+	public static Img FrostWater()
 	{
-		var parts = new List<string>();
-		foreach (var c in CUTS)
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
 		{
-			var xs = new List<double>();
-			for (int m = -4; m < 4 * W / (int)c[2] + 8; m++)
-			{
-				double x = (m * 0.5 - c[3]) * c[2];
-				if (x >= 0 && x < W) xs.Add(x);
-			}
-			xs.Sort(); xs.Add(xs[0] + W);
-			var v = new List<string>();
-			foreach (var x in xs)
-				v.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, "[{0:0.##},{1:0.##}]", x, (c[0] + c[1]*Tri(x, c[2], c[3])) * H));
-			parts.Add("[" + string.Join(",", v) + "]");
+			double u = (double)x/W, v = (double)y/H, d;
+			double cover = RibbonCover(u, v, out d);
+			double flow = Fbm(u, v, 6, 3, 4, 304);
+			double r = Lerp(.42, .06, d) + .10*flow, g = Lerp(.68, .28, d) + .12*flow, b = Lerp(.92, .58, d) + .10*flow;
+			double rim = Math.Exp(-d*d*120) * 0.45;                       // light along the top of the ribbon
+			img.Set(x, y, r + rim, g + rim, b + rim, cover * (0.72 + 0.18*(1 - d)));
 		}
-		return "[" + string.Join(",", parts) + "]";
+		return img;
 	}
-
-	public static Img FrostIce()
+	public static Img FrostWaterHi()   // ADD: bright flowing streaks and a few bubbles inside the ribbon
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (double)x/W, v = (double)y/H, d;
+			double cover = RibbonCover(u, v, out d);
+			// long thin streaks along the flow: noise stretched sideways, few cells across, many down
+			double streak = Math.Pow(Clamp(1 - Math.Abs(Fbm(u, v, 4, 6, 4, 305))), 18) * 0.55;
+			int bx = x / 6, by = y / 6;
+			double bdx = (x % 6) - 2.5, bdy = (y % 6) - 2.5;
+			double bubble = Hash(bx, by, 306) > 0.97 ? Math.Exp(-(bdx*bdx + bdy*bdy)/1.2) * 0.6 : 0;
+			double t = (streak + bubble) * cover;
+			img.Set(x, y, t*.80, t*.92, t, 1);
+		}
+		return img;
+	}
+	public static Img FrostIce()       // the frozen slab: pale, cloudy, cracked, frosted along the rims
 	{
 		var img = new Img(W, H);
 		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
 		{
 			double u = (double)x/W, v = (double)y/H;
-			double n = Fbm(u, v, 8, 1, 4, 221) * 0.10;
-			double shade = 0.50 + n - (v - 0.5)*0.22;
-			double fern = Math.Pow(Clamp(1 - Math.Abs(Fbm(u, v, 16, 2, 4, 204))), 10) * 0.13
-				+ Math.Pow(Clamp(1 - Math.Abs(Fbm(u, v, 48, 6, 3, 205))), 16) * 0.08;   // a second, finer frost
-			double grain = (Hash(x, y, 206) - 0.5) * 0.06 + (Hash(x, y, 207) > 0.993 ? 0.35 : 0);   // fine noise and glints
-			double rim = Math.Exp(-y/1.6) * 0.45 + Math.Exp(-(H-1-y)/1.6) * 0.25 - Math.Exp(-(H-1-y)/4.0) * 0.12;
-			double r = .05 + .30*shade, g = .20 + .44*shade, b = .42 + .50*shade, w = fern + rim + grain;
-			img.Set(x, y, r + w*.80, g + w*.92, b + w, 0.94);
+			double cloud = Fbm(u, v, 8, 1, 5, 311);
+			// a few long fractures (sharp ridges of stretched noise), not a cell network
+			double fracture = Math.Pow(Clamp(1 - Math.Abs(Fbm(u, v, 6, 2, 3, 312))), 30) * 0.45
+				+ Math.Pow(Clamp(1 - Math.Abs(Fbm(u, v, 12, 3, 3, 313))), 40) * 0.25;
+			double crack = fracture;
+			double streak = Math.Pow(Clamp(1 - Math.Abs(Fbm(u, v*0.3, 12, 1, 3, 314))), 10) * 0.18
+				+ Smooth(0.1, 0.7, Fbm(u, v, 16, 4, 4, 318)) * 0.22;                 // milky frozen-in cloud
+			double rimN = 0.06*Fbm(u, v, 32, 2, 3, 315);
+			double rim = Smooth(0.16 + rimN, 0.0, v)*0.55 + Smooth(0.84 - rimN, 1.0, v)*0.40;   // frosted top and bottom
+			double grain = (Hash(x, y, 316) - 0.5)*0.05 + (Hash(x, y, 317) > 0.994 ? 0.3 : 0);
+			double t = 0.52 + 0.16*cloud - (v - 0.5)*0.10;
+			double w = crack + streak + rim + grain;
+			img.Set(x, y, .40*t + .55*w + .22, .56*t + .58*w + .26, .70*t + .60*w + .28, 0.95);
 		}
 		return img;
 	}
-	// Each cut comes as two layers so the ice keeps its colour:
-	//   frost_cutN_hi (ADD): brightens the lit side, strongest along the bevel, plus the bright cut line
-	//   frost_cutN_lo (BLEND): a deep navy wash over the shadow side, darkest along the bevel; clear elsewhere
-	//   (alpha, not multiply, so the addon can fade it: WoW's MOD blend ignores alpha)
-	public static Img FrostCut(int i, bool hi)
+	public static Img FrostFront()     // 64x64: rime feathering in from the right edge (the freeze front)
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = x/63.0, v = y/63.0;
+			double fern = Math.Pow(Clamp(1 - Math.Abs(Fbm(u, v, 4, 4, 4, 321))), 6);
+			double reach = Smooth(0.0, 1.0, u + 0.25*Fbm(u, v, 2, 6, 3, 322));
+			img.Set(x, y, .86, .95, 1, Clamp(reach*reach*(0.35 + 0.65*fern)));
+		}
+		return img;
+	}
+
+	// ================================================================ FISHING: a pond with lily pads, fish and a bobber
+	public static Img FishWater()      // the pond: bright surface line near the top, deeper teal below
 	{
 		var img = new Img(W, H);
 		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
 		{
-			double d = CutDist(i, x, y), ad = Math.Abs(d);
-			bool lit = d < 0;                                                    // above the cut faces the light
-			double bevel = Math.Exp(-ad/2.0), line = Math.Exp(-ad*ad/0.25);
-			if (hi)
+			double u = (double)x/W, v = (double)y/H;
+			double surf = 0.13 + 0.015*Math.Sin(2*Math.PI*(u*8)) + 0.01*Fbm(u, 0.5, 16, 1, 2, 401);
+			double n = Fbm(u, v, 8, 1, 4, 402);
+			double depth = Clamp((v - surf) / (1 - surf));
+			double r = Lerp(.20, .04, depth) + .04*n, g = Lerp(.55, .22, depth) + .05*n, b = Lerp(.60, .30, depth) + .05*n;
+			double line = Math.Exp(-Math.Pow((v - surf)*H/1.3, 2)) * 0.55;    // the surface catching the light
+			double above = Smooth(surf + 0.01, surf - 0.03, v);                 // a sliver of sky reflection over it
+			r = Lerp(r, .55, above*0.6) + line; g = Lerp(g, .75, above*0.6) + line; b = Lerp(b, .78, above*0.6) + line;
+			double weed = Smooth(0.72, 1.0, v) * Smooth(0.2, 0.6, Fbm(u, v, 24, 2, 3, 403)) * 0.35;   // weed in the deep
+			img.Set(x, y, r - weed*.10, g - weed*.02, b - weed*.12, 0.92);
+		}
+		return img;
+	}
+	public static Img FishCaustic()    // ADD: sunlight network on the water, fading with depth
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (double)x/W, v = (double)y/H, f1, f2; int cell;
+			Voronoi(u + 0.02*Fbm(u, v, 8, 1, 2, 411), v, 32, 4, 412, out f1, out f2, out cell);
+			double t = Math.Exp(-Math.Pow((f2 - f1)*9, 2)) * 0.28 * (1 - 0.75*v) * Smooth(0.1, 0.18, v);
+			img.Set(x, y, t*.65, t*.95, t*.90, 1);
+		}
+		return img;
+	}
+	public static Img LilyPad()        // a pad seen from just above the water: flat ellipse with a notch and veins
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/30.0, dy = (y - 31.5)/12.0, r = Math.Sqrt(dx*dx + dy*dy), a = Math.Atan2(dy, dx);
+			double notch = Smooth(0.18, 0.08, Math.Abs(Math.Atan2(Math.Sin(a - 0.6), Math.Cos(a - 0.6)))) * Smooth(0.15, 0.3, r);
+			double pad = Smooth(1.0, 0.92, r) * (1 - notch);
+			double vein = Math.Pow(Math.Abs(Math.Cos(a*7)), 40) * 0.25 * Smooth(0.15, 0.4, r);
+			double shade = 0.75 + 0.25*(-dy*0.35 + 0.6) - vein - Smooth(0.75, 1.0, r)*0.25;
+			double n = 0.08*Noise(dx*3, dy*3, 64, 64, 421);
+			img.Set(x, y, (.22 + n)*shade, (.50 + n)*shade, (.18 + n)*shade, Clamp(pad));
+		}
+		return img;
+	}
+	public static Img Fish()           // a small fish facing right, white (tinted per fish), dark eye
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0;
+			double bx = (dx - 0.08)/0.52, by = dy/(0.20*(1 - 0.35*Math.Max(0, -bx)));   // body narrows toward the tail
+			double body = Smooth(1.0, 0.85, Math.Sqrt(bx*bx + by*by));
+			double tx = (-dx - 0.42)/0.30;                                                   // forked tail
+			double tail = (tx > 0 && tx < 1) ? Smooth(0.08, 0.0, Math.Abs(Math.Abs(dy) - tx*0.26) - 0.06*(1 - tx)) : 0;
+			double fin = Smooth(0.03, 0.0, Math.Abs(dy + 0.20 + 0.35*(dx - 0.05)) - 0.02) * Smooth(-0.15, -0.05, dx) * Smooth(0.25, 0.1, dx);
+			double a = Clamp(Math.Max(body, Math.Max(tail*0.9, fin*0.8)));
+			double shade = 0.65 + 0.35*Clamp(-dy*2.2 + 0.4);                               // lit from above
+			double eye = Math.Exp(-((dx - 0.42)*(dx - 0.42) + (dy + 0.03)*(dy + 0.03))*1800);
+			shade = Lerp(shade, 0.08, eye);
+			img.Set(x, y, shade, shade, shade, a);
+		}
+		return img;
+	}
+	public static Img Bobber()         // red cap, white base, a little stick on top; the line hangs from it
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/32.0, dy = (y - 35.5)/32.0, r = Math.Sqrt(dx*dx + dy*dy);
+			double ball = Smooth(0.36, 0.32, r);
+			double stick = Smooth(0.05, 0.03, Math.Abs(dx)) * Smooth(-0.75, -0.7, dy) * Smooth(-0.25, -0.32, dy);
+			bool top = dy < 0.02;
+			double band = Math.Exp(-Math.Pow((dy - 0.02)*40, 2));
+			double lit = 0.75 + 0.25*Clamp(-(dx + dy)*1.6) + 0.5*Math.Exp(-((dx + 0.12)*(dx + 0.12) + (dy + 0.14)*(dy + 0.14))*90);
+			double cr = top ? .85 : .95, cg = top ? .10 : .93, cb = top ? .10 : .90;
+			cr = Lerp(cr, .15, band); cg = Lerp(cg, .10, band); cb = Lerp(cb, .10, band);
+			if (stick > ball) { cr = .25; cg = .18; cb = .12; lit = 1; }
+			img.Set(x, y, cr*lit, cg*lit, cb*lit, Clamp(Math.Max(ball, stick)));
+		}
+		return img;
+	}
+	public static Img Ripple()         // a thin ring; the addon squashes it flat and grows it
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0, r = Math.Sqrt(dx*dx + dy*dy);
+			img.Set(x, y, 1, 1, 1, Math.Exp(-Math.Pow((r - 0.85)/0.06, 2)));
+		}
+		return img;
+	}
+
+	// ================================================================ MINING: rails along a rock wall, a cart, a pickaxe
+	public static Img MineRails()
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (double)x/W, v = (double)y/H, f1, f2; int cell;
+			Voronoi(u, v, 24, 3, 501, out f1, out f2, out cell);            // stones in the wall
+			double stone = 0.55 + 0.25*Hash(cell, 1, 502) + 0.15*Fbm(u, v, 32, 4, 3, 503);
+			double seam = Smooth(0.0, 0.12, f2 - f1);
+			double r = .20*stone*seam, g = .17*stone*seam, b = .15*stone*seam;
+			if (Hash(x/2, y/2, 504) > 0.996)                                   // ore glints in the wall
 			{
-				double k = lit ? 1 + 2.2*bevel : 0;
-				img.Set(x, y, .09*k + line*.70, .15*k + line*.85, .21*k + line*1.0, 1);
+				int k = (int)(Hash(x/2, y/2, 505)*4);
+				double[][] gem = { new[]{.4,.7,1.0}, new[]{.75,.5,1.0}, new[]{.4,1.0,.6}, new[]{1.0,.8,.35} };
+				r = gem[k][0]; g = gem[k][1]; b = gem[k][2];
 			}
-			else if (lit || line > 0.3) img.Set(x, y, 0, 0, 0, 0);
-			else img.Set(x, y, .02, .07, .22, 0.40 + 0.25*bevel);
+			// track bed: gravel, sleepers every 32 px, a far rail and the near rail
+			double bed = Smooth(0.66, 0.70, v);
+			double gravel = 0.12 + 0.08*Hash(x/2, y/2, 506);
+			r = Lerp(r, gravel*1.1, bed); g = Lerp(g, gravel, bed); b = Lerp(b, gravel*0.9, bed);
+			double sx = Mod(x, 32);
+			if (v > 0.73 && v < 0.92 && sx > 4 && sx < 22)
+			{
+				double grain = 0.8 + 0.2*Noise(x/3.0, y*1.5, 512, 64, 507);
+				double sh = 0.7 + 0.3*Clamp((0.92 - v)/0.19);
+				r = .42*grain*sh; g = .27*grain*sh; b = .14*grain*sh;
+			}
+			double farRail = Smooth(0.03, 0.0, Math.Abs(v - 0.715)), nearRail = Smooth(0.045, 0.0, Math.Abs(v - 0.80));
+			double rail = Math.Max(farRail*0.75, nearRail);
+			double steel = 0.45 + 0.45*Clamp(1 - (v - 0.775)/0.05);
+			r = Lerp(r, .55*steel, rail); g = Lerp(g, .50*steel, rail); b = Lerp(b, .48*steel, rail);
+			img.Set(x, y, r, g, b, 1);
+		}
+		return img;
+	}
+	public static Img MineFlow()       // ADD: warm, flickering lantern light on the wall
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (double)x/W, v = (double)y/H;
+			double t = Smooth(-0.1, 0.6, Fbm(u, v, 8, 1, 3, 511)) * 0.35 * (1 - 0.5*v);
+			img.Set(x, y, t, t*.62, t*.25, 1);
+		}
+		return img;
+	}
+	public static Img Cart()           // 64x64: wooden cart with iron bands and a heap of ore; wheels are separate
+	{
+		var img = new Img(64, 64);
+		double[][] gem = { new[]{.35,.65,1.0}, new[]{.70,.45,1.0}, new[]{.35,.95,.55}, new[]{1.0,.80,.30}, new[]{.62,.60,.58} };
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = x/63.0, v = y/63.0;
+			double inset = (v - 0.38)*0.10;                                     // the box narrows toward the bottom
+			bool box = v > 0.38 && v < 0.80 && u > 0.06 + inset && u < 0.94 - inset;
+			double r = 0, g = 0, b = 0, a = 0;
+			// ore heap: overlapping chunks above the rim
+			for (int k = 0; k < 9; k++)
+			{
+				// crystals: tall diamonds leaning a little, lit on the left face
+				double cx = 0.16 + 0.085*k, cy = 0.33 - 0.10*Hash(k, 0, 521), rad = 0.07 + 0.04*Hash(k, 1, 521);
+				double lean = (Hash(k, 3, 521) - 0.5)*0.6;
+				double qx = (u - cx) - lean*(v - cy), qy = v - cy;
+				double dd = Math.Abs(qx)*1.6 + Math.Abs(qy);
+				if (dd < rad*1.6)
+				{
+					var c = gem[(int)(Hash(k, 2, 521)*gem.Length)];
+					double lit = (qx < 0 ? 1.1 : 0.7) + (dd < rad*0.4 ? 0.3 : 0);
+					r = c[0]*lit; g = c[1]*lit; b = c[2]*lit; a = 1;
+				}
+			}
+			if (box)
+			{
+				double plank = 0.85 + 0.15*Math.Sin(v*64*1.2) + 0.08*Noise(u*20, v*4, 64, 64, 522);
+				r = .48*plank; g = .30*plank; b = .16*plank; a = 1;
+				bool band = Math.Abs(v - 0.40) < 0.035 || Math.Abs(v - 0.78) < 0.03 || Math.Abs(u - 0.08 - inset) < 0.04 || Math.Abs(u - 0.92 + inset) < 0.04;
+				if (band) { r = .30; g = .30; b = .32; }
+				if (band && Hash(x/4, y/4, 523) > 0.8) { r = .55; g = .52; b = .48; }    // rivets
+			}
+			// lantern on the front face
+			double ld = Math.Sqrt((u - 0.80)*(u - 0.80) + (v - 0.60)*(v - 0.60));
+			if (ld < 0.07) { r = 1.0; g = .80; b = .40; a = 1; }
+			img.Set(x, y, r, g, b, a);
+		}
+		return img;
+	}
+	public static Img Wheel()          // iron wheel with six spokes; the addon turns it as the cart rolls
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0, r = Math.Sqrt(dx*dx + dy*dy), an = Math.Atan2(dy, dx);
+			double rim = Smooth(0.95, 0.88, r) * Smooth(0.66, 0.74, r);
+			double spoke = Smooth(0.10, 0.06, Math.Abs(Math.Sin(an*3)) * r) * Smooth(0.75, 0.6, r);
+			double hub = Smooth(0.22, 0.16, r);
+			double t = Math.Max(rim, Math.Max(spoke, hub));
+			double sh = 0.35 + 0.25*Clamp(-dy) + (hub > 0.5 ? 0.2 : 0);
+			img.Set(x, y, sh, sh*.96, sh*.92, Clamp(t));
+		}
+		return img;
+	}
+	public static Img Pickaxe()        // handle straight down from the centre; the head across the top
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0;
+			double handle = Smooth(0.07, 0.045, Math.Abs(dx)) * Smooth(0.95, 0.9, dy) * Smooth(-0.62, -0.55, dy);
+			double hy = -0.62 + 0.30*dx*dx;                                     // the head curves down at both picks
+			double headW = 0.09*(1 - Math.Abs(dx)/0.95);
+			double head = Smooth(headW + 0.02, headW, Math.Abs(dy - hy)) * Smooth(0.95, 0.85, Math.Abs(dx));
+			double r, g, b;
+			if (head > 0.01) { double s = 0.55 + 0.4*Clamp(-(dy - hy)/0.1 + 0.5); r = .62*s; g = .64*s; b = .68*s; }
+			else { double s = 0.8 + 0.2*Noise(dy*12, dx*4, 64, 64, 541); r = .50*s; g = .32*s; b = .17*s; }
+			img.Set(x, y, r, g, b, Clamp(Math.Max(handle, head)));
+		}
+		return img;
+	}
+	public static Img Chip()           // an angular rock chip, white (tinted)
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0, an = Math.Atan2(dy, dx);
+			double r = Math.Abs(dx)*0.9 + Math.Abs(dy)*1.2 + 0.15*Math.Sin(an*5 + 1);
+			double lit = 0.6 + 0.4*Clamp(-dy - dx*0.5 + 0.3);
+			img.Set(x, y, lit, lit, lit, Smooth(0.75, 0.68, r));
 		}
 		return img;
 	}
@@ -545,6 +764,136 @@ public static class CastbarArt
 		return img;
 	}
 
+	// ================================================================ SKINNING: a pasture of cows and pigs, a cleaver, bones
+	public static Img SkinBase()       // dusk pasture: grass along the bottom, dark field behind
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (double)x/W, v = (double)y/H;
+			double n = Fbm(u, v, 8, 1, 4, 601);
+			double r = .10 + .04*n + .05*(1 - v), g = .13 + .05*n + .04*(1 - v), b = .12 + .04*n + .06*(1 - v);
+			double ground = 0.80 + 0.03*Fbm(u, 0.5, 16, 1, 2, 602);
+			double blade = Smooth(0.0, 1.0, (v - ground)*12 + 0.35*Math.Abs(Math.Sin(x*1.7 + 3*Hash(x, 0, 603))));
+			double gr = Hash(x, y/2, 604);
+			r = Lerp(r, .16 + .08*gr, blade); g = Lerp(g, .34 + .14*gr, blade); b = Lerp(b, .12 + .05*gr, blade);
+			img.Set(x, y, r, g, b, 1);
+		}
+		return img;
+	}
+	public static Img SkinBlood()      // BLEND: blood stains soaking into the grass along the bottom
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (double)x/W, v = (double)y/H;
+			double stain = Smooth(-0.10, 0.25, Fbm(u, v, 12, 2, 4, 611)) * Smooth(0.55, 0.90, v);
+			double drip = Hash(x/2, y/2, 612) > 0.992 && v > 0.55 ? 0.9 : 0;
+			double a = Clamp(Math.Max(stain*0.85, drip));
+			double dark = 0.6 + 0.4*Fbm(u, v, 24, 3, 2, 613);
+			img.Set(x, y, .42*dark, .02, .03, a);
+		}
+		return img;
+	}
+	static double Ell(double x, double y, double cx, double cy, double a, double b) { double dx = (x - cx)/a, dy = (y - cy)/b; return Math.Sqrt(dx*dx + dy*dy); }
+	static double Bar(double x, double y, double x0, double y0, double x1, double y1, double w)   // distance to a thick segment, 0 inside
+	{
+		double px = x - x0, py = y - y0, vx = x1 - x0, vy = y1 - y0;
+		double t = Clamp((px*vx + py*vy) / (vx*vx + vy*vy));
+		double dx = px - vx*t, dy = py - vy*t;
+		return Math.Sqrt(dx*dx + dy*dy) - w;
+	}
+	public static Img Cow()            // a little cow facing right, feet on the bottom
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = x/63.0, v = y/63.0, r = 0, g = 0, b = 0, a = 0;
+			bool legs = false;
+			foreach (double lx in new[] { .26, .36, .56, .66 }) if (Bar(u, v, lx, .60, lx, .88, .035) < 0) legs = true;
+			double body = Ell(u, v, .46, .52, .30, .16), head = Ell(u, v, .79, .44, .11, .10), snout = Ell(u, v, .87, .50, .06, .05);
+			double horn = Math.Min(Bar(u, v, .74, .36, .70, .29, .015), Bar(u, v, .84, .36, .88, .29, .015));
+			double tail = Bar(u, v, .17, .48, .11, .66, .012);
+			if (legs || tail < 0) { r = g = b = .85; a = 1; if (v > .84 && legs) { r = g = b = .15; } }
+			if (body < 1 || head < 1)
+			{
+				double patch = Fbm(u, v, 3, 3, 2, 621) > 0.12 && head > 1 ? 1 : 0;
+				double sh = 0.75 + 0.25*Clamp(-(v - .45)*4);
+				r = g = b = patch > 0 ? .12*sh : .92*sh; a = 1;
+			}
+			if (snout < 1) { r = .95; g = .65; b = .65; a = 1; }
+			if (horn < 0) { r = .9; g = .85; b = .7; a = 1; }
+			if (Ell(u, v, .81, .41, .018, .018) < 1) { r = g = b = .05; }   // eye
+			img.Set(x, y, r, g, b, a);
+		}
+		return img;
+	}
+	public static Img Pig()            // a little pink pig facing right, curly tail
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = x/63.0, v = y/63.0, r = 0, g = 0, b = 0, a = 0;
+			bool legs = false;
+			foreach (double lx in new[] { .28, .38, .56, .66 }) if (Bar(u, v, lx, .66, lx, .88, .04) < 0) legs = true;
+			double body = Ell(u, v, .46, .56, .30, .18), head = Ell(u, v, .77, .50, .12, .11), snout = Ell(u, v, .89, .53, .045, .055);
+			double ear = Bar(u, v, .74, .40, .70, .32, .03);
+			double tr = Math.Sqrt((u - .14)*(u - .14) + (v - .48)*(v - .48));
+			double tail = Math.Abs(tr - .045) - .012;
+			double sh = 0.75 + 0.25*Clamp(-(v - .5)*4);
+			if (legs) { r = .90*sh; g = .58*sh; b = .62*sh; a = 1; if (v > .85) { r = .45; g = .25; b = .25; } }
+			if (tail < 0 && u < .16) { r = .95; g = .62; b = .66; a = 1; }
+			if (body < 1 || head < 1 || ear < 0) { r = .98*sh; g = .66*sh; b = .70*sh; a = 1; }
+			if (snout < 1) { r = .90; g = .48; b = .55; a = 1; if (Ell(u, v, .885, .515, .01, .016) < 1 || Ell(u, v, .9, .55, .01, .016) < 1) { r = .4; g = .15; b = .2; } }
+			if (Ell(u, v, .79, .46, .016, .016) < 1) { r = g = b = .05; }   // eye
+			img.Set(x, y, r, g, b, a);
+		}
+		return img;
+	}
+	public static Img Bones()          // a skull and crossed bones on a blood stain
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = x/63.0, v = y/63.0, r = 0, g = 0, b = 0, a = 0;
+			double pool = Ell(u, v, .50, .87, .40, .08) + 0.15*Noise(u*6, v*6, 64, 64, 631);
+			if (pool < 1) { r = .45; g = .03; b = .04; a = .9; }
+			double bone1 = Bar(u, v, .22, .82, .74, .64, .035), bone2 = Bar(u, v, .24, .62, .76, .80, .035);
+			double knob = Math.Min(Math.Min(Ell(u, v, .21, .80, .05, .05), Ell(u, v, .75, .62, .05, .05)), Math.Min(Ell(u, v, .23, .60, .05, .05), Ell(u, v, .77, .82, .05, .05)));
+			double skull = Ell(u, v, .50, .55, .16, .14), jaw = Ell(u, v, .50, .69, .09, .06);
+			if (bone1 < 0 || bone2 < 0 || knob < 1) { r = .86; g = .82; b = .72; a = 1; }
+			if (skull < 1 || jaw < 1)
+			{
+				double sh = 0.7 + 0.3*Clamp(-(v - .5)*5 - (u - .5)*2);
+				r = .93*sh; g = .90*sh; b = .80*sh; a = 1;
+				if (Ell(u, v, .44, .55, .04, .045) < 1 || Ell(u, v, .56, .55, .04, .045) < 1) { r = g = b = .1; }   // eye sockets
+				if (Ell(u, v, .50, .63, .015, .02) < 1) { r = g = b = .15; }
+			}
+			img.Set(x, y, r, g, b, a);
+		}
+		return img;
+	}
+	public static Img Cleaver()        // handle straight down from the centre; the blade off the top, edge on its right
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0;
+			double handle = Smooth(0.07, 0.05, Math.Abs(dx)) * Smooth(0.95, 0.9, dy) * Smooth(-0.40, -0.36, dy);
+			bool blade = dx > -0.07 && dx < 0.58 && dy > -0.95 && dy < -0.36;
+			double r = 0, g = 0, bl = 0, a = 0;
+			if (handle > 0.01) { double s = 0.8 + 0.2*Noise(dy*12, dx*4, 64, 64, 641); r = .30*s; g = .17*s; bl = .09*s; a = handle; }
+			if (blade)
+			{
+				double s = 0.55 + 0.35*Clamp((dx + 0.07)/0.65) + 0.25*Math.Exp(-Math.Pow((dx - 0.55)*30, 2));   // bright cutting edge
+				r = .70*s; g = .72*s; bl = .76*s; a = 1;
+				if (Ell(dx, dy, .05, -.80, .05, .05) < 1) { r = .15; g = .15; bl = .17; }                       // the hanging hole
+			}
+			img.Set(x, y, r, g, bl, a);
+		}
+		return img;
+	}
+
 	// ================================================================ live-drawn pieces (vines, flowers, twinkles)
 	public static Img Vine()        // bark strip, tiles along its length; the addon draws it as line segments
 	{
@@ -773,11 +1122,18 @@ New-Item -ItemType Directory -Force $Out | Out-Null
 $Out = (Resolve-Path $Out).Path
 $jobs = [ordered]@{
 	'frost_ice'  = { [CastbarArt]::FrostIce() }
-	'frost_cut0_hi' = { [CastbarArt]::FrostCut(0, $true) };  'frost_cut0_lo' = { [CastbarArt]::FrostCut(0, $false) }
-	'frost_cut1_hi' = { [CastbarArt]::FrostCut(1, $true) };  'frost_cut1_lo' = { [CastbarArt]::FrostCut(1, $false) }
-	'frost_cut2_hi' = { [CastbarArt]::FrostCut(2, $true) };  'frost_cut2_lo' = { [CastbarArt]::FrostCut(2, $false) }
-	'frost_cut3_hi' = { [CastbarArt]::FrostCut(3, $true) };  'frost_cut3_lo' = { [CastbarArt]::FrostCut(3, $false) }
-	'frost_cut4_hi' = { [CastbarArt]::FrostCut(4, $true) };  'frost_cut4_lo' = { [CastbarArt]::FrostCut(4, $false) }
+	'frost_water' = { [CastbarArt]::FrostWater() };  'frost_water_hi' = { [CastbarArt]::FrostWaterHi() }
+	'frost_front' = { [CastbarArt]::FrostFront() }
+	'fish_water' = { [CastbarArt]::FishWater() };   'fish_caustic' = { [CastbarArt]::FishCaustic() }
+	'mine_rails' = { [CastbarArt]::MineRails() };   'mine_flow'   = { [CastbarArt]::MineFlow() }
+	'p_lily'     = { [CastbarArt]::LilyPad() };     'p_fish'      = { [CastbarArt]::Fish() }
+	'p_bobber'   = { [CastbarArt]::Bobber() };      'p_ripple'    = { [CastbarArt]::Ripple() }
+	'p_cart'     = { [CastbarArt]::Cart() };        'p_wheel'     = { [CastbarArt]::Wheel() }
+	'p_pickaxe'  = { [CastbarArt]::Pickaxe() }
+	'skin_base'  = { [CastbarArt]::SkinBase() };    'skin_blood'  = { [CastbarArt]::SkinBlood() }
+	'p_cow'      = { [CastbarArt]::Cow() };         'p_pig'       = { [CastbarArt]::Pig() }
+	'p_bones'    = { [CastbarArt]::Bones() };       'p_cleaver'   = { [CastbarArt]::Cleaver() }
+	'p_chip'     = { [CastbarArt]::Chip() };        'p_flower'    = { [CastbarArt]::Flower() }
 	'fire_base'  = { [CastbarArt]::FireBase() };    'fire_flow'   = { [CastbarArt]::FireFlow() }
 	'shadow_base'= { [CastbarArt]::ShadowBase() };  'shadow_flow' = { [CastbarArt]::ShadowFlow() }
 	'nature_base'= { [CastbarArt]::NatureBase() };  'nature_flow' = { [CastbarArt]::NatureFlow() }
@@ -805,17 +1161,6 @@ foreach ($name in $jobs.Keys) {
 }
 Write-Host "Wrote $($jobs.Count) textures to $Out"
 
-# The frost cut geometry, so the addon traces exactly the lines baked into the frost_cut textures.
-$lua = @(
-	'-- daves_castbar / FrostCuts.lua',
-	'-- GENERATED by tools/Make-CastbarMedia.ps1 - do not edit. The frost cut lines baked into',
-	'-- Media/frost_cutN_*.tga, as { {x, y}, ... } per cut in texture pixels (512 x 64, y down),',
-	'-- from the first corner at or after x = 0 to that corner + 512.',
-	'',
-	'local _, ns = ...',
-	('ns.FROST_CUTS = ' + ([CastbarArt]::FrostCutsJson() -replace '\[', '{' -replace '\]', '}'))
-) -join "`n"
-[IO.File]::WriteAllText((Join-Path (Split-Path $Out) 'FrostCuts.lua'), $lua + "`n", (New-Object Text.UTF8Encoding $false))
 if ($Preview) {
 	[CastbarArt]::Preview($Out, $Preview)
 	Write-Host "Preview: $Preview"

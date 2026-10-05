@@ -1,12 +1,13 @@
 -- daves_castbar / Elements.lua
--- The six looks, and which one a spell gets.
+-- The looks (six elements and four gathering professions), and which one a spell gets.
 --
 -- WoW has no API that returns a spell's school (C_Spell.GetSpellInfo has none, and the combat
 -- log is closed to addons on Forever), so the element comes from, in order:
 --   1. your own choice for that spell (/castbar set <element>)
---   2. the spell's name: known names first, then words in it ("Frost", "Flame", "Shadow", ...)
---   3. your class and specialization
---   4. the fallback setting (professions, hearthstone, mounts)
+--   2. the gathering spells by name: Fishing, Mining, Herb Gathering, Skinning
+--   3. the spell's name: known names first, then words in it ("Frost", "Flame", "Shadow", ...)
+--   4. your class and specialization
+--   5. the fallback setting (professions, hearthstone, mounts)
 
 local _, ns = ...
 
@@ -15,23 +16,27 @@ local _, ns = ...
 -- speeds are pixels per second on a 28-pixel bar (scaled with the height), y up.
 local function C(r, g, b) return { r / 255, g / 255, b / 255 } end
 
-ns.ELEMENT_ORDER = { "frost", "fire", "shadow", "nature", "arcane", "holy" }
+ns.ELEMENT_ORDER = { "frost", "fire", "shadow", "nature", "arcane", "holy", "fishing", "herbalism", "mining", "skinning" }
 
 ns.ELEMENTS = {
 	frost = {
-		label = "Frost", border = C(190, 225, 255), glow = C(110, 180, 255), spark = C(200, 235, 255), veil = C(140, 200, 255),
+		-- a band of water flows ahead of the cast (the track) and freezes into ice behind the fill edge
+		label = "Frost", border = C(190, 225, 255), glow = C(110, 180, 255), spark = C(225, 245, 255), veil = C(140, 200, 255),
 		layers = { { tex = "frost_ice" } },
-		frostCuts = true, sweep = true,     -- facets built from cut layers, two of them traced
+		track = { tex = "frost_water", su = .05, a = .95, hi = "frost_water_hi", su2 = .09 },
+		freeze = true, sweep = true,        -- the freeze front at the fill edge; a glint sweeps across the ice
 		emit = {
-			{ tex = "p_flake", rate = 3, colors = { C(210, 235, 255) }, size = { .3, .5 }, life = { 1.2, 2.2 }, vx = { -30, -8 }, vy = { -10, 6 }, spin = { -1.2, 1.2 }, from = "edge", add = true },
-			{ tex = "p_star", rate = 9, colors = { C(225, 245, 255) }, size = { .15, .32 }, life = { .3, .7 }, twinkle = true, add = true },
+			{ tex = "p_flake", rate = 5, colors = { C(220, 240, 255) }, size = { .25, .45 }, life = { .8, 1.6 }, vx = { -24, -6 }, vy = { -8, 8 }, spin = { -1.5, 1.5 }, from = "edge", add = true },
+			{ tex = "p_star", rate = 7, colors = { C(225, 245, 255) }, size = { .15, .3 }, life = { .3, .7 }, twinkle = true, add = true },
 		},
 	},
 	fire = {
 		label = "Fire", border = C(220, 100, 30), glow = C(255, 110, 20), spark = C(255, 210, 140), veil = C(255, 120, 30),
+		-- the flame tongues scroll upward (sv > 0); embers rise from the bottom and carry on off the top
 		layers = { { tex = "fire_base", su = .02 }, { tex = "fire_flow", su = .025, sv = .55, a = { .5, .95 }, add = true, flicker = true } },
 		emit = {
 			{ tex = "p_ember", rate = 24, colors = { C(255, 170, 60), C(255, 120, 30), C(255, 220, 120) }, size = { .12, .26 }, life = { .5, 1.2 }, vx = { -8, 8 }, vy = { 15, 45 }, from = "bottom", swirl = 20, add = true },
+			{ tex = "p_ember", rate = 16, colors = { C(255, 190, 80), C(255, 140, 40) }, size = { .08, .18 }, life = { .8, 1.6 }, vx = { -10, 10 }, vy = { 25, 55 }, from = "top", swirl = 25, add = true },
 		},
 	},
 	shadow = {
@@ -66,6 +71,53 @@ ns.ELEMENTS = {
 			{ tex = "p_soft", rate = 12, colors = { C(255, 225, 150), C(255, 245, 210) }, size = { .08, .18 }, life = { 1, 2 }, vx = { -5, 5 }, vy = { 6, 18 }, add = true },
 		},
 	},
+
+	-- Gathering professions
+	fishing = {
+		-- a pond the length of the bar: lily pads on top, fish below, the bobber riding the cast edge
+		label = "Fishing", border = C(70, 170, 190), glow = C(80, 190, 220), spark = C(210, 245, 255), veil = C(90, 190, 210),
+		channel = true,     -- Fishing is a channel: test casts and Edit Mode previews drain like the real one
+		layers = { { tex = "fish_water", su = .004 }, { tex = "fish_caustic", su = .012, a = { .3, .6 }, add = true } },
+		track = { tex = "fish_water", su = .004, a = .6 },
+		pond = true,
+		emit = {
+			{ tex = "p_soft", rate = 3, colors = { C(220, 245, 255) }, size = { .06, .12 }, life = { 1, 1.8 }, vx = { -2, 2 }, vy = { 5, 12 }, from = "bottom", alpha = .7, add = true },
+		},
+	},
+	herbalism = {
+		-- the nature vines, with herbs and flowers blooming along them
+		label = "Herbalism", border = C(110, 170, 60), glow = C(130, 210, 80), spark = C(230, 255, 180), veil = C(140, 210, 90),
+		layers = { { tex = "nature_base", su = .004 }, { tex = "nature_flow", su = .02, a = { .35, .8 }, add = true } },
+		vines = true, flowers = true,
+		emit = {
+			{ tex = "p_soft", rate = 8, colors = { C(255, 230, 120), C(230, 255, 160) }, size = { .06, .13 }, life = { 1.2, 2.2 }, vx = { -5, 5 }, vy = { 3, 10 }, add = true },
+		},
+	},
+	mining = {
+		-- rails along a rock wall: the gem cart rolls to the cast edge while a pickaxe strikes the wall at the end
+		label = "Mining", border = C(190, 140, 80), glow = C(255, 170, 80), spark = C(255, 220, 150), veil = C(200, 140, 70),
+		layers = { { tex = "mine_rails" }, { tex = "mine_flow", su = .01, a = { .4, .9 }, add = true, flicker = true } },
+		track = { tex = "mine_rails", a = .35 },
+		mine = true,
+		emit = {
+			{ tex = "p_soft", rate = 4, colors = { C(150, 130, 110) }, size = { .25, .5 }, life = { 1.2, 2 }, vx = { -4, 4 }, vy = { 1, 6 }, alpha = .35 },
+		},
+	},
+	skinning = {
+		-- a pasture of cows and pigs: the cleaver chops at the cast edge, and each animal it reaches
+		-- becomes a bone pile on a blood stain
+		label = "Skinning", border = C(150, 40, 40), glow = C(200, 50, 40), spark = C(255, 190, 170), veil = C(150, 60, 50),
+		layers = { { tex = "skin_base" }, { tex = "skin_blood" } },
+		track = { tex = "skin_base", a = .55 },
+		skin = true,
+		emit = {},
+	},
+}
+
+-- Gathering spells (lowercase names), checked before anything else that guesses.
+local GATHERING = {
+	["fishing"] = "fishing", ["mining"] = "mining", ["herb gathering"] = "herbalism", ["herbalism"] = "herbalism",
+	["skinning"] = "skinning",
 }
 
 ---------------------------------------------------------------------------
@@ -135,6 +187,7 @@ end
 function ns:ResolveElement(spellID, name, isTradeskill)
 	local own = spellID and not issecretvalue(spellID) and ns.db.spellElements[spellID]
 	if own and ns.ELEMENTS[own] then return own end
+	if type(name) == "string" and not issecretvalue(name) and GATHERING[name:lower()] then return GATHERING[name:lower()] end
 	if isTradeskill then return ns.db.fallback end
 	if type(name) == "string" and not issecretvalue(name) then
 		local lower = name:lower()
