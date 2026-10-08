@@ -19,7 +19,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scrip
 ```
 
 If the index is missing or older than a patch, rebuild it (about one minute): `scripts/Update-WowApiIndex.ps1 -Branch forever`.
-For behaviour details, read Blizzard's own code in the `forever` branch of https://github.com/Gethe/wow-ui-source, and the API pages on https://warcraft.wiki.gg. See [sources.md](sources.md) for what each source is good for.
+For behaviour details, read Blizzard's own code. A local copy of the `forever` branch lives in the plugin at `data/ui-source/forever/Interface/` (every .lua, .xml and .toc). Look a name up in `data/ui-source/forever/INDEX.tsv` first (`name<TAB>kind<TAB>path:line`; kinds: function, method, template, frame), then read that file at that line:
+
+```powershell
+Select-String -Path "C:/Users/David/Documents/daves-wow-addons/wow-addon-kit/plugins/wow-forever-addons/data/ui-source/forever/INDEX.tsv" -Pattern "^ContainerFrameItemButton_OnClick`t"
+```
+
+On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Vanilla`/`TBC`/`Wrath`/`Cata`/`Mists` copies don't (the addon's TOC decides). If the folder is missing or older than the installed build (`SOURCE.txt` has the commit and date), run `scripts/Update-WowUiSource.ps1` (about a minute). Also see the API pages on https://warcraft.wiki.gg. See [sources.md](sources.md) for what each source is good for.
 
 ## Facts (verified 2026-10-03)
 

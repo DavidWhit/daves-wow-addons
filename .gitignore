@@ -6,3 +6,6 @@
 Thumbs.db
 .DS_Store
 desktop.ini
+
+# Local copy of Blizzard UI source (rebuild with Update-WowUiSource.ps1)
+wow-addon-kit/plugins/wow-forever-addons/data/ui-source/

@@ -7,7 +7,7 @@
       "name": "wow-forever-addons",
       "source": "./plugins/wow-forever-addons",
       "description": "Create, set up, test and release WoW: Forever addons.",
-      "version": "1.2.0",
+      "version": "1.3.0",
       "category": "development",
       "tags": ["wow", "addons", "lua"]
     }

@@ -34,7 +34,7 @@ The Forever beta installs as `_classic_beta_`. The launch folder name isn't conf
 - **API index** for Forever (`Update-WowApiIndex.ps1 -Branch forever`), built from Blizzard's UI source (Gethe/wow-ui-source). Skipped if it is less than 7 days old.
 - Prints the optional VS Code extension command: `code --install-extension ketho.wow-api`.
 
-`refresh-api`: after a game patch, run `Update-WowApiIndex.ps1 -Branch forever` to rebuild the index. Other branches: `live` (Retail), `classic_era`, `classic`, `classic_anniversary`, `classic_titan`.
+`refresh-api`: after a game patch, run `Update-WowApiIndex.ps1 -Branch forever` to rebuild the index. Other branches: `live` (Retail), `classic_era`, `classic`, `classic_anniversary`, `classic_titan`. Also run `Update-WowUiSource.ps1` to refresh the local Blizzard UI source and its `INDEX.tsv`.
 
 ## 3. Link every addon after cloning or pulling (`link-all`)
 

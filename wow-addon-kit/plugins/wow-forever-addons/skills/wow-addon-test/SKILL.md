@@ -1,12 +1,28 @@
 ---
 name: wow-addon-test
-description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck), an advisor-mode code review whose fixes wait for the user's approval, plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, or when asked to check, lint, verify or debug a WoW addon.
+description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck), an advisor-mode code review whose fixes wait for the user's approval, plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, when the game reports an error, "action blocked" or "only available to the Blizzard UI" (it reads the client's taint.log first), or when asked to check, lint, verify or debug a WoW addon.
 argument-hint: "[addon folder] [flavors]"
 ---
 
 # Test a WoW addon
 
 Arguments: `$ARGUMENTS` (addon folder and optional flavors, e.g. `C:\dev\CampTracker forever,retail`). Without a folder, use the addon you're working on, or ask.
+
+## 0. Bug reports: start from the game's own evidence
+
+When the user reports something going wrong in game ("action blocked", "only available to the Blizzard UI", an error, odd behaviour), read what the client recorded **before** reading addon code or forming a theory:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:/Users/David/Documents/daves-wow-addons/wow-addon-kit/plugins/wow-forever-addons/scripts/Get-WowTaintLog.ps1" -Addon <addon folder name>
+```
+
+Then work from the root cause outward:
+1. Take the `Execution tainted by <addon> while reading <X>` line. That's where taint entered Blizzard code, not the blocked call after it.
+2. Open each stack `Interface/...:line` in the local UI source (`data/ui-source/forever/`; look names up in its `INDEX.tsv`). Follow the branch the code actually took. In this session's daves_sack case, the stack showed the vendor branch, so a vendor window was open.
+3. Find who wrote `<X>`. If Blizzard wrote it moments earlier in the same call, the taint came in before that: list the state that call path reads, then find which of it the addon touches (calling Blizzard functions from addon code, hooks, `SetScript`/`HookScript` on Blizzard frames, fields written on template frames).
+4. Only then search the addon for the write, and fix it there.
+
+No log, or nothing for this addon: ask the user to run `/console taintLog 1`, reproduce, `/reload`, then re-run the script. Note the log's timestamp, so you don't chase old events.
 
 ## 1. Static validation (always)
 
