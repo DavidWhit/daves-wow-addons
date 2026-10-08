@@ -40,6 +40,7 @@ A replacement for the default bags: one combined window styled like WoW's **HUD 
 | 1.7.3 | Consumables' "Bandages" group became **First Aid**: bandages plus anti-venoms (by item ID and name, checked before the potion subclass so an anti-venom never lands in Alchemy). First Aid's cloth (linen, wool…) stays under Reagents → Tailoring. Its on/off switch carries over. |
 | 1.7.4 | **Faster refresh when merging stacks.** Gaps are now only held while your cursor is over the bags *and* a merchant, mailbox, trade, bank, guild bank, auction or void storage window is open (the rapid right-click cases). Everywhere else (merging stacks, using items) the grid tidies up immediately. |
 | 1.7.5 | **No more resizing when items arrive.** "Fit height to my items" now fits when you open the bags, when you change a setting, or when you collapse or expand a section. While the bags stay open the size is locked and new items scroll. Space for the scrollbar is always reserved, so the width never jumps. |
+| 1.7.7 | **Fixed "This action is only available to the Blizzard UI"** when right-clicking items with a vendor open. Closing the bags called Blizzard's `CloseAllBags` from addon code, which tainted Blizzard's bag state; the merchant window picked that up when it opened, and `UseContainerItem` was then blocked (confirmed in `Logs/taint.log`). The addon no longer calls Blizzard's bag functions; `/sack` toggles the window directly. |
 
 ### Second advisor review (v1.6) — what was fixed
 
@@ -100,6 +101,7 @@ It covers categories and sub-groups, camping, item-slot layering (tooltips), cur
 
 ## Lessons learned
 
+- **Never call Blizzard's bag functions (`CloseAllBags`, `ToggleAllBags`) from addon code.** They run tainted and taint Blizzard's bag state, which spreads to the merchant window and blocks item use there (v1.7.7).
 - **Never change the scroll position inside a scroll callback** when using Blizzard's scroll frame. Its bar and frame update each other, and only stop when nothing changes (v1.6 crash).
 - **Blizzard's item button template pins frame level 10.** Anything we create must sit above it explicitly, or the window steals the mouse (v1.5 tooltip bug).
 - **Don't depend on Blizzard art or add-ons for our own icons.** The help-plate "i" didn't render on the user's client (v1.3).

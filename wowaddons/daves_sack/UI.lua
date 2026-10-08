@@ -1138,10 +1138,11 @@ local function Build()
 		Update(true); UpdateCooldowns(); UpdateMoney(); ns.RefreshCurrencies()
 		if refitHeight then ns.ApplyView() end     -- nothing changed since last time: fit anyway
 	end)
-	frame:SetScript("OnHide", function()
-		search:ClearFocus()
-		if CloseAllBags then CloseAllBags() end   -- keep Blizzard's open/closed state in sync
-	end)
+	-- Never call Blizzard's bag functions (CloseAllBags, ToggleAllBags…) from
+	-- here: they'd run tainted and taint Blizzard's bag state. The merchant
+	-- window then inherits it when it opens the bags, and right-clicking an item
+	-- there is blocked ("only available to the Blizzard UI", UseContainerItem).
+	frame:SetScript("OnHide", function() search:ClearFocus() end)
 end
 
 ---------------------------------------------------------------------------
@@ -1149,9 +1150,7 @@ end
 ---------------------------------------------------------------------------
 function ns.Open()  if not frame:IsShown() then frame:Show() end end
 function ns.Close() if frame:IsShown() then frame:Hide() end end
-function ns.Toggle()
-	if ToggleAllBags then ToggleAllBags() else frame:SetShown(not frame:IsShown()) end
-end
+function ns.Toggle() frame:SetShown(not frame:IsShown()) end   -- not ToggleAllBags: see OnHide
 
 local hidden = CreateFrame("Frame"); hidden:Hide()
 
