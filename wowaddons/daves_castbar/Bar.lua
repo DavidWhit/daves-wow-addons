@@ -8,6 +8,7 @@
 --             per element, always the full bar size, holding that element's layers. So the art
 --             is revealed by the fill instead of being stretched by it.
 --   fx        spark, particles and live effects; not clipped, so they can spill past the edges
+--   tools     (Effects.lua) things held in front of the bar, over its frame line: the skinning roll and knife
 --   text      spell name, time, icon
 -- Borderless style: three mask textures per frame (ragged top/bottom edge, soft left and right
 -- ends) fade the bar out instead of ending in a box. A mask must live in the frame it masks.
@@ -221,7 +222,7 @@ function ns:InitBar()
 
 	textFrame = CreateFrame("Frame", nil, bar)
 	textFrame:SetAllPoints()
-	textFrame:SetFrameLevel(bar:GetFrameLevel() + 8)
+	textFrame:SetFrameLevel(bar:GetFrameLevel() + 9)   -- above the tools held in front of the bar (Effects.lua, + 8)
 	local name = textFrame:CreateFontString(nil, "OVERLAY")
 	name:SetJustifyH("LEFT"); name:SetWordWrap(false)
 	name:SetShadowOffset(1, -1); name:SetShadowColor(0, 0, 0, 1)
@@ -364,6 +365,16 @@ end
 
 function ns:BarSize() return W, H end
 
+-- An element's live effects can tint the track for one cast (skinning: the fur ahead is a different
+-- pelt every time). tex tints the track's texture, hi its bright layer.
+function ns.TintTrack(tex, hi)
+	track.tex:SetVertexColor(tex[1], tex[2], tex[3])
+	if hi then track.hi:SetVertexColor(hi[1], hi[2], hi[3]) end
+end
+
+-- A texture on the track (below the fill, ahead of the cast) that follows the borderless masks.
+function ns.TrackTexture(sub) return ns.Maskable(track, track:CreateTexture(nil, "ARTWORK", nil, sub)) end
+
 ---------------------------------------------------------------------------
 -- Showing an element
 ---------------------------------------------------------------------------
@@ -399,6 +410,8 @@ local function ActivateElement(key)
 	if T and T.hi then track.hi:SetTexture(MEDIA .. T.hi, "REPEAT", "REPEAT") end
 	track.u, track.u2 = rand(0, 1), rand(0, 1)
 	TrackCoords()
+	track.tex:SetVertexColor(1, 1, 1); track.hi:SetVertexColor(1, 1, 1)   -- FX:Begin may tint it (ns.TintTrack)
+	track.tex:SetDesaturation(0); track.hi:SetDesaturation(0)             -- an interrupt greys it (TintInterrupted)
 	for _, t in ipairs({ glowFrame.l, glowFrame.m, glowFrame.r }) do SetColor(t, cfg.glow) end
 	SetColor(fx.spark, cfg.spark)
 	for _, t in ipairs(border.lit) do SetColor(t, cfg.border) end
@@ -486,6 +499,9 @@ local function TintInterrupted(k)
 		layer.tex:SetDesaturation(k)
 		layer.tex:SetVertexColor(1, 1 - .55 * k, 1 - .55 * k)
 	end
+	-- looks that fill the bar with more than their layers (skinning's fur ahead, roll and pool) grey too
+	track.tex:SetDesaturation(k); track.hi:SetDesaturation(k)
+	ns.FX:Interrupted(k)
 end
 
 -- Cast GUIDs can be secret for spells flagged that way, so they are only compared when neither is.
@@ -632,7 +648,7 @@ function ns:OnBarUpdate(dt)
 	-- glow behind the fill (anchored in Layout), and the spark on its leading edge
 	glowFrame:SetWidth(math.max(H * 2.2, fillW + H * 1.1))
 	glowFrame:SetAlpha(fillW > 1 and (.30 + .12 * glowFrame.wob(clock)) * 1.2 or 0)
-	local sparkOn = cast.state == "cast" and p > 0 and p < 1
+	local sparkOn = cast.state == "cast" and p > 0 and p < 1 and not active.cfg.noSpark
 	fx.spark:SetShown(sparkOn)
 	if sparkOn then
 		fx.spark:ClearAllPoints()
@@ -640,7 +656,7 @@ function ns:OnBarUpdate(dt)
 		fx.spark:SetAlpha(.75 + .25 * fx.sparkWob(clock))
 	end
 
-	ns.FX:Update(dt, clock, fillW, cast.state == "cast")
+	ns.FX:Update(dt, clock, fillW, cast.state == "cast", cast.state)
 
 	if cast.state == "cast" and ns.db.showTime then
 		local left = math.max(0, cast.finish - Now())

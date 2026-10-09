@@ -7,8 +7,8 @@ World of Warcraft addons for **WoW: Forever** (Interface 16001), plus the Claude
 | Folder | What it is |
 | --- | --- |
 | [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs (v0.1.3) |
-| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: an all-in-one bag with categories, search and quality borders (v1.7.6) |
-| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: an animated elemental cast bar (frost, fire, shadow, nature, arcane, holy), different every cast, plus fishing, herbalism, mining and skinning looks (v0.2.2) |
+| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: an all-in-one bag with categories, search and quality borders (v1.7.8) |
+| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: an animated elemental cast bar (frost, fire, shadow, nature, arcane, holy), different every cast, plus fishing, herbalism, mining, skinning, smelting and blacksmithing looks (v0.3.0) |
 | [`wow-addon-kit`](wow-addon-kit) | Claude Code plugin (`wow-forever-addons`) for scaffolding, testing, reviewing and releasing addons, plus a `HelloForever` example |
 
 ## The addons
@@ -21,7 +21,7 @@ An animated cast bar that replaces Blizzard's. Each spell gets a look, and every
 
 ```text
 /castbar                 options
-/castbar test fishing    play a pretend cast of one look (frost, fire, shadow, nature, arcane, holy, fishing, herbalism, mining, skinning)
+/castbar test fishing    play a pretend cast of one look (frost, fire, shadow, nature, arcane, holy, fishing, herbalism, mining, skinning, smelting, blacksmithing)
 /castbar set frost       right after casting a spell: always give that spell this look (/castbar set auto undoes it)
 /castbar unlock          move and resize the bar outside Edit Mode (/castbar lock, /castbar reset)
 ```

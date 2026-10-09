@@ -2,7 +2,7 @@
 ## Title: Dave's Cast Bar
 ## Notes: Animated elemental cast bar: frost, fire, shadow, nature, arcane and holy, each alive and different every cast
 ## Author: davidwhit5
-## Version: 0.2.2
+## Version: 0.3.0
 ## SavedVariables: DavesCastbarDB
 ## IconTexture: Interface\Icons\Spell_Frost_FrostBolt02
 ## AddonCompartmentFunc: DavesCastbar_OnAddonCompartmentClick

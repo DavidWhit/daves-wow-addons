@@ -197,14 +197,48 @@ EL.frost_channel = {
 	],
 };
 EL.skinning = {
-	// a pasture of cows and pigs; the cleaver chops at the cast edge and each animal it reaches becomes bones on a blood stain
-	spell: 'Skinning', border: [150, 40, 40], glow: [200, 50, 40], spark: [255, 190, 170], veil: [150, 60, 50],
-	layers: [{ t: 'skin_base', su: 0 }, { t: 'skin_blood', su: 0 }],
-	track: { t: 'skin_base', a: .55 },
-	skin: true,
+	// the pelt rolls back over marbled meat: fur ahead (a different pelt every cast), the hide rolling up at
+	// the cast edge, a pool of blood behind the knife sawing along the roll
+	spell: 'Skinning', border: [150, 40, 40], glow: [150, 30, 26], spark: [255, 200, 175], veil: [70, 22, 22],
+	layers: [{ t: 'skin_meat', su: 0 }],
+	track: { t: 'skin_fur', a: 1, hi: 'skin_fur_hi', hiA: 1 },   // tinted per cast
+	skin: true, noSpark: true, padTop: 1.4,
 	emit: [],
 };
-const BLOOD = P({ t: 'p_soft', color: [[110, 8, 10], [150, 15, 15]], size: [.07, .14], life: [.5, .9], vx: [-25, 25], vy: [-35, -10], add: false, gravity: 160 });
+// as Effects.lua: the coat colour and the guard hairs' tips (added on top), one pelt per cast in turn
+const PELTS = [
+	{ fur: [86, 57, 33], tips: [84, 75, 59] }, { fur: [92, 90, 92], tips: [122, 120, 110] }, { fur: [146, 100, 48], tips: [84, 94, 86] },
+	{ fur: [168, 74, 26], tips: [68, 94, 78] }, { fur: [196, 196, 200], tips: [50, 50, 48] }, { fur: [30, 28, 30], tips: [56, 52, 46] },
+	{ fur: [70, 62, 122], tips: [94, 88, 92] }, { fur: [96, 80, 62], tips: [74, 72, 64] },
+];
+let peltTurn = Math.floor(Math.random() * PELTS.length);
+EL.smelting = {
+	// a forged-iron ladle rides the cast edge, pouring molten steel that cools to dark crust behind it
+	spell: 'Smelt Iron', border: [200, 120, 50], glow: [255, 130, 40], spark: [255, 170, 70], veil: [110, 45, 15],
+	layers: [{ t: 'smelt_crust', su: 0 }],
+	smelt: true, noSpark: true, padTop: 1.6,
+	emit: [],
+};
+EL.blacksmithing = {
+	// red-hot iron, hottest at the cast edge where the forge hammer strikes; it quenches to tempered steel
+	spell: 'Copper Chain Belt', border: [200, 90, 40], glow: [255, 100, 30], spark: [200, 225, 255], veil: [120, 40, 15],
+	layers: [{ t: 'smith_iron', su: 0 }],
+	track: { t: 'smith_cold', a: .9 },
+	smith: true, noSpark: true, padTop: 1.7,
+	emit: [],
+};
+// as Effects.lua: the hammer and ladle atlases (Make-CastbarMedia.ps1 Hammer, Ladle), and the forge's particles (y down here)
+const HAM = { poses: 16, max: .95, span: 3.0, ox: .45, oy: 2.1, L: 1.45, face: .522, scale: .78 };
+const LADLE = { span: 2.6, ox: .3, oy: 1.8, scale: .38 / .56 };
+const STEAM_C = [[226, 226, 232]];
+const FORGE_SPARK = P({ t: 'p_ember', color: [[255, 226, 130], [255, 172, 60], [255, 250, 210], [255, 130, 40]], size: [.07, .13], life: [.25, .65], vx: [-150, 150], vy: [-220, -40], gravity: 450 });
+const STRIKE_STEAM = P({ t: 'p_soft', color: STEAM_C, size: [.18, .3], grow: [.7, 1.1], life: [.8, 1.4], vx: [-28, 28], vy: [-50, -20], alpha: .55, add: false });
+const WISPS = [0, 1, 2, 3].map(i => P({ t: 'p_soft', color: STEAM_C, size: [.1, .18], grow: [.45, .75], life: [1, 1.9], vx: [-7, 7], vy: [-36, -17], alpha: .14 + .2 * i / 3, add: false }));
+const QUENCH = P({ t: 'p_soft', color: STEAM_C, size: [.25, .45], grow: [.9, 1.5], life: [1, 1.6], vx: [-17, 17], vy: [-62, -17], alpha: .7, add: false });
+const POUR_SPARK = P({ t: 'p_ember', color: [[255, 210, 110], [255, 160, 50], [255, 240, 170]], size: [.06, .11], life: [.35, .8], vx: [-90, 90], vy: [-165, -60], gravity: 390 });
+const POUR_DROP = P({ t: 'p_soft', color: [[255, 150, 40]], size: [.1, .16], life: [.25, .45], vx: [-50, 50], vy: [-85, -40], gravity: 340 });
+const hammerLift = u => u < .12 ? .13 * Math.sin(Math.PI * u / .12) : u < .26 ? 0 : u < .8 ? HAM.max * (1 - (1 - (u - .26) / .54) ** 2) : HAM.max * (1 - ((u - .8) / .2) ** 2);
+const KNIFE = { w: 128 / 120, h: 256 / 120, tipX: .35, tipY: 2.0, L: 1.05, belly: .22 };   // upright, edge facing right (Make-CastbarMedia.ps1 Knife)
 const FLOWER_TINTS =[[230, 60, 60], [90, 140, 255], [170, 110, 230], [255, 210, 70], [150, 130, 240], [80, 200, 190]];
 const FISH_TINTS = [[255, 150, 60], [205, 218, 228], [110, 130, 140], [255, 205, 120]];
 const CHIP = P({ t: 'p_chip', color: [[120, 115, 110], [150, 140, 130], [205, 120, 60]], size: [.12, .24], life: [.5, .9], vx: [-40, -12], vy: [-40, -14], spin: [-8, 8], add: false, gravity: 140 });
@@ -258,6 +292,7 @@ class Bar {
 		if (this.cfg.pond) this.makePond();
 		if (this.cfg.mine) { this.swingT = rand(0, .8); this.lastSwing = 0; }
 		if (this.cfg.skin) this.makeSkin();
+		if (this.cfg.smith || this.cfg.smelt) this.makeForge();
 		this.glyphs = []; this.glyphT = 0; this.twinkles = []; this.twinkleAcc = 0; this.circles = []; this.circleNext = rand(.2, 1.2) * settings.H;
 		this.cv.style.opacity = 1; this.parts = [];
 	}
@@ -454,51 +489,222 @@ class Bar {
 		g.restore();
 	}
 
-	// ---- skinning: cows and pigs along the bar; the cleaver chops at the cast edge, and each animal
-	// the edge reaches turns into a bone pile on a blood stain
+	// ---- skinning: the pelt rolls back over marbled meat (as Effects.lua). The fur ahead is the track,
+	// tinted to this cast's pelt; the meat is the fill layer; the pool and the meat's light and shade are
+	// drawn inside the fill; the roll and the knife stand in front of the bar's frame line.
 	makeSkin() {
-		const W = settings.W, H = settings.H;
-		this.animals = [];
-		for (let x = H * rand(.6, 1.1); x < W - H * .5; x += H * rand(1.1, 1.6))
-			this.animals.push({ x, kind: Math.random() < .5 ? 'p_cow' : 'p_pig', s: H * rand(.85, 1.0), flip: Math.random() < .5, ph: rand(0, 6.283), dead: null });
-		this.chopT = rand(0, .55); this.lastChop = 0; this.skinDoneAt = null;
+		peltTurn = (peltTurn + 1) % PELTS.length;
+		const p = PELTS[peltTurn];
+		this.trackTint = p;
+		this.rollTint = p.fur.map((c, i) => Math.min(255, c + p.tips[i] * .35));
+		this.knifeTex = Math.random() < .4 ? 'p_knife_antler' : 'p_knife_wood';
+		this.spiralFlip = Math.random() < .5;
+		this.pool = []; this.poolNext = settings.H * rand(.5, .9); this.skinEnd = null;
 	}
-	drawSkin(g, ox, oy, fillW, H, dt) {
-		const ground = H * .90;
-		for (const a of this.animals) {
-			if (!a.dead && fillW >= a.x && this.state === 'cast') {
-				a.dead = this.clock;
-				for (let i = 0; i < 6; i++) this.spawn(BLOOD, a.x, ground - a.s * .35);
+	skinGeom(fillW, H) {
+		const r = H * (.2 + .16 * fillW / settings.W);
+		return { r, xc: fillW - r * .9 };
+	}
+	blotRadius(q) {
+		const age = this.clock - q.born, t = clamp01(age / q.grow);
+		return q.max * ((1 - (1 - t) * (1 - t)) * .75 + .25 * Math.min(1, Math.log(1 + age * .6) / 2.2));
+	}
+	// the meat's light and shade and the pool of blood, inside the fill (g: bar pixels, y down)
+	drawSkinMeat(g, fillW, H) {
+		const { r, xc } = this.skinGeom(fillW, H);
+		while (this.state === 'cast' && xc - r * 1.6 > this.poolNext && this.pool.length < 80) {
+			const x = this.poolNext, nearText = clamp01((x - H * .6) / (H * 3.2));
+			this.pool.push({ x, y: H - H * (.5 + rand(-.14, .14)), max: H * rand(.2, .32) * (.55 + .45 * nearText), born: this.clock, grow: rand(.5, .9),
+				fade: 1 - .55 * (1 - Math.min(1, x / (H * 4))), cell: Math.floor(rand(0, 4)), glint: Math.random() < .3, ph: rand(0, 6.283) });
+			this.poolNext += H * rand(.26, .4);
+		}
+		const band = (key, left, right, tint, a, flip, add) => {
+			left = Math.max(0, left); right = Math.min(settings.W, right);
+			if (right - left <= .5) return;
+			g.save(); g.globalAlpha = a; g.globalCompositeOperation = add ? 'lighter' : 'source-over';
+			if (flip) { g.translate(right, 0); g.scale(-1, 1); g.drawImage(tinted(key, tint), 0, 0, right - left, H); }
+			else g.drawImage(tinted(key, tint), left, 0, right - left, H);
+			g.restore();
+		};
+		band('edge_h', 0, xc - H * 2, [0, 0, 0], .22, true);
+		band('edge_h', xc - H * 1.4, xc, [255, 120, 110], .12, false, true);
+		band('edge_h', xc - H * .6, xc, [0, 0, 0], .55);
+		const blot = (q, scale, tint, a, dx, dy) => {
+			const s = this.blotRadius(q) / .3 * scale;
+			g.globalAlpha = a * q.fade;
+			g.drawImage(tinted('p_pool', tint), q.cell * 64, 0, 64, 64, q.x + dx - s / 2, q.y + dy - s / 2, s, s);
+		};
+		for (const q of this.pool) blot(q, 1.12, [41, 0, 5], .45, H * .02, H * .03);
+		for (const q of this.pool) blot(q, 1, [163, 18, 26], 1, 0, 0);
+		for (const q of this.pool) blot(q, .84, [110, 5, 10], 1, 0, 0);
+		g.globalCompositeOperation = 'lighter';
+		for (const q of this.pool) if (q.glint) {
+			const gr = this.blotRadius(q), s = gr * .7;
+			g.globalAlpha = (.3 + .15 * Math.sin(this.clock * .7 + q.ph)) * q.fade;
+			g.drawImage(tinted('p_soft', [255, 225, 225]), q.x + gr * .15 - s / 2, q.y - gr * .35 - s / 2, s, s);
+		}
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+	// the coat just ahead of the roll lies in its shadow (the fx frame, under the frame line)
+	drawSkinAhead(g, ox, oy, fillW, H) {
+		if (fillW <= 1) return;
+		const { r, xc } = this.skinGeom(fillW, H), left = xc + r, w = Math.min(H * .5, settings.W - left);
+		if (w <= .5) return;
+		g.save(); g.globalAlpha = .45; g.translate(ox + left + w, oy); g.scale(-1, 1);
+		g.drawImage(tinted('edge_h', [0, 0, 0]), 0, 0, w, H); g.restore();
+	}
+	// the roll and the knife, over the frame line
+	drawSkinTools(g, ox, oy, fillW, H) {
+		if (fillW <= 1) return;
+		const { r, xc } = this.skinGeom(fillW, H);
+		if (this.state !== 'cast') this.skinEnd = this.skinEnd ?? this.clock;
+		const lift = this.skinEnd !== null ? Math.min(1, (this.clock - this.skinEnd) / .5) ** 2 : 0;
+		const ry = r * .3, top = -H * .08, bodyH = H * 1.16 + ry;
+		// shadow cast on the bar
+		g.globalAlpha = .45;
+		g.drawImage(tinted('glow', [0, 0, 0]), ox + xc + H * .08 - (r * 2 + H * .5) / 2, oy + H * .56 - H * .75, r * 2 + H * .5, H * 1.5);
+		g.globalAlpha = 1;
+		// the side: fur turning as it rolls, cut to shape, shaded
+		const bw = Math.max(1, Math.ceil(r * 2)), bh = Math.max(1, Math.ceil(bodyH));
+		if (!this.rollCv) this.rollCv = document.createElement('canvas');
+		const cv = this.rollCv; cv.width = bw; cv.height = bh;
+		const c = cv.getContext('2d'), tile = r * 4, off = (xc * .9) % tile;
+		const fur = tinted('p_roll_fur', this.rollTint);
+		for (let y = -off; y < bh; y += tile) c.drawImage(fur, 0, y, bw, tile);
+		c.globalCompositeOperation = 'destination-in'; c.drawImage(imgs.p_roll_mask, 0, 0, bw, bh);
+		c.globalCompositeOperation = 'source-over'; c.drawImage(imgs.p_roll_shade, 0, 0, bw, bh);
+		g.drawImage(cv, ox + xc - r, oy + top, r * 2, bodyH);
+		// the top end: the hide rolled on itself
+		g.save(); g.translate(ox + xc, oy + top); if (this.spiralFlip) g.scale(-1, 1);
+		g.drawImage(imgs.p_roll_end, -r, -ry, r * 2, ry * 2);
+		g.drawImage(tinted('p_roll_spiral', this.trackTint.fur), -r, -ry, r * 2, ry * 2);
+		g.restore();
+		// the knife, upright just left of the roll: its curved edge rests on the roll's edge, the tip at the
+		// bar's bottom, the handle standing above; it saws up and down and lifts away up and to the left
+		const saw = this.state === 'cast' ? Math.sin(this.clock * 13) * H * .05 : 0;
+		const tipX = xc - r - KNIFE.belly * H - lift * H * .6;
+		const tipY = H * .04 - saw + lift * H * 1.2;     // up from the bar's bottom
+		g.globalAlpha = 1 - lift;
+		g.drawImage(imgs[this.knifeTex], ox + tipX - KNIFE.tipX * H, oy + H - (tipY + KNIFE.tipY * H), KNIFE.w * H, KNIFE.h * H);
+		const gx = tipX + H * .07, gy = tipY + KNIFE.L * H * (.25 + .5 * (.5 + .5 * Math.sin(this.clock * 13)));
+		g.globalCompositeOperation = 'lighter'; g.globalAlpha = .45 * (1 - lift);
+		g.drawImage(imgs.p_soft, ox + gx - H * .1, oy + H - gy - H * .1, H * .2, H * .2);
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+
+	// ---- blacksmithing and smelting (as Effects.lua): hot metal over the fill, the hammer and the ladle in front
+	makeForge() {
+		if (this.cfg.smith) this.smith = { u: rand(.3, .6), period: rand(.62, .78), flares: [], wispAcc: 0, flashAt: -1, tex: Math.random() < .4 ? 'p_hammer_antler' : 'p_hammer_wood', endAt: null };
+		if (this.cfg.smelt) this.smelt = { cool: rand(.16, .22), sparkAcc: 0, streamV: rand(0, 1), bob: wobble(2), endAt: null };
+	}
+	forgeSince(o) {
+		if (this.state !== 'cast' && o.endAt === null) { o.endAt = this.clock; o.quench = this.state === 'done'; }
+		return o.endAt === null ? 0 : this.clock - o.endAt;
+	}
+	// inside the fill (og in bar pixels, y down)
+	drawSmithFill(og, fillW, H) {
+		const s = this.smith, W = settings.W, p = fillW / W, base = .2 + .4 * p;
+		const since = this.forgeSince(s);
+		if (s.quench && !s.burst) {   // the quench: a rolling cloud of steam bursts off the bar
+			s.burst = true;
+			for (let i = 0; i < Math.min(60, Math.floor(W / H * 5)); i++) this.spawn(QUENCH, rand(0, W), H - H * rand(.2, 1.1));
+		}
+		const q = s.quench ? 1 - (1 - Math.min(1, since / .35)) ** 2 : 0, cool = s.endAt !== null && !s.quench ? Math.max(0, 1 - since / .7) : 1;
+		const dpr = window.devicePixelRatio || 1, k = H * dpr / 64;
+		og.save(); og.setTransform(1, 0, 0, 1, 0, 0);
+		og.globalAlpha = Math.min(1, (base - .2) / .5) * (1 - q) * cool;
+		og.fillStyle = pattern(og, scaled('smith_hot', k), this.layerOff[0].u, 0); og.fillRect(0, 0, fillW * dpr, H * dpr);
+		og.restore();
+		const l = Math.max(0, fillW - H * 3.3);
+		og.save(); og.globalCompositeOperation = 'lighter'; og.globalAlpha = .55 * (1 - q) * cool;
+		if (fillW - l > .5) og.drawImage(tinted('edge_h', [255, 191, 89]), l, 0, fillW - l, H);
+		// impact flares on struck spots, cooling over a couple of seconds
+		s.flares = s.flares.filter(f => this.clock - f.born < 2);
+		for (const f of s.flares) {
+			og.globalAlpha = .9 * Math.exp(-(this.clock - f.born) * 2.2) * (1 - q);
+			og.drawImage(tinted('p_soft', [255, 199, 102]), f.x - H * .8, H * .5 - H * .65, H * 1.6, H * 1.3);
+		}
+		og.restore();
+		if (q > 0) { og.globalAlpha = q; og.drawImage(imgs.smith_temper, 0, 0, W, H); og.globalAlpha = 1; }
+	}
+	// the hammer's rhythm, its strike flash and the steam (under the frame line)
+	drawSmithFx(g, ox, oy, fillW, H, dt) {
+		const s = this.smith, p = fillW / settings.W, base = .2 + .4 * p, hx = Math.max(H * .3, fillW - H * .3);
+		if (this.state === 'cast') {
+			s.u += dt / s.period;
+			if (s.u >= 1) {
+				s.u -= 1;
+				if (fillW > H * .2) {   // a strike: flash, sparks, a puff of steam, the struck spot flares
+					for (let i = 0; i < Math.floor(10 + 10 * (base + .4)); i++) this.spawn(FORGE_SPARK, hx + rand(-.2, .2) * H, H * rand(-.05, .1));
+					for (let i = 0; i < 5; i++) this.spawn(STRIKE_STEAM, hx + rand(-.45, .45) * H, H * rand(-.15, .25));
+					s.flares.push({ x: hx, born: this.clock }); s.flashAt = this.clock;
+				}
 			}
-			if (a.dead) {
-				const s = a.s * .9 * easeOutBack(clamp01((this.clock - a.dead) / .3));
-				g.drawImage(imgs.p_bones, ox + a.x - s / 2, oy + ground - s * .9, s, s);
-			} else {
-				const hop = Math.abs(Math.sin(this.clock * 6 + a.ph)) * H * .03;
-				g.save(); g.translate(ox + a.x, oy + ground - a.s * .4 - hop); if (a.flip) g.scale(-1, 1);
-				g.drawImage(imgs[a.kind], -a.s / 2, -a.s / 2, a.s, a.s);
-				g.restore();
+			if (fillW > 2) {   // steam wisps rising off the hot part, more as it heats
+				s.wispAcc += (2 + 12 * p) * fillW / 300 * dt;
+				while (s.wispAcc >= 1) { s.wispAcc--; this.spawn(WISPS[Math.min(3, Math.floor(p * 4))], rand(0, fillW), H * rand(-.05, .15)); }
 			}
 		}
-		// once the last animal is chopped the cleaver is done: it fades out instead of chopping the empty end
-		const alive = this.animals.some(a => !a.dead);
-		if (!alive) this.skinDoneAt = this.skinDoneAt ?? this.clock;
-		const cleaverA = alive ? 1 : clamp01(1 - (this.clock - this.skinDoneAt) / .2);
-		// the cleaver: same swing as the pickaxe, chopping at the cast edge
-		const P = H * 1.1, L = P * .76, cycle = .55, deg = Math.PI / 180;
-		this.chopT = (this.chopT + dt) % cycle;
-		const t = this.chopT / cycle;
-		let th;
-		if (t < .62) th = (100 - 92 * Math.sin(t / .62 * Math.PI / 2)) * deg;
-		else if (t < .72) th = (8 + 92 * ((t - .62) / .1) ** 2) * deg;
-		else th = (100 - 8 * Math.sin((t - .72) / .28 * Math.PI)) * deg;
-		const hx = fillW + H * .12, hy = ground - H * .62;   // the handle lands here; the blade hangs down to the ground
-		const px = hx - L * Math.sin(100 * deg), py = hy + L * Math.cos(100 * deg);
-		g.save(); g.globalAlpha = cleaverA; g.translate(ox + px, oy + py); g.rotate(th);
-		g.drawImage(imgs.p_cleaver, -P / 2, -P / 2 - P * .45, P, P);
-		g.restore();
-		if (this.state === 'cast' && alive && t >= .72 && this.lastChop < .72) for (let i = 0; i < 2; i++) this.spawn(BLOOD, hx, ground - H * .1);
-		this.lastChop = t;
+		const fa = Math.max(0, 1 - (this.clock - s.flashAt) / .18);
+		if (fa > 0) {
+			const sc = .5 + 1.1 * (1 - fa * fa), w = H * sc * 2.6, h = H * sc * 1.6;
+			g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = .95 * fa;
+			g.drawImage(tinted('p_soft', [255, 230, 166]), ox + hx - w / 2, oy - h / 2, w, h); g.restore();
+		}
+	}
+	drawSmithTools(g, ox, oy, fillW, H) {
+		const s = this.smith, since = s.endAt === null ? 0 : this.clock - s.endAt, ha = s.endAt === null ? 1 : Math.max(0, 1 - since * 3);
+		if (ha <= 0 || fillW <= 1) return;
+		const hx = Math.max(H * .3, fillW - H * .3), lift = hammerLift(s.u);
+		const pose = Math.max(0, Math.min(HAM.poses - 1, Math.round(lift / HAM.max * (HAM.poses - 1))));
+		const k = H * HAM.scale, px = hx - HAM.L * k, py = -HAM.face * k, size = HAM.span * k, cell = imgs[s.tex].width / 4;
+		g.globalAlpha = ha;
+		g.drawImage(imgs[s.tex], (pose % 4) * cell, Math.floor(pose / 4) * cell, cell, cell, ox + px - HAM.ox * k, oy + py - HAM.oy * k, size, size);
+		g.globalAlpha = 1;
+	}
+	drawSmeltFill(og, fillW, H) {
+		const s = this.smelt, W = settings.W, since = this.forgeSince(s), cool = s.endAt === null ? 1 : Math.exp(-since * 1.4);
+		if (fillW <= 1) return;
+		const land = Math.max(0, fillW - H * .32), span = 3.2 * (W * s.cool * .55 + H * .9), left = land - span, img = imgs.smelt_hot;   // as Effects.lua SmeltSpan
+		og.globalAlpha = cool;
+		og.drawImage(img, left, 0, span, H);
+		if (fillW > land) og.drawImage(img, img.width - 1, 0, 1, img.height, land, 0, fillW - land + 1, H);   // past the landing point it stays at its hottest
+		og.globalCompositeOperation = 'lighter'; og.globalAlpha = .4 * cool;
+		og.drawImage(tinted('p_soft', [255, 179, 77]), fillW - H * .15 - H * .8, H * .5 - H * .8, H * 1.6, H * 1.6);
+		og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
+	}
+	drawSmeltFx(g, ox, oy, fillW, H, dt) {
+		const s = this.smelt, since = s.endAt === null ? 0 : this.clock - s.endAt, back = s.endAt === null ? 0 : 1 - (1 - Math.min(1, since / .5)) ** 2;
+		const land = Math.max(0, fillW - H * .32);
+		if (fillW > 1 && back < 1) {
+			g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = .35 * (1 - back);
+			g.drawImage(tinted('p_soft', [255, 130, 41]), ox + land - H * 1.1, oy + H * .12 - H * 1.1, H * 2.2, H * 2.2); g.restore();
+		}
+		if (this.state === 'cast' && fillW > 1) {
+			s.sparkAcc += dt * 26;
+			while (s.sparkAcc >= 1) { s.sparkAcc--; this.spawn(POUR_SPARK, land, H * .12); if (Math.random() < .15) this.spawn(POUR_DROP, land, H * .12); }
+		}
+		s.back = back;
+	}
+	drawSmeltTools(g, ox, oy, fillW, H, dt) {
+		const s = this.smelt, back = s.back || 0;
+		if (!(fillW > .5 || this.state === 'cast') || back >= 1) return;
+		const land = Math.max(0, fillW - H * .32), k = H * LADLE.scale;
+		const lipX = land + H * .11, lipY = -H * .3 - back * H * .3 - (this.state === 'cast' ? s.bob(this.clock) * H * .02 : 0);   // y down
+		// the stream, behind the ladle: from the spout down into the metal, flowing
+		if (this.state === 'cast') {
+			const top = lipY + H * .03, bottom = H * .22, sw = H * .11 / .64, tile = sw * 4, img = imgs.smelt_stream, x = ox + land + H * .015 - sw / 2;
+			s.streamV = ((s.streamV - dt * 2.2) % 1 + 1) % 1;
+			g.save(); g.beginPath(); g.rect(x, oy + top, sw, bottom - top); g.clip();
+			for (let y = top - (1 - s.streamV) * tile; y < bottom; y += tile) g.drawImage(img, x, oy + y, sw, tile);
+			g.restore();
+		}
+		const pose = Math.round(back * 3), cell = imgs.p_ladle.width / 2, size = LADLE.span * k;
+		g.globalAlpha = 1 - back * back;
+		g.drawImage(imgs.p_ladle, (pose % 2) * cell, Math.floor(pose / 2) * cell, cell, cell, ox + lipX - LADLE.ox * k, oy + lipY - LADLE.oy * k, size, size);
+		g.globalCompositeOperation = 'lighter'; g.globalAlpha = .5 * (1 - back);
+		g.drawImage(tinted('p_soft', [255, 150, 41]), ox + lipX - H * .04 - H * .275, oy + lipY - H * .275, H * .55, H * .55);
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 	}
 
 	// ---- herbalism: flowers bloom on the vines (drawn with the leaves)
@@ -529,7 +735,7 @@ class Bar {
 		this.parts.push({
 			x, y, vx: rand(...e.vx) * k, vy: rand(...e.vy) * k, life: rand(...e.life), age: 0,
 			size: rand(...e.size) * H, rot: rand(0, 6.28), spin: rand(...e.spin), e, color: pick(e.color),
-			tw: e.twinkle ? rand(8, 16) : 0, sw: e.swirl ? rand(0, 6.28) : 0,
+			tw: e.twinkle ? rand(8, 16) : 0, sw: e.swirl ? rand(0, 6.28) : 0, grow: e.grow ? rand(...e.grow) * H : 0,
 		});
 	}
 	emit(dt, fillW, H) {
@@ -551,7 +757,7 @@ class Bar {
 		for (const p of this.parts) {
 			if (p.e.swirl) p.vx += Math.sin(p.age * 6 + p.sw) * p.e.swirl * dt;
 			if (p.e.gravity) p.vy += p.e.gravity * settings.H / 28 * dt;
-			p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.spin * dt;
+			p.x += p.vx * dt; p.y += p.vy * dt; p.rot += p.spin * dt; p.size += p.grow * dt;   // steam spreads as it rises
 			const t = p.age / p.life;
 			let a = Math.min(1, t / .15) * Math.min(1, (1 - t) / .4) * p.e.alpha;
 			if (p.tw) a *= .5 + .5 * Math.sin(p.age * p.tw);
@@ -629,9 +835,9 @@ class Bar {
 		// a channel drains, so some looks swap to a reversed version (frost freezes the other way)
 		const cfg = (settings.mode === 'channel' && this.cfg.channelLook) ? EL[this.cfg.channelLook] : this.cfg;
 		this.cur = cfg;
-		const PAD = Math.round(H * 0.9);
+		const PAD = Math.round(H * 0.9), PT = Math.round(H * (cfg.padTop || .9));   // looks with tools held above the bar need more room on top
 		const dpr = window.devicePixelRatio || 1;
-		const cw = W + PAD * 2, ch = H + PAD * 2;
+		const cw = W + PAD * 2, ch = H + PAD + PT;
 		if (this.cv.width !== cw * dpr || this.cv.height !== ch * dpr) {
 			this.cv.width = cw * dpr; this.cv.height = ch * dpr; this.cv.style.width = cw + 'px'; this.cv.style.height = ch + 'px';
 			this.off.width = W * dpr; this.off.height = H * dpr;
@@ -659,7 +865,7 @@ class Bar {
 		// outer glow behind the filled part
 		const ga = .30 + .12 * this.glowWob(this.clock);
 		g.save(); g.shadowColor = rgba(cfg.glow, ga * 1.4); g.shadowBlur = H * .9; g.fillStyle = rgba(cfg.glow, ga * .35);
-		if (fillW > 1) g.fillRect(PAD + 2, PAD + 3, fillW - 4, H - 6);
+		if (fillW > 1) g.fillRect(PAD + 2, PT + 3, fillW - 4, H - 6);
 		g.restore();
 
 		// empty track (layers are drawn in device pixels so the patterns are never rescaled)
@@ -670,8 +876,14 @@ class Bar {
 			// this element's own track: what lies ahead of the cast (flowing water, a pond, dim rails)
 			const T = cfg.track;
 			this.trackU += (T.su || 0) * dt * settings.speed; this.trackU2 += (T.su2 || 0) * dt * settings.speed;
-			og.globalAlpha = T.a; og.fillStyle = pattern(og, scaled(T.t, k), this.trackU, 0); og.fillRect(0, 0, DW, DH);
-			if (T.hi) { og.globalCompositeOperation = 'lighter'; og.globalAlpha = .8; og.fillStyle = pattern(og, scaled(T.hi, k), this.trackU2, 0); og.fillRect(0, 0, DW, DH); og.globalCompositeOperation = 'source-over'; }
+			// a look can tint its track per cast (skinning: the next pelt), like ns.TintTrack
+			const tt = cfg.skin && this.trackTint;
+			const trackTex = tt ? scaled(T.t + '|' + tt.fur, k, tinted(T.t, tt.fur)) : scaled(T.t, k);
+			og.globalAlpha = T.a; og.fillStyle = pattern(og, trackTex, this.trackU, 0); og.fillRect(0, 0, DW, DH);
+			if (T.hi) {
+				const hiTex = tt ? scaled(T.hi + '|' + tt.tips, k, tinted(T.hi, tt.tips)) : scaled(T.hi, k);
+				og.globalCompositeOperation = 'lighter'; og.globalAlpha = T.hiA || .8; og.fillStyle = pattern(og, hiTex, this.trackU2, 0); og.fillRect(0, 0, DW, DH); og.globalCompositeOperation = 'source-over';
+			}
 			og.globalAlpha = 1;
 		} else {
 			og.globalAlpha = .16; og.fillStyle = pattern(og, scaled(cfg.layers[0].t, k), this.layerOff[0].u, 0); og.fillRect(0, 0, DW, DH); og.globalAlpha = 1;
@@ -698,6 +910,9 @@ class Bar {
 		if (cfg.glyphs) { this.drawCircles(og, fillW, H, dt); this.drawGlyphs(og, fillW, H, dt); }
 		if (cfg.sweep) this.drawSweep(og, fillW, H, dt * settings.speed);
 		if (cfg.freeze) this.drawFreeze(og, fillW, H);
+		if (cfg.skin) this.drawSkinMeat(og, fillW, H);
+		if (cfg.smith) this.drawSmithFill(og, fillW, H);
+		if (cfg.smelt) this.drawSmeltFill(og, fillW, H);
 		og.restore();
 		og.setTransform(dpr, 0, 0, dpr, 0, 0);
 		if (cfg.freezeReverse) this.drawFreezeReverse(og, fillW, H);   // outside the fill's clip, over the ice
@@ -720,32 +935,38 @@ class Bar {
 			og.setTransform(1, 0, 0, 1, 0, 0); og.drawImage(edgeMask(W * dpr, H * dpr), 0, 0);
 			og.globalCompositeOperation = 'source-over';
 		}
-		g.drawImage(this.off, PAD, PAD, W, H);
+		g.drawImage(this.off, PAD, PT, W, H);
 
 		// live elements drawn over the bar (free to spill past its edges)
-		if (cfg.pond) this.drawPond(g, PAD, PAD, fillW, H, dt * settings.speed);
-		if (cfg.mine) this.drawMine(g, PAD, PAD, fillW, H, dt * settings.speed);
-		if (cfg.skin) this.drawSkin(g, PAD, PAD, fillW, H, dt * settings.speed);
-		if (this.vines) { if (this.state === 'cast') this.growVines(fillW, H); this.drawVines(g, PAD, PAD, fillW, H); }
-		if (cfg.twinkles) this.drawTwinkles(g, PAD, PAD, fillW, H, dt * settings.speed);
+		if (cfg.pond) this.drawPond(g, PAD, PT, fillW, H, dt * settings.speed);
+		if (cfg.mine) this.drawMine(g, PAD, PT, fillW, H, dt * settings.speed);
+		if (cfg.skin) this.drawSkinAhead(g, PAD, PT, fillW, H);
+		if (cfg.smith) this.drawSmithFx(g, PAD, PT, fillW, H, dt * settings.speed);
+		if (cfg.smelt) this.drawSmeltFx(g, PAD, PT, fillW, H, dt * settings.speed);
+		if (this.vines) { if (this.state === 'cast') this.growVines(fillW, H); this.drawVines(g, PAD, PT, fillW, H); }
+		if (cfg.twinkles) this.drawTwinkles(g, PAD, PT, fillW, H, dt * settings.speed);
 
-		if (DEBUG) { g.fillStyle = 'red'; g.fillRect(PAD + fillW - 1, 0, 2, 8); g.fillStyle = 'lime'; for (const q of this.parts) g.fillRect(PAD + q.x - 1, PAD + q.y - 1, 2, 2); }
+		if (DEBUG) { g.fillStyle = 'red'; g.fillRect(PAD + fillW - 1, 0, 2, 8); g.fillStyle = 'lime'; for (const q of this.parts) g.fillRect(PAD + q.x - 1, PT + q.y - 1, 2, 2); }
 		// leading-edge spark
-		if (this.state === 'cast' && p > 0 && p < 1) {
+		if (this.state === 'cast' && p > 0 && p < 1 && !cfg.noSpark) {
 			const sa = .75 + .25 * this.sparkWob(this.clock);
 			g.globalCompositeOperation = 'lighter'; g.globalAlpha = sa;
 			const sw = H * .9, sh = H * 1.7;
-			g.drawImage(tinted('spark', cfg.spark), PAD + fillW - sw / 2, PAD + H / 2 - sh / 2, sw, sh);
+			g.drawImage(tinted('spark', cfg.spark), PAD + fillW - sw / 2, PT + H / 2 - sh / 2, sw, sh);
 			g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 		}
 
 		if (this.state === 'cast') this.emit(dt * settings.speed, fillW, H);
-		this.drawParts(g, PAD, PAD, dt * settings.speed);
+		this.drawParts(g, PAD, PT, dt * settings.speed);
 
 		if (style === 'framed') {
-			g.strokeStyle = 'rgba(0,0,0,.8)'; g.lineWidth = 3; g.strokeRect(PAD - 1, PAD - 1, W + 2, H + 2);
-			g.strokeStyle = rgba(cfg.border, 1); g.lineWidth = 1.5; g.strokeRect(PAD - .75, PAD - .75, W + 1.5, H + 1.5);
+			g.strokeStyle = 'rgba(0,0,0,.8)'; g.lineWidth = 3; g.strokeRect(PAD - 1, PT - 1, W + 2, H + 2);
+			g.strokeStyle = rgba(cfg.border, 1); g.lineWidth = 1.5; g.strokeRect(PAD - .75, PT - .75, W + 1.5, H + 1.5);
 		}
+		// tools held in front of the bar, over its frame line (the addon's tools frame)
+		if (cfg.skin) this.drawSkinTools(g, PAD, PT, fillW, H);
+		if (cfg.smith) this.drawSmithTools(g, PAD, PT, fillW, H);
+		if (cfg.smelt) this.drawSmeltTools(g, PAD, PT, fillW, H, dt * settings.speed);
 
 		// text
 		const fs = Math.max(10, Math.round(H * .46));
@@ -753,10 +974,10 @@ class Bar {
 		g.shadowColor = 'rgba(0,0,0,.95)'; g.shadowBlur = 3; g.shadowOffsetY = 1;
 		g.fillStyle = '#fff'; g.textAlign = 'left';
 		const label = this.state === 'interrupted' ? 'Interrupted' : cfg.spell;
-		g.fillText(label, PAD + H * .4, PAD + H / 2 + 1);
+		g.fillText(label, PAD + H * .4, PT + H / 2 + 1);
 		if (this.state === 'cast') {
 			g.textAlign = 'right';
-			g.fillText(Math.max(0, this.dur - this.elapsed).toFixed(1), PAD + W - H * .4, PAD + H / 2 + 1);
+			g.fillText(Math.max(0, this.dur - this.elapsed).toFixed(1), PAD + W - H * .4, PT + H / 2 + 1);
 		}
 		g.shadowColor = 'transparent';
 	}

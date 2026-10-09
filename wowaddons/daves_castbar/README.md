@@ -1,7 +1,7 @@
 # Dave's Cast Bar (daves_castbar)
 
-An animated, elemental player cast bar for WoW Forever. Each spell gets one of ten looks (six elements
-and four gathering professions), and every cast is different:
+An animated, elemental player cast bar for WoW Forever. Each spell gets one of twelve looks (six elements,
+four gathering and two crafting professions), and every cast is different:
 
 | Element | Look |
 | --- | --- |
@@ -14,7 +14,9 @@ and four gathering professions), and every cast is different:
 | Fishing | A pond: lily pads drift on top, fish swim below, the bobber rides the cast edge with ripples |
 | Herbalism | The nature vines, with flowers blooming along them |
 | Mining | Rails along a rock wall: a gem cart rolls to the cast edge while a pickaxe strikes the wall at the end |
-| Skinning | Cows and pigs along a pasture: a cleaver chops at the cast edge, turning each one into a bone pile on a blood stain |
+| Skinning | The pelt rolls back over marbled meat: fur ahead of the cast (a different pelt every cast: bear, wolf, tawny cat, red fox, arctic white, black bear, nightsaber, boar), the hide rolling up at the cast edge, a pool of blood spreading behind the knife, which stands against the roll with its edge on it, sawing up and down |
+| Smelting | A forged-iron ladle rides the cast edge, pouring a glowing stream; the molten steel is pale yellow where it lands and cools through orange to dark crust behind it, its seams still glowing; sparks fly where the stream lands. At the end the ladle tips back and lifts away |
+| Blacksmithing | Red-hot iron, hottest at the cast edge, cold iron ahead; a forge hammer (wood and brass, or antler and steel) strikes the edge in rhythm, each blow a flash, sparks, a puff of steam and a flare that cools; steam rises more as it heats. Finishing quenches it: a cloud of steam and tempered steel, straw to blue |
 
 Targets: forever (`## Interface: 16001`).
 
@@ -30,8 +32,9 @@ Targets: forever (`## Interface: 16001`).
 - `/castbar unlock` / `lock` lets you move the bar outside Edit Mode. `/castbar reset` puts it back.
 
 WoW gives addons no way to read a spell's school, so the element comes from your choice for that
-spell, then the spell's name ("Frostbolt", anything with "Flame", ...), then your class and
-specialization, then the "Other casts" setting.
+spell, then the gathering and smelting spells by name, then for crafting casts the recipe's
+profession (Blacksmithing; Mining recipes are smelts), then the spell's name ("Frostbolt", anything
+with "Flame", ...), then your class and specialization, then the "Other casts" setting.
 
 ## Develop
 
@@ -51,7 +54,7 @@ Files:
 | File | What it does |
 | --- | --- |
 | `Core.lua` | Startup, saved settings, slash command |
-| `Elements.lua` | The ten looks and which spell gets which (Fishing, Mining, Herb Gathering and Skinning get theirs by name) |
+| `Elements.lua` | The twelve looks and which spell gets which (Fishing, Mining, Herb Gathering, Skinning and Smelt ... get theirs by name; Blacksmithing and Mining crafts by their recipe's profession) |
 | `Bar.lua` | The bar, casting states, fill, glow, spark, text, borderless masks, hiding Blizzard's bar |
 | `Effects.lua` | Particles and each element's live effects |
 | `EditModeDialog.lua` | The kit's shared Edit Mode settings dialog and selection art (copied from `wow-addon-kit`; don't edit it here) |

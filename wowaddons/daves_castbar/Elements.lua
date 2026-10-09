@@ -1,13 +1,14 @@
 -- daves_castbar / Elements.lua
--- The looks (six elements and four gathering professions), and which one a spell gets.
+-- The looks (six elements, four gathering and two crafting professions), and which one a spell gets.
 --
 -- WoW has no API that returns a spell's school (C_Spell.GetSpellInfo has none, and the combat
 -- log is closed to addons on Forever), so the element comes from, in order:
 --   1. your own choice for that spell (/castbar set <element>)
---   2. the gathering spells by name: Fishing, Mining, Herb Gathering, Skinning
---   3. the spell's name: known names first, then words in it ("Frost", "Flame", "Shadow", ...)
---   4. your class and specialization
---   5. the fallback setting (professions, hearthstone, mounts)
+--   2. the gathering spells by name: Fishing, Mining, Herb Gathering, Skinning, and Smelt ... for smelting
+--   3. crafting casts (tradeskill) by their recipe's profession: Blacksmithing, Mining (smelting); else the fallback
+--   4. the spell's name: known names first, then words in it ("Frost", "Flame", "Shadow", ...)
+--   5. your class and specialization
+--   6. the fallback setting (other professions, hearthstone, mounts)
 
 local _, ns = ...
 
@@ -16,7 +17,7 @@ local _, ns = ...
 -- speeds are pixels per second on a 28-pixel bar (scaled with the height), y up.
 local function C(r, g, b) return { r / 255, g / 255, b / 255 } end
 
-ns.ELEMENT_ORDER = { "frost", "fire", "shadow", "nature", "arcane", "holy", "fishing", "herbalism", "mining", "skinning" }
+ns.ELEMENT_ORDER = { "frost", "fire", "shadow", "nature", "arcane", "holy", "fishing", "herbalism", "mining", "skinning", "smelting", "blacksmithing" }
 
 ns.ELEMENTS = {
 	frost = {
@@ -119,12 +120,32 @@ ns.ELEMENTS = {
 		},
 	},
 	skinning = {
-		-- a pasture of cows and pigs: the cleaver chops at the cast edge, and each animal it reaches
-		-- becomes a bone pile on a blood stain
-		label = "Skinning", border = C(150, 40, 40), glow = C(200, 50, 40), spark = C(255, 190, 170), veil = C(150, 60, 50),
-		layers = { { tex = "skin_base" }, { tex = "skin_blood" } },
-		track = { tex = "skin_base", a = .55 },
+		-- the pelt rolls back over marbled meat: fur ahead of the cast (a different pelt every cast), the
+		-- hide rolling up at the cast edge, a pool of blood behind the knife sawing along the roll
+		label = "Skinning", border = C(150, 40, 40), glow = C(150, 30, 26), spark = C(255, 200, 175), veil = C(70, 22, 22),
+		layers = { { tex = "skin_meat" } },
+		track = { tex = "skin_fur", a = 1, hi = "skin_fur_hi" },   -- tinted per cast (Effects.lua)
 		skin = true,
+		noSpark = true,     -- the roll stands on the cast edge
+		emit = {},
+	},
+
+	-- Crafting professions (their casts are named after the item, so they are found by profession)
+	smelting = {
+		-- a forged-iron ladle rides the cast edge, pouring molten steel that cools to dark crust behind it
+		label = "Smelting", border = C(200, 120, 50), glow = C(255, 130, 40), spark = C(255, 170, 70), veil = C(110, 45, 15),
+		layers = { { tex = "smelt_crust" } },
+		smelt = true,
+		noSpark = true,     -- the stream lands just behind the cast edge
+		emit = {},
+	},
+	blacksmithing = {
+		-- red-hot iron, hottest at the cast edge where the forge hammer strikes; it quenches to tempered steel
+		label = "Blacksmithing", border = C(200, 90, 40), glow = C(255, 100, 30), spark = C(200, 225, 255), veil = C(120, 40, 15),
+		layers = { { tex = "smith_iron" } },
+		track = { tex = "smith_cold", a = .9 },   -- the iron still to be heated
+		smith = true,
+		noSpark = true,     -- the hammer strikes the cast edge
 		emit = {},
 	},
 }
@@ -199,11 +220,47 @@ local function ClassElement()
 	return SpecElement() or CLASSES[class]
 end
 
+-- Crafting casts are named after what they make ("Copper Chain Belt"), so the profession comes from the
+-- recipe: a tradeskill cast's spell is its recipe, and C_TradeSkillUI.GetProfessionInfoByRecipeID gives its
+-- profession (Blizzard_ProfessionsInspectRecipe.lua does the same). If that has nothing, the profession
+-- window that is open (GetBaseProfessionInfo) is the next best guess. Both are feature-detected.
+local CRAFTS = Enum and Enum.Profession and {
+	[Enum.Profession.Blacksmithing] = "blacksmithing",
+	[Enum.Profession.Mining] = "smelting",       -- a Mining recipe is a smelt
+} or {}
+
+-- the readable profession in a ProfessionInfo table, or nil
+local function Profession(info)
+	if type(info) ~= "table" then return end
+	local prof = info.profession
+	if prof == nil or issecretvalue(prof) then return end
+	return prof
+end
+
+local function CraftElement(spellID)
+	local tsui = C_TradeSkillUI
+	if not tsui then return end
+	if spellID and not issecretvalue(spellID) and tsui.GetProfessionInfoByRecipeID then
+		local ok, info = pcall(tsui.GetProfessionInfoByRecipeID, spellID)
+		local prof = ok and Profession(info)
+		if prof then return CRAFTS[prof] end   -- known: trust it, even when it's a profession without a look
+	end
+	-- only an open professions window counts: it can still report the last profession after it closes
+	-- (ProfessionsFrame: Blizzard_Professions/Camelot/Blizzard_ProfessionsFrame.xml)
+	if tsui.GetBaseProfessionInfo and ProfessionsFrame and ProfessionsFrame:IsShown() then
+		local ok, info = pcall(tsui.GetBaseProfessionInfo)
+		local prof = ok and Profession(info)
+		return prof and CRAFTS[prof] or nil
+	end
+end
+
 function ns:ResolveElement(spellID, name, isTradeskill)
 	local own = spellID and not issecretvalue(spellID) and ns.db.spellElements[spellID]
 	if own and ns.ELEMENTS[own] then return own end
-	if type(name) == "string" and not issecretvalue(name) and GATHERING[name:lower()] then return GATHERING[name:lower()] end
-	if isTradeskill then return ns.db.fallback end
+	local plain = type(name) == "string" and not issecretvalue(name)
+	if plain and GATHERING[name:lower()] then return GATHERING[name:lower()] end
+	if plain and name:lower():find("^smelt ") then return "smelting" end   -- Smelt Copper, Smelt Iron, ...
+	if not issecretvalue(isTradeskill) and isTradeskill then return CraftElement(spellID) or ns.db.fallback end
 	if type(name) == "string" and not issecretvalue(name) then
 		local lower = name:lower()
 		if NAMES[lower] then return NAMES[lower] end

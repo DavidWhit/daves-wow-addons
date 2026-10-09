@@ -764,134 +764,994 @@ public static class CastbarArt
 		return img;
 	}
 
-	// ================================================================ SKINNING: a pasture of cows and pigs, a cleaver, bones
-	public static Img SkinBase()       // dusk pasture: grass along the bottom, dark field behind
+	// ================================================================ SKINNING: the pelt rolls back over marbled meat
+	// Ahead of the cast lies the fur: skin_fur (the coat) with the guard hairs' light tips in skin_fur_hi, added
+	// on top. Both are neutral; the addon tints them to a different pelt every cast. At the cast edge the hide
+	// rolls up on itself (p_roll_*: the fur side, its shape, its shading and the hide's flesh side, the spiral
+	// end), behind it lies the meat it leaves (skin_meat, a marbled ribeye), a pool of blood grows behind the
+	// knife from soft blots (p_pool), and the knife saws under the roll (p_knife_wood, p_knife_antler).
+
+	// distance from (x, y) to the segment (x0, y0)-(x1, y1)
+	static double SegDist(double x, double y, double x0, double y0, double x1, double y1)
+	{
+		double vx = x1 - x0, vy = y1 - y0, l2 = vx*vx + vy*vy;
+		double t = l2 > 0 ? Clamp(((x - x0)*vx + (y - y0)*vy) / l2) : 0;
+		double dx = x - x0 - vx*t, dy = y - y0 - vy*t;
+		return Math.Sqrt(dx*dx + dy*dy);
+	}
+	// A hair: a stroke along the polyline (xs, ys), w pixels wide with round ends and 1px antialiasing, painted
+	// over img at brightness lum and opacity a. The image wraps left-right (and top-bottom with wrapY).
+	static void Stroke(Img img, double[] xs, double[] ys, double w, double lum, double a, bool wrapY)
+	{
+		double minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
+		for (int i = 0; i < xs.Length; i++) { minX = Math.Min(minX, xs[i]); maxX = Math.Max(maxX, xs[i]); minY = Math.Min(minY, ys[i]); maxY = Math.Max(maxY, ys[i]); }
+		double pad = w/2 + 1.5, rr = Math.Max(w/2, 0.5), k = Math.Min(1, w);
+		int x0 = (int)Math.Floor(minX - pad), x1 = (int)Math.Ceiling(maxX + pad), y0 = (int)Math.Floor(minY - pad), y1 = (int)Math.Ceiling(maxY + pad);
+		for (int y = y0; y <= y1; y++)
+		{
+			int yy = wrapY ? Mod(y, img.H) : y;
+			if (yy < 0 || yy >= img.H) continue;
+			for (int x = x0; x <= x1; x++)
+			{
+				double d = 1e9;
+				for (int i = 0; i + 1 < xs.Length; i++) d = Math.Min(d, SegDist(x + 0.5, y + 0.5, xs[i], ys[i], xs[i+1], ys[i+1]));
+				double cov = Clamp(rr + 0.5 - d) * k * a;
+				if (cov <= 0) continue;
+				int j = yy*img.W + Mod(x, img.W);
+				img.R[j] = Lerp(img.R[j], lum, cov); img.G[j] = Lerp(img.G[j], lum, cov); img.B[j] = Lerp(img.B[j], lum, cov);
+				img.A[j] = img.A[j] + cov*(1 - img.A[j]);
+			}
+		}
+	}
+	// Points along a slightly bent hair from (x, y), between fractions t0 and t1 of its length.
+	static void HairPts(double x, double y, double ang, double len, double bend, double t0, double t1, out double[] xs, out double[] ys)
+	{
+		double ex = x + Math.Cos(ang)*len, ey = y + Math.Sin(ang)*len;
+		double cx = (x + ex)/2 - Math.Sin(ang)*bend, cy = (y + ey)/2 + Math.Cos(ang)*bend;
+		xs = new double[4]; ys = new double[4];
+		for (int i = 0; i < 4; i++)
+		{
+			double t = Lerp(t0, t1, i/3.0), it = 1 - t;
+			xs[i] = it*it*x + 2*it*t*cx + t*t*ex; ys[i] = it*it*y + 2*it*t*cy + t*t*ey;
+		}
+	}
+	static double Rnd(Random r, double a, double b) { return a + r.NextDouble()*(b - a); }
+
+	// Fur, in brightness relative to the coat colour (1 = the coat colour the addon tints it to): dark roots,
+	// the coat, and long guard hairs whose dark roots go in `coat` and whose light tips go in `tips` (white on
+	// clear, added on top and tinted to the tips' colour). hp is pixels per bar height; ang gives the hairs'
+	// direction at a pixel. Three coats: dense short undercoat, the main coat, the guard hairs.
+	static void PaintFur(Img coat, Img tips, double hp, Func<double, double, double> ang, Random rnd, bool wrapY)
+	{
+		double area = coat.W * coat.H / (hp*hp);
+		// soft mottling, so the coat isn't one flat tone
+		for (int n = 0; n < (int)(area*6); n++)
+		{
+			double cx = Rnd(rnd, 0, coat.W), cy = Rnd(rnd, 0, coat.H), r = hp*Rnd(rnd, 0.15, 0.45), c = rnd.NextDouble() < 0.5 ? 0.35 : 1.0;
+			for (int y = (int)(cy - r); y <= (int)(cy + r); y++)
+			{
+				int yy = wrapY ? Mod(y, coat.H) : y;
+				if (yy < 0 || yy >= coat.H) continue;
+				for (int x = (int)(cx - r); x <= (int)(cx + r); x++)
+				{
+					double d = Math.Sqrt((x - cx)*(x - cx) + (y - cy)*(y - cy)), t = 0.28*Clamp(1 - d/r);
+					int j = yy*coat.W + Mod(x, coat.W);
+					coat.R[j] = Lerp(coat.R[j], c, t); coat.G[j] = coat.R[j]; coat.B[j] = coat.R[j];
+				}
+			}
+		}
+		double[] xs, ys;
+		// undercoat: short dense hairs at the roots' colour
+		for (int n = 0; n < (int)(area*1100); n++)
+		{
+			double x = Rnd(rnd, 0, coat.W), y = Rnd(rnd, -0.05*hp, coat.H + 0.05*hp), a = ang(x, y) + Rnd(rnd, -0.12, 0.12);
+			HairPts(x, y, a, hp*Rnd(rnd, 0.05, 0.09), hp*Rnd(rnd, -0.025, 0.025), 0, 1, out xs, out ys);
+			Stroke(coat, xs, ys, Math.Max(0.45, hp*0.02), rnd.NextDouble() < 0.5 ? 0.35 : 0.52, 0.75, wrapY);
+		}
+		// the main coat
+		for (int n = 0; n < (int)(area*800); n++)
+		{
+			double x = Rnd(rnd, 0, coat.W), y = Rnd(rnd, -0.05*hp, coat.H + 0.05*hp), a = ang(x, y) + Rnd(rnd, -0.12, 0.12);
+			HairPts(x, y, a, hp*Rnd(rnd, 0.08, 0.14), hp*Rnd(rnd, -0.025, 0.025), 0, 1, out xs, out ys);
+			double pick = rnd.NextDouble();
+			Stroke(coat, xs, ys, Math.Max(0.45, hp*0.016), pick < 0.34 ? 0.68 : 1.0, 0.7, wrapY);
+		}
+		// guard hairs: dark root half in the coat, light tip half (and a brighter tip end) in the tips
+		for (int n = 0; n < (int)(area*380); n++)
+		{
+			double x = Rnd(rnd, 0, coat.W), y = Rnd(rnd, -0.05*hp, coat.H + 0.05*hp), a = ang(x, y) + Rnd(rnd, -0.12, 0.12);
+			double len = hp*Rnd(rnd, 0.12, 0.22), bend = hp*Rnd(rnd, -0.025, 0.025), w = Math.Max(0.4, hp*0.012);
+			HairPts(x, y, a, len, bend, 0, 0.5, out xs, out ys); Stroke(coat, xs, ys, w, 0.35, 0.75, wrapY);
+			HairPts(x, y, a, len, bend, 0.5, 1, out xs, out ys); Stroke(tips, xs, ys, w, 1, 0.7, wrapY);
+			HairPts(x, y, a, len, bend, 0.82, 1, out xs, out ys); Stroke(tips, xs, ys, w*0.8, 1, 0.55, wrapY);
+		}
+	}
+	static Img furTips;
+	public static Img SkinFur()        // the coat ahead of the cast: hairs flow toward the tail (left) and fan out top and bottom
+	{
+		var coat = new Img(W, H); furTips = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double v = (y + 0.5)/H, l = v < 0.5 ? Lerp(0.76, 0.68, v*2) : Lerp(0.68, 0.52, (v - 0.5)*2);
+			coat.Set(x, y, l, l, l, 1); furTips.Set(x, y, 1, 1, 1, 0);
+		}
+		PaintFur(coat, furTips, H, (x, y) => Math.PI - (y/H - 0.5)*1.0 + 0.4*Fbm(x/W, y/H, 27, 3, 1, 703), new Random(701), false);
+		// a soft sheen where the light catches the coat, and the body rounding off top and bottom
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double v = (y + 0.5)/H, band = 0.22*Math.Exp(-Math.Pow((v - 0.3)/0.12, 2));
+			double shade = v < 0.25 ? 0.32*(1 - v/0.25) : v > 0.75 ? 0.4*(v - 0.75)/0.25 : 0;
+			int j = y*W + x;
+			double k = (1 + band)*(1 - shade);
+			coat.R[j] = Clamp(coat.R[j]*k); coat.G[j] = coat.R[j]; coat.B[j] = coat.R[j];
+			furTips.A[j] = Clamp(furTips.A[j]*k);
+		}
+		return coat;
+	}
+	public static Img SkinFurHi() { if (furTips == null) SkinFur(); return furTips; }   // ADD: the guard hairs' light tips
+
+	// The roll: its side is fur wrapped round (p_roll_fur, tiling top to bottom so the addon can turn it as it
+	// rolls), cut to shape by p_roll_mask (a rectangle with a rounded bottom) and shaded by p_roll_shade (the
+	// hide's pale flesh side along the left, cylinder light and shade). The top end (p_roll_end) shows the hide
+	// rolled on itself; p_roll_spiral is the fur between its layers, tinted with the pelt.
+	public static Img RollFur()        // 64x128: hairs running down the roll
+	{
+		var img = new Img(64, 128); var tips = new Img(64, 128);
+		for (int i = 0; i < img.R.Length; i++) { img.R[i] = img.G[i] = img.B[i] = 0.7; img.A[i] = 1; tips.R[i] = tips.G[i] = tips.B[i] = 1; }
+		PaintFur(img, tips, 110, (x, y) => Math.PI/2 + 0.25 + 0.35*Fbm(x/64.0, y/128.0, 2, 5, 1, 711), new Random(712), true);
+		for (int i = 0; i < img.R.Length; i++)   // the tips are part of this one texture
+		{
+			double l = Lerp(img.R[i], 1, tips.A[i]*0.6);
+			img.R[i] = img.G[i] = img.B[i] = l;
+		}
+		return img;
+	}
+	const double ROLL_CAP = 0.07;      // the rounded bottom's share of the roll's height
+	static double RollShape(double u, double v)
+	{
+		double ax = Math.Abs(u - 0.5)/0.5;
+		if (v <= 1 - ROLL_CAP) return Smooth(1.0, 0.94, ax);
+		double dy = (v - (1 - ROLL_CAP))/ROLL_CAP;
+		return Smooth(1.0, 0.94, Math.Sqrt(ax*ax + dy*dy));
+	}
+	public static Img RollMask()
+	{
+		var img = new Img(64, 128);
+		for (int y = 0; y < 128; y++) for (int x = 0; x < 64; x++) img.Set(x, y, 1, 1, 1, RollShape((x + 0.5)/64, (y + 0.5)/128));
+		return img;
+	}
+	static readonly double[] HIDE = { 216/255.0, 178/255.0, 150/255.0 }, HIDE_D = { 168/255.0, 120/255.0, 96/255.0 };
+	// a premultiplied "over"
+	static void Over(ref double r, ref double g, ref double b, ref double a, double cr, double cg, double cb, double ca)
+	{ r = cr*ca + r*(1 - ca); g = cg*ca + g*(1 - ca); b = cb*ca + b*(1 - ca); a = ca + a*(1 - ca); }
+	public static Img RollShade()
+	{
+		var img = new Img(64, 128);
+		// cylinder light: dark on the left edge, a warm highlight, clear, then deep shade on the far side
+		double[] su = { 0, 0.28, 0.45, 0.8, 1 }, sa = { 0.35, 0.12, 0, 0.35, 0.6 };
+		for (int y = 0; y < 128; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = (x + 0.5)/64, v = (y + 0.5)/128, r = 0, g = 0, b = 0, a = 0;
+			// the hide's flesh side showing on the curl, along the side that faces the meat
+			double t = u/0.3;
+			if (t < 1)
+			{
+				double k = Clamp(t/0.45);
+				double hr = Lerp(HIDE_D[0], HIDE[0], k), hg = Lerp(HIDE_D[1], HIDE[1], k), hb = Lerp(HIDE_D[2], HIDE[2], k);
+				double ha = t < 0.45 ? Lerp(0.95, 0.85, t/0.45) : Lerp(0.85, 0, (t - 0.45)/0.55);
+				Over(ref r, ref g, ref b, ref a, hr, hg, hb, ha);
+			}
+			int s = 1; while (s < su.Length - 1 && u > su[s]) s++;
+			double ca = Lerp(sa[s-1], sa[s], Clamp((u - su[s-1])/(su[s] - su[s-1])));
+			bool warm = u > 0.12 && u < 0.45;
+			Over(ref r, ref g, ref b, ref a, warm ? 1 : 0, warm ? 0.94 : 0, warm ? 0.84 : 0, ca);
+			if (v > 0.7) Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.4*(v - 0.7)/0.3);
+			double shape = RollShape(u, v);
+			if (a > 0) img.Set(x, y, r/a, g/a, b/a, a*shape);
+		}
+		return img;
+	}
+	// The end is drawn squashed to an ellipse a third as tall as it is wide; distances for its strokes are
+	// measured on screen (y times 0.3), the way they look there.
+	public static Img RollEnd()
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double ux = (x + 0.5 - 32)/32, uy = (y + 0.5 - 32)/32, d = Math.Sqrt(ux*ux + uy*uy);
+			double t = Clamp(Math.Sqrt((ux + 0.2)*(ux + 0.2) + (uy + 0.3)*(uy + 0.3))/1.15);
+			double r, g, b;
+			if (t < 0.75) { double k = t/0.75; r = Lerp(Lerp(HIDE[0], 1, 0.2), HIDE[0], k); g = Lerp(Lerp(HIDE[1], 0.94, 0.2), HIDE[1], k); b = Lerp(Lerp(HIDE[2], 0.88, 0.2), HIDE[2], k); }
+			else { double k = (t - 0.75)/0.25; r = Lerp(HIDE[0], HIDE_D[0], k); g = Lerp(HIDE[1], HIDE_D[1], k); b = Lerp(HIDE[2], HIDE_D[2], k); }
+			double core = 0.7*Clamp(1 - d/0.3);
+			r = Lerp(r, 20/255.0, core); g = Lerp(g, 10/255.0, core); b = Lerp(b, 6/255.0, core);
+			double ring = 0.3*Clamp(1 - Math.Abs(d - 0.97)*32/1.5);
+			r *= 1 - ring; g *= 1 - ring; b *= 1 - ring;
+			img.Set(x, y, r, g, b, Smooth(1.0, 0.96, d));
+		}
+		return img;
+	}
+	public static Img RollSpiral()     // white (tinted to the pelt): the fur showing between the rolled hide's layers
+	{
+		var img = new Img(64, 64);
+		var px = new List<double>(); var py = new List<double>();
+		double turns = 2.6, ang0 = 0.7;
+		for (double a = 0; a <= Math.PI*2*turns; a += 0.06)
+		{
+			double rr = 1 - a/(Math.PI*2*(turns + 0.35));
+			px.Add(Math.Cos(a + ang0)*rr); py.Add(Math.Sin(a + ang0)*rr*0.3);
+		}
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double ux = (x + 0.5 - 32)/32, uy = (y + 0.5 - 32)/32, sx = ux, sy = uy*0.3, d = 1e9;
+			for (int i = 0; i + 1 < px.Count; i++) d = Math.Min(d, SegDist(sx, sy, px[i], py[i], px[i+1], py[i+1]));
+			double px1 = 1/32.0*0.3;                                   // one texture pixel, measured on screen
+			double outer = 0.85*Clamp((0.065 - d)/px1 + 0.5), inner = 0.7*Clamp((0.025 - d)/px1 + 0.5);
+			double r = 0, g = 0, b = 0, a = 0;
+			Over(ref r, ref g, ref b, ref a, 1, 1, 1, outer);
+			Over(ref r, ref g, ref b, ref a, 0.35, 0.35, 0.35, inner);
+			a *= Smooth(1.0, 0.96, Math.Sqrt(ux*ux + uy*uy));
+			if (a > 0) img.Set(x, y, r/Math.Max(a, 1e-6), g/Math.Max(a, 1e-6), b/Math.Max(a, 1e-6), a);
+		}
+		return img;
+	}
+
+	// The meat behind the roll, like a marbled ribeye: deep wine-red muscle laced with fine creamy fat, larger
+	// swirling fat seams that split it into regions, and a waxy, pink-tinged fat cap along the top and bottom.
+	public static Img SkinMeat()
+	{
+		var img = new Img(W, H);
+		double[] MD = { 78, 6, 18 }, M = { 142, 18, 32 }, ML = { 186, 44, 52 }, FC = { 246, 232, 222 }, FP = { 232, 196, 186 };
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (x + 0.5)/W, v = (y + 0.5)/H;
+			// swirl: warp the coordinates so seams and lace curl around like a ribeye's eye
+			double wu = u + 0.45/8*Fbm(u, v, 6, 1, 3, 801)*1.4, wv = v + 0.3*Fbm(u + 0.37, v, 6, 1, 3, 802)*1.4;
+			// fat cap along the top and bottom, with a wavy inner edge
+			double top = 0.135 + 0.06*Fbm(u, 0.1, 13, 1, 1, 803) + 0.03*Fbm(u, 0.3, 40, 1, 1, 804);
+			double bot = 0.865 - 0.06*Fbm(u, 0.6, 13, 1, 1, 805) - 0.03*Fbm(u, 0.8, 40, 1, 1, 806);
+			double cap = Math.Max(1 - Smooth(top - 0.04, top + 0.03, v), Smooth(bot - 0.03, bot + 0.04, v));
+			// large seams of fat between muscle regions, soft and uneven in width
+			double seamW = 0.045 + 0.035*Fbm(wu, wv, 16, 2, 1, 807);
+			double seam = 1 - Smooth(seamW*0.35, seamW, Math.Abs(Fbm(wu, wv, 9, 2, 3, 808)*1.4));
+			// fine marbling, denser in some regions: fat patches, a dense spray of specks, a broken web of threads
+			double dens = Clamp(0.5 + 0.6*Fbm(u, v, 6, 2, 2, 809)*1.4);
+			double patch = Smooth(0.3 - 0.12*dens, 0.45 - 0.12*dens, Fbm(wu, wv, 24, 4, 3, 810)*1.4);
+			double speck = Smooth(0.18 - 0.2*dens, 0.32 - 0.2*dens, Fbm(wu, wv, 64, 8, 2, 811)*1.4);
+			double web = (1 - Smooth(0.01, 0.045, Math.Abs(Fbm(wu + 0.2, wv, 40, 5, 2, 812)*1.4))) * Smooth(0.05, 0.3, Fbm(wu, wv, 56, 7, 2, 813)*1.4);
+			double fine = Math.Max(patch*0.95, Math.Max(speck*0.9, web*0.75)) * (0.35 + 0.65*dens);
+			// muscle: wine-red, darker in the deep middle of each region, lighter toward the fat
+			double tone = Clamp(0.5 + 0.55*Fbm(wu, wv, 18, 3, 3, 814)*1.4 + 0.25*seam);
+			double[] m = new double[3];
+			for (int c = 0; c < 3; c++) m[c] = tone < 0.5 ? Lerp(MD[c], M[c], tone*2) : Lerp(M[c], ML[c], (tone - 0.5)*2);
+			// fat: creamy white with a pink blush; thin fat is translucent and the red shows through it
+			double wax = 0.5 + 0.5*Fbm(u, v, 32, 4, 1, 815);
+			double thin = Math.Max(fine*0.3, seam*0.12), fatW = Math.Max(cap, Math.Max(seam*0.95, fine*0.88)), blush = (1 - cap)*thin;
+			double band = Smooth(0, 0.5, cap)*(1 - Smooth(0.5, 1, cap));   // the cap meets the meat in a pink band
+			double sh = (1 - 0.18*Math.Pow(Math.Abs(v - 0.5)*2, 3)) * (0.92 + 0.08*Fbm(u + 0.5, v, 9, 1, 1, 816));
+			double[] o = new double[3]; double[] pinkBand = { 214, 132, 132 };
+			for (int c = 0; c < 3; c++)
+			{
+				double f = Lerp(FC[c], FP[c], wax*0.7);
+				f = Lerp(f, m[c] + (c == 0 ? 70 : 60), blush);
+				double col = Lerp(m[c], f, fatW);
+				col = Lerp(col, pinkBand[c], band*0.5);
+				o[c] = Clamp(col*sh/255);
+			}
+			img.Set(x, y, o[0], o[1], o[2], 1);
+		}
+		return img;
+	}
+
+	// Pool blots, 4 cells of 64x64 (white, tinted): a round lobe with a few rounded bulges. The addon lays them
+	// down behind the knife in three passes (a dark seep, a brighter rim, the darker body a little smaller), so
+	// overlapping blots merge into one puddle.
+	public static Img PoolBlots()
+	{
+		var img = new Img(256, 64);
+		var rnd = new Random(851);
+		for (int c = 0; c < 4; c++)
+		{
+			int n = 3 + rnd.Next(3);
+			var cx = new List<double> { 0 }; var cy = new List<double> { 0 }; var cr = new List<double> { 0.3 };
+			for (int i = 0; i < n; i++) { cx.Add(Rnd(rnd, -0.85, 0.85)*0.3); cy.Add(Rnd(rnd, -0.7, 0.7)*0.3); cr.Add(Rnd(rnd, 0.4, 0.6)*0.3); }
+			for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+			{
+				double ux = (x + 0.5)/64 - 0.5, uy = (y + 0.5)/64 - 0.5, a = 0;
+				for (int i = 0; i < cx.Count; i++)
+				{
+					double d = Math.Sqrt((ux - cx[i])*(ux - cx[i]) + (uy - cy[i])*(uy - cy[i]));
+					a = Math.Max(a, Clamp((cr[i] - d)*64/1.3 + 0.5));
+				}
+				img.Set(c*64 + x, y, 1, 1, 1, a);
+			}
+		}
+		return img;
+	}
+
+	// ---------------------------------------------------------------- the skinning knife
+	// Painted upright, as it stands against the pelt roll: the tip at the bottom, the blade running straight up
+	// with its curved edge facing right (against the roll), then the bolster and the handle above. 128x256 at
+	// 120 px per bar height; the tip sits 0.35 bar heights from the left and 2.0 from the top. A soft shadow falls
+	// down and to the right.
+	public const double KNIFE_PX = 120, KNIFE_TIPX = 0.35, KNIFE_TIPY = 2.0, KNIFE_ANG = Math.PI/2;
+	static List<double[]> Bez(double x0, double y0, double x1, double y1, double x2, double y2, double x3, double y3, int n)
+	{
+		var p = new List<double[]>();
+		for (int i = 0; i <= n; i++)
+		{
+			double t = (double)i/n, it = 1 - t;
+			p.Add(new[] { it*it*it*x0 + 3*it*it*t*x1 + 3*it*t*t*x2 + t*t*t*x3, it*it*it*y0 + 3*it*it*t*y1 + 3*it*t*t*y2 + t*t*t*y3 });
+		}
+		return p;
+	}
+	static List<double[]> Quad(double x0, double y0, double x1, double y1, double x2, double y2, int n)
+	{ return Bez(x0, y0, x0 + (x1 - x0)*2/3, y0 + (y1 - y0)*2/3, x2 + (x1 - x2)*2/3, y2 + (y1 - y2)*2/3, x2, y2, n); }
+	static bool InPoly(List<double[]> p, double x, double y)
+	{
+		bool c = false;
+		for (int i = 0, j = p.Count - 1; i < p.Count; j = i++)
+			if (((p[i][1] > y) != (p[j][1] > y)) && (x < (p[j][0] - p[i][0])*(y - p[i][1])/(p[j][1] - p[i][1]) + p[i][0])) c = !c;
+		return c;
+	}
+	static double LineDist(List<double[]> p, double x, double y, bool closed)
+	{
+		double d = 1e9;
+		for (int i = 0; i + 1 < p.Count; i++) d = Math.Min(d, SegDist(x, y, p[i][0], p[i][1], p[i+1][0], p[i+1][1]));
+		if (closed) d = Math.Min(d, SegDist(x, y, p[p.Count-1][0], p[p.Count-1][1], p[0][0], p[0][1]));
+		return d;
+	}
+	static List<double[]> RoundRect(double x, double y, double w, double h, double r)
+	{
+		var p = new List<double[]>();
+		double[][] c = { new[]{ x + w - r, y + r, -Math.PI/2 }, new[]{ x + w - r, y + h - r, 0 }, new[]{ x + r, y + h - r, Math.PI/2 }, new[]{ x + r, y + r, Math.PI } };
+		foreach (var k in c) for (int i = 0; i <= 6; i++) { double a = k[2] + Math.PI/2*i/6; p.Add(new[] { k[0] + Math.Cos(a)*r, k[1] + Math.Sin(a)*r }); }
+		return p;
+	}
+	static double[] Stops(double t, double[] at, double[][] cols)
+	{
+		t = Clamp(t);
+		for (int i = 1; i < at.Length; i++)
+			if (t <= at[i]) { double k = (t - at[i-1])/(at[i] - at[i-1]); return new[] { Lerp(cols[i-1][0], cols[i][0], k), Lerp(cols[i-1][1], cols[i][1], k), Lerp(cols[i-1][2], cols[i][2], k) }; }
+		return cols[cols.Length - 1];
+	}
+	static double[] Hex(int rgb) { return new[] { ((rgb >> 16) & 255)/255.0, ((rgb >> 8) & 255)/255.0, (rgb & 255)/255.0 }; }
+	static double Ink(double d, double w) { return Clamp((w/2 - d)*KNIFE_PX + 0.5); }   // coverage of a line w wide at distance d
+	public static Img Knife(bool antler)
+	{
+		const int SW = 128, SH = 256; const double PX = KNIFE_PX;
+		double L = 1.05, bw = 0.27, hc = bw*0.16, gw = bw*0.3, hl = 0.76, hh = bw*0.44, hx0 = L + gw, hx1 = L + gw + hl;
+		var blade = Bez(0, 0, L*0.05, bw*0.55, L*0.45, bw*0.98, L, bw*0.62, 28);
+		blade.Add(new[] { L, -bw*0.3 });
+		blade.AddRange(Quad(L, -bw*0.3, L*0.45, bw*0.1, 0, 0, 18));
+		var belly = Bez(0, 0, L*0.05, bw*0.55, L*0.45, bw*0.98, L, bw*0.62, 40);
+		var spine = Quad(L, -bw*0.28, L*0.45, bw*0.1, L*0.04, bw*0.01, 18);
+		var handle = Bez(hx0, hc - hh, hx0 + hl*0.4, hc - hh*1.08, hx1 - hl*0.2, hc - hh*1.15, hx1 - hh*0.5, hc - hh*1.05, 20);
+		handle.AddRange(Quad(hx1 - hh*0.5, hc - hh*1.05, hx1 + hh*0.35, hc, hx1 - hh*0.5, hc + hh, 10));
+		handle.AddRange(Bez(hx1 - hh*0.5, hc + hh, hx1 - hl*0.25, hc + hh*1.05, hx0 + hl*0.35, hc + hh*0.95, hx0, hc + hh, 20));
+		var bolster = RoundRect(L - gw*0.05, hc - hh*1.18, gw*1.1, hh*2.36, gw*0.35);
+
+		var rnd = new Random(antler ? 871 : 861);
+		var smears = new List<double[]>();      // u, v, rx, ry, a: blood toward the tip
+		for (int i = 0; i < 6; i++) smears.Add(new[] { Rnd(rnd, 0.02, 0.42), Rnd(rnd, -0.1, 0.55), Rnd(rnd, 0.05, 0.14), Rnd(rnd, 0.08, 0.22), Rnd(rnd, 0.35, 0.7) });
+		var grain = new List<double[]>();       // v, amp, f, ph
+		for (int i = 0; i < 7; i++) grain.Add(new[] { Rnd(rnd, -0.8, 0.8), Rnd(rnd, 0.03, 0.1), Rnd(rnd, 5, 11), Rnd(rnd, 0, 6.283) });
+		var knobs = new List<double[]>();       // u, v, r
+		for (int i = 0; i < 9; i++) knobs.Add(new[] { Rnd(rnd, 0.05, 0.95), Rnd(rnd, -0.6, 0.6), Rnd(rnd, 0.04, 0.09) });
+
+		double ca = Math.Cos(KNIFE_ANG), sa = Math.Sin(KNIFE_ANG);
+		var img = new Img(SW, SH);
+		double[] hAt = { 0, 0.4, 1 }; double[][] hCol = antler ? new[] { Hex(0xe6dac4), Hex(0xb7a385), Hex(0x5d4c38) } : new[] { Hex(0x9a6a40), Hex(0x6a4322), Hex(0x2a160a) };
+		double[] bAt = { 0, 0.35, 0.7, 1 };
+		double[][] bCol = antler ? new[] { Hex(0xf2f5f8), Hex(0xa9b2bb), Hex(0x5c646d), Hex(0x2a2f35) } : new[] { Hex(0xfbe6a8), Hex(0xc79a44), Hex(0x7a5418), Hex(0x3e2a0a) };
+		double[][] pin = antler ? new[] { Hex(0xffffff), Hex(0xa8b0b8), Hex(0x4a5058) } : new[] { Hex(0xfff0b8), Hex(0xb88a36), Hex(0x5a3e12) };
+		double[] sAt = { 0, 0.3, 0.55, 1 }; double[][] sCol = { Hex(0xe4e9ee), Hex(0xa7b0b9), Hex(0x7b858f), Hex(0x5d6670) };
+		for (int y = 0; y < SH; y++) for (int x = 0; x < SW; x++)
+		{
+			int hH = 0, hB = 0, hK = 0;
+			for (int sy = 0; sy < 4; sy++) for (int sx = 0; sx < 4; sx++)
+			{
+				double wx = (x + (sx + 0.5)/4)/PX - KNIFE_TIPX, wy = (y + (sy + 0.5)/4)/PX - KNIFE_TIPY;
+				double qx = ca*wx - sa*wy, qy = sa*wx + ca*wy;
+				if (qx > hx0 - 0.02 && InPoly(handle, qx, qy)) hH++;
+				if (qx > L - 0.1 && qx < L + gw*1.2 && InPoly(bolster, qx, qy)) hB++;
+				if (qx < L + 0.02 && InPoly(blade, qx, qy)) hK++;
+			}
+			double cx = (x + 0.5)/PX - KNIFE_TIPX, cy = (y + 0.5)/PX - KNIFE_TIPY;
+			double lx = ca*cx - sa*cy, ly = sa*cx + ca*cy;
+			double r = 0, g = 0, b = 0, a = 0;
+			if (lx > hx0 - 0.1 && lx < hx1 + 0.1 && Math.Abs(ly - hc) < hh*1.5)
+			{
+				// handle: wood with grain, or pitted, ridged antler; a highlight along the top, two pins
+				if (hH > 0)
+				{
+					var c = Stops((ly - (hc - hh))/(2*hh), hAt, hCol);
+					double uu = (lx - hx0)/hl;
+					if (antler)
+						foreach (var k in knobs)
+						{
+							double kx = Lerp(hx0, hx1, k[0]), ky = hc + k[1]*hh, kr = k[2], d = Math.Sqrt((lx - kx + kr*0.3)*(lx - kx + kr*0.3) + (ly - ky + kr*0.3)*(ly - ky + kr*0.3))/kr;
+							if (d < 1) { double t = d < 0.6 ? 0.35*(1 - d/0.6) : 0; double dk = d >= 0.6 ? 0.25*(1 - (d - 0.6)/0.4) : 0; for (int q = 0; q < 3; q++) c[q] = Lerp(Lerp(c[q], 1.0, t), 0.35, dk); }
+						}
+					foreach (var gr in grain)
+					{
+						double gy = hc + gr[0]*hh*(antler ? 0.8 : 1) + Math.Sin(uu*gr[2] + gr[3])*gr[1]*hh;
+						double k = Ink(Math.Abs(ly - gy), 0.01) * (antler ? 0.35 : 0.25 + gr[1]*2);
+						double[] gc = antler ? new[] { 70/255.0, 52/255.0, 34/255.0 } : new[] { 30/255.0, 14/255.0, 4/255.0 };
+						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], gc[q], k);
+					}
+					if (!antler)
+					{
+						double wx0 = Lerp(hx0, hx1, 0.55), wy0 = hc - hh*0.3, wd = Math.Sqrt((lx - wx0)*(lx - wx0) + (ly - wy0)*(ly - wy0))/(hl*0.35);
+						double k = 0.12*Clamp(1 - wd); c[0] = Lerp(c[0], 1, k); c[1] = Lerp(c[1], 0.88, k); c[2] = Lerp(c[2], 0.75, k);
+					}
+					double top = 0.28*Clamp(1 - (ly - (hc - hh))/(hh*0.6));
+					c[0] = Lerp(c[0], 1, top); c[1] = Lerp(c[1], 0.96, top); c[2] = Lerp(c[2], 0.88, top);
+					Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], hH/16.0);
+				}
+				foreach (double pu in new[] { 0.28, 0.72 })
+				{
+					double px0 = Lerp(hx0, hx1, pu), pr = bw*0.075, d = Math.Sqrt((lx - px0)*(lx - px0) + (ly - hc)*(ly - hc));
+					if (d < pr + 0.01)
+					{
+						double dl = Math.Sqrt((lx - px0 + pr*0.35)*(lx - px0 + pr*0.35) + (ly - hc + pr*0.35)*(ly - hc + pr*0.35))/pr;
+						var pc = Stops(dl, new[] { 0, 0.55, 1 }, pin);
+						Over(ref r, ref g, ref b, ref a, pc[0], pc[1], pc[2], Clamp((pr - d)*PX + 0.5));
+					}
+				}
+				Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.3*Ink(LineDist(handle, lx, ly, true), 0.012));
+			}
+			// bolster: brass or steel
+			if (hB > 0)
+			{
+				var c = Stops((ly - (hc - hh*1.18))/(hh*2.36), bAt, bCol);
+				Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], hB/16.0);
+			}
+			if (lx > L - 0.1 && lx < L + gw*1.2) Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.3*Ink(LineDist(bolster, lx, ly, true), 0.012));
+			// blade: brushed steel, a brighter ground bevel along the edge, blood toward the tip
+			if (lx < L + 0.05)
+			{
+				double dBelly = LineDist(belly, lx, ly, false);
+				if (hK > 0)
+				{
+					var c = Stops((ly + bw*0.35)/(bw*1.25), sAt, sCol);
+					double brush = 1 + 0.035*Noise(lx*30, ly*400, 64, 512, 881);   // fine lengthwise brushing
+					for (int q = 0; q < 3; q++) c[q] *= brush;
+					double bev = 0.55*Clamp((bw*0.25 - dBelly)*PX + 0.5);
+					c[0] = Lerp(c[0], 214/255.0, bev); c[1] = Lerp(c[1], 224/255.0, bev); c[2] = Lerp(c[2], 232/255.0, bev);
+					double line = 0.35*Ink(LineDist(belly, lx, ly + bw*0.22, false), 0.012);
+					c[0] = Lerp(c[0], 70/255.0, line); c[1] = Lerp(c[1], 78/255.0, line); c[2] = Lerp(c[2], 88/255.0, line);
+					foreach (var sm in smears)
+					{
+						double al = sm[4]*(1 - sm[0]*1.6);
+						if (al <= 0) continue;
+						double ex = (lx - L*sm[0])/(L*sm[2]), ey = (ly - bw*sm[1])/(bw*sm[3]*2), t = Math.Sqrt(ex*ex + ey*ey);
+						if (t >= 1) continue;
+						double k = t < 0.7 ? Lerp(al, al*0.6, t/0.7) : Lerp(al*0.6, 0, (t - 0.7)/0.3);
+						c[0] = Lerp(c[0], t < 0.7 ? 118/255.0 : 96/255.0, k); c[1] = Lerp(c[1], 8/255.0, k); c[2] = Lerp(c[2], 12/255.0, k);
+					}
+					Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], hK/16.0);
+				}
+				Over(ref r, ref g, ref b, ref a, 1, 1, 1, 0.85*Ink(dBelly, 0.01));                              // the sharp edge
+				Over(ref r, ref g, ref b, ref a, 1, 1, 1, 0.4*Ink(LineDist(spine, lx, ly, false), 0.012));     // spine highlight
+				Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.28*Ink(LineDist(blade, lx, ly, true), 0.012));     // outline
+			}
+			if (a > 0) img.Set(x, y, r/a, g/a, b/a, a);
+		}
+		// one soft shadow under the whole knife, down and to the right
+		var sh = new double[SW*SH];
+		for (int i = 0; i < sh.Length; i++) sh[i] = img.A[i];
+		for (int pass = 0; pass < 3; pass++) sh = BoxBlur(sh, SW, SH, 8);
+		int ox = (int)Math.Round(0.05*PX), oy = (int)Math.Round(0.08*PX);
+		for (int y = 0; y < SH; y++) for (int x = 0; x < SW; x++)
+		{
+			int sx = x - ox, sy = y - oy;
+			double s = (sx >= 0 && sy >= 0) ? 0.45*sh[sy*SW + sx] : 0;
+			int i = y*SW + x;
+			double ka = img.A[i], oa = ka + s*(1 - ka);
+			if (oa <= 0) continue;
+			img.R[i] = img.R[i]*ka/oa; img.G[i] = img.G[i]*ka/oa; img.B[i] = img.B[i]*ka/oa; img.A[i] = oa;
+		}
+		return img;
+	}
+	// ================================================================ BLACKSMITHING and SMELTING: hot metal, the hammer, the ladle
+	// Iron heat colours (blacksmithing): cold iron -> dull red -> orange -> yellow -> white.
+	static readonly double[][] IRON_HEAT = { S(0, 42, 34, 32), S(0.22, 104, 20, 10), S(0.45, 190, 46, 12), S(0.66, 245, 118, 28), S(0.85, 255, 196, 84), S(1.05, 255, 246, 214) };
+	// Molten steel (smelting): cooled crust -> dull red -> orange -> pale yellow; the hottest stays short of white so text reads.
+	static readonly double[][] MELT_HEAT = { S(0, 52, 50, 56), S(0.16, 84, 38, 26), S(0.34, 165, 42, 14), S(0.52, 228, 92, 18), S(0.72, 255, 160, 44), S(0.88, 255, 208, 104), S(1, 255, 228, 150) };
+	static double[] HeatCol(double[][] ramp, double t)
+	{
+		double lo = ramp[0][0], hi = ramp[ramp.Length-1][0];
+		var c = Ramp((t - lo)/(hi - lo), Rescale(ramp, lo, hi));
+		return new[] { c[0]/255, c[1]/255, c[2]/255 };
+	}
+	static double[][] Rescale(double[][] ramp, double lo, double hi)
+	{
+		var o = new double[ramp.Length][];
+		for (int i = 0; i < ramp.Length; i++) o[i] = new[] { (ramp[i][0] - lo)/(hi - lo), ramp[i][1], ramp[i][2], ramp[i][3] };
+		return o;
+	}
+
+	// A bar of iron at a heat: scale flecks on it (fewer as it gets hotter), lit along the top, darker underneath.
+	static Img IronBar(double heat, double cold, int seed)
 	{
 		var img = new Img(W, H);
 		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
 		{
-			double u = (double)x/W, v = (double)y/H;
-			double n = Fbm(u, v, 8, 1, 4, 601);
-			double r = .10 + .04*n + .05*(1 - v), g = .13 + .05*n + .04*(1 - v), b = .12 + .04*n + .06*(1 - v);
-			double ground = 0.80 + 0.03*Fbm(u, 0.5, 16, 1, 2, 602);
-			double blade = Smooth(0.0, 1.0, (v - ground)*12 + 0.35*Math.Abs(Math.Sin(x*1.7 + 3*Hash(x, 0, 603))));
-			double gr = Hash(x, y/2, 604);
-			r = Lerp(r, .16 + .08*gr, blade); g = Lerp(g, .34 + .14*gr, blade); b = Lerp(b, .12 + .05*gr, blade);
-			img.Set(x, y, r, g, b, 1);
+			double u = (x + 0.5)/W, v = (y + 0.5)/H;
+			double h = heat + 0.07*Fbm(u, v, 12, 1, 3, seed);
+			double[] c = cold > 0 ? new[] { (58 + 20*Fbm(u, v, 24, 3, 3, seed + 1))/255*0.85, 56/255.0*0.85, 60/255.0*0.85 } : HeatCol(IRON_HEAT, h);
+			double f1, f2; int cell;
+			Voronoi(u, v, 48, 6, seed + 2, out f1, out f2, out cell);
+			double fleck = Smooth(0.42, 0.22, f1) * (Hash(cell, 3, seed) < 0.55 ? 1 : 0) * (0.25 + 0.35*Hash(cell, 5, seed));
+			double fa = fleck * (cold > 0 ? 0.8 : Clamp(1.15 - h));
+			for (int k = 0; k < 3; k++) c[k] = Lerp(c[k], new[] { 28/255.0, 10/255.0, 6/255.0 }[k], fa);
+			double top = 0.16*Clamp(1 - v/0.18), dark = v > 0.7 ? 0.5*(v - 0.7)/0.3 : 0.08*Smooth(0.18, 0.7, v);
+			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k], 1, top)*(1 - dark));
+			img.Set(x, y, c[0], c[1], c[2], 1);
 		}
 		return img;
 	}
-	public static Img SkinBlood()      // BLEND: blood stains soaking into the grass along the bottom
+	public static Img SmithIron() { return IronBar(0.3, 0, 901); }    // the heated part: dull red-hot iron
+	public static Img SmithHot()  { return IronBar(0.78, 0, 901); }   // the same iron near white heat (laid over it as it heats)
+	public static Img SmithCold() { return IronBar(0, 1, 905); }      // ahead of the cast: cold iron
+
+	// Tempered steel after the quench, stretched across the whole bar: straw at the left to blue at the right.
+	public static Img SmithTemper()
+	{
+		var img = new Img(256, 64);
+		double[] at = { 0, 0.35, 0.55, 0.75, 1 };
+		double[][] cols = { Hex(0x6c7480), Hex(0x8a8577), Hex(0x9a7d4f), Hex(0x5d5a86), Hex(0x4b6a92) };
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 256; x++)
+		{
+			double u = (x + 0.5)/256, v = (y + 0.5)/64;
+			var c = Stops(u + 0.03*Fbm(u, v, 8, 2, 2, 911), at, cols);
+			double brush = 1 + 0.05*Noise(u*16, v*90, 16, 90, 912);
+			double top = 0.35*Clamp(1 - v/0.25), dark = 0.5*Smooth(0.25, 1, v);
+			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k]*brush, 1, top)*(1 - dark));
+			img.Set(x, y, c[0], c[1], c[2], 1);
+		}
+		return img;
+	}
+
+	// ---------------------------------------------------------------- shared: paint a shape-built sprite once, then turn it
+	// Sprites that swing (the hammer) or tip (the ladle) are painted once in their own frame, then sampled at a
+	// set of angles into an atlas, so the addon only ever switches cells and moves them: nothing turns in game.
+	class Src { public double X0, Y0, PX; public Img Img; }   // premultiplied colour; local point (X0, Y0) at pixel 0,0
+	static double InkP(double d, double w, double px) { return Clamp((w/2 - d)*px + 0.5); }
+	static double Cover(List<double[]> poly, double lx, double ly, double px)   // 3x3 supersampled coverage of a polygon
+	{
+		int n = 0;
+		for (int sy = 0; sy < 3; sy++) for (int sx = 0; sx < 3; sx++)
+			if (InPoly(poly, lx + (sx - 1)/(3*px), ly + (sy - 1)/(3*px))) n++;
+		return n/9.0;
+	}
+	static double[] Bbox(List<double[]> p)
+	{
+		double a = 1e9, b = 1e9, c = -1e9, d = -1e9;
+		foreach (var q in p) { a = Math.Min(a, q[0]); b = Math.Min(b, q[1]); c = Math.Max(c, q[0]); d = Math.Max(d, q[1]); }
+		return new[] { a, b, c, d };
+	}
+	static bool Near(double[] bb, double x, double y, double m) { return x > bb[0] - m && x < bb[2] + m && y > bb[1] - m && y < bb[3] + m; }
+	static void Bilinear(Src s, double lx, double ly, double[] o)   // o: premultiplied r, g, b, a
+	{
+		double fx = (lx - s.X0)*s.PX - 0.5, fy = (ly - s.Y0)*s.PX - 0.5;
+		int x0 = (int)Math.Floor(fx), y0 = (int)Math.Floor(fy); double tx = fx - x0, ty = fy - y0;
+		o[0] = o[1] = o[2] = o[3] = 0;
+		for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++)
+		{
+			int xx = x0 + i, yy = y0 + j;
+			if (xx < 0 || yy < 0 || xx >= s.Img.W || yy >= s.Img.H) continue;
+			double w = (i == 0 ? 1 - tx : tx)*(j == 0 ? 1 - ty : ty); int k = yy*s.Img.W + xx;
+			o[0] += s.Img.R[k]*w; o[1] += s.Img.G[k]*w; o[2] += s.Img.B[k]*w; o[3] += s.Img.A[k]*w;
+		}
+	}
+	// One atlas of poses: cell c shows the source turned by ang[c] (canvas sense: y down, positive turns clockwise)
+	// about the local origin, which sits at (ox, oy) bar heights from the cell's top-left; cell is span bar heights
+	// square. A soft shadow falls down and to the right, as under the skinning knife.
+	static Img Poses(Src s, double[] ang, int cols, int cell, double span, double ox, double oy)
+	{
+		int rows = (ang.Length + cols - 1)/cols;
+		var img = new Img(cols*cell, rows*cell);
+		double cpx = cell/span; var o = new double[4];
+		for (int c = 0; c < ang.Length; c++)
+		{
+			double ca = Math.Cos(ang[c]), sa = Math.Sin(ang[c]);
+			int bx = (c % cols)*cell, by = (c/cols)*cell;
+			var pr = new double[cell*cell]; var pg = new double[cell*cell]; var pb = new double[cell*cell]; var pa = new double[cell*cell];
+			for (int y = 0; y < cell; y++) for (int x = 0; x < cell; x++)
+			{
+				double r = 0, g = 0, b = 0, a = 0;
+				for (int sy = 0; sy < 2; sy++) for (int sx = 0; sx < 2; sx++)
+				{
+					double dx = (x + 0.25 + sx*0.5)/cpx - ox, dy = (y + 0.25 + sy*0.5)/cpx - oy;
+					Bilinear(s, dx*ca + dy*sa, -dx*sa + dy*ca, o);
+					r += o[0]; g += o[1]; b += o[2]; a += o[3];
+				}
+				int i = y*cell + x; pr[i] = r/4; pg[i] = g/4; pb[i] = b/4; pa[i] = a/4;
+			}
+			var sh = (double[])pa.Clone();
+			int rad = Math.Max(1, (int)Math.Round(0.05*cpx));
+			for (int pass = 0; pass < 3; pass++) sh = BoxBlur(sh, cell, cell, rad);
+			int offx = (int)Math.Round(0.05*cpx), offy = (int)Math.Round(0.08*cpx);
+			for (int y = 0; y < cell; y++) for (int x = 0; x < cell; x++)
+			{
+				int i = y*cell + x, sx2 = x - offx, sy2 = y - offy;
+				double shA = (sx2 >= 0 && sy2 >= 0) ? 0.45*sh[sy2*cell + sx2] : 0;
+				double ka = pa[i], oa = ka + shA*(1 - ka);
+				if (oa <= 0) continue;
+				img.Set(bx + x, by + y, Clamp(pr[i]/oa), Clamp(pg[i]/oa), Clamp(pb[i]/oa), Clamp(oa));   // shadow is black: colour scales by ka/oa
+			}
+		}
+		return img;
+	}
+	static void Put(Src s, int x, int y, double r, double g, double b, double a)   // store premultiplied
+	{ int k = y*s.Img.W + x; s.Img.R[k] = r*a; s.Img.G[k] = g*a; s.Img.B[k] = b*a; s.Img.A[k] = a; }
+
+	// ---------------------------------------------------------------- the forge hammer
+	// The Warcraft hammer of the blacksmithing concept (smith-a), painted like the skinning knife: brushed steel
+	// with a bright ground striking face and a glint, a brass or steel bolster, bands and pommel, a wood or antler
+	// haft with grain and two pins, faint edges, no outline. Its own frame, in bar heights: the grip end at the
+	// origin, the haft along +x, the head at x = 1.45 with the striking face 0.522 below the haft (y down).
+	// The atlas holds HAM_POSES cells from level (cell 0) to lifted HAM_MAX rad (the last), the grip end at
+	// (HAM_OX, HAM_OY) in each HAM_SPAN-square cell; the addon draws it at 0.78 of the bar height.
+	public const int HAM_POSES = 16, HAM_CELL = 128;
+	public const double HAM_MAX = 0.95, HAM_SPAN = 3.0, HAM_OX = 0.45, HAM_OY = 2.1, HAM_L = 1.45, HAM_FACE = 0.522;
+	static Src HammerSource(bool antler)
+	{
+		const double PX = 96, X0 = -0.42, Y0 = -1.0;
+		var s = new Src { X0 = X0, Y0 = Y0, PX = PX, Img = new Img((int)(2.45*PX), (int)(1.65*PX)) };
+		double L = HAM_L, th = 0.16, hx0 = -0.1, hx1 = L - 0.06, hw = 0.78, cx = L, x0 = cx - hw/2, x1 = cx + hw/2;
+		double yFace = HAM_FACE, yTop = -0.5, hh = yFace - yTop, bev = 0.07, glow = 0.55;
+		var haft = Bez(hx0, -th*0.9, hx0 + (hx1 - hx0)*0.4, -th, hx1 - 0.1, -th*0.8, hx1, -th*0.7, 16);
+		haft.AddRange(Bez(hx1, th*0.7, hx1 - 0.1, th*0.8, hx0 + (hx1 - hx0)*0.4, th, hx0, th*0.9, 16));
+		haft.AddRange(Quad(hx0, th*0.9, hx0 - th*0.5, 0, hx0, -th*0.9, 8));
+		double pr = th*1.05;
+		var pommel = RoundRect(hx0 - pr*1.1, -pr, pr*1.2, pr*2, pr*0.45);
+		var bolster = RoundRect(L - hw*0.5 - 0.1, -th*1.15, 0.12, th*2.3, th*0.35);
+		var head = new List<double[]> { new[]{ x0 + bev, yTop }, new[]{ x1 - bev, yTop }, new[]{ x1, yTop + bev }, new[]{ x1, yFace - bev },
+			new[]{ x1 - bev, yFace }, new[]{ x0 + bev, yFace }, new[]{ x0, yFace - bev }, new[]{ x0, yTop + bev } };
+		var back = new List<double[]>();
+		if (!antler)   // a spike (wood and brass), or a double claw (antler and steel)
+		{
+			back.AddRange(Quad(cx - hw*0.24, yTop + 0.01, cx - hw*0.12, yTop - 0.2, cx - hw*0.02, yTop - 0.42, 10));
+			back.AddRange(Quad(cx + hw*0.02, yTop - 0.42, cx + hw*0.12, yTop - 0.2, cx + hw*0.24, yTop + 0.01, 10));
+		}
+		else
+		{
+			back.AddRange(Quad(cx - hw*0.42, yTop + 0.01, cx - hw*0.58, yTop - 0.28, cx - hw*0.32, yTop - 0.36, 10));
+			back.Add(new[]{ cx - hw*0.13, yTop + 0.01 }); back.Add(new[]{ cx + hw*0.13, yTop + 0.01 });
+			back.Add(new[]{ cx + hw*0.32, yTop - 0.36 });
+			back.AddRange(Quad(cx + hw*0.32, yTop - 0.36, cx + hw*0.58, yTop - 0.28, cx + hw*0.42, yTop + 0.01, 10));
+		}
+		double bh = 0.085;
+		double[] bandY = { yTop + hh*0.24, yTop + hh*0.7 };
+		var bands = new List<List<double[]>>();
+		foreach (var yc in bandY) bands.Add(RoundRect(x0 - 0.02, yc - bh/2, hw + 0.04, bh, bh*0.3));
+
+		var rnd = new Random(antler ? 931 : 921);
+		var grain = new List<double[]>(); for (int i = 0; i < 7; i++) grain.Add(new[] { Rnd(rnd, -0.8, 0.8), Rnd(rnd, 0.03, 0.1), Rnd(rnd, 5, 11), Rnd(rnd, 0, 6.283) });
+		var knobs = new List<double[]>(); for (int i = 0; i < 9; i++) knobs.Add(new[] { Rnd(rnd, 0.05, 0.95), Rnd(rnd, -0.6, 0.6), Rnd(rnd, 0.04, 0.09) });
+		bool brass = !antler;
+		double[] hAt = { 0, 0.4, 1 }; double[][] hCol = antler ? new[] { Hex(0xe6dac4), Hex(0xb7a385), Hex(0x5d4c38) } : new[] { Hex(0x9a6a40), Hex(0x6a4322), Hex(0x2a160a) };
+		double[] mAt = { 0, 0.35, 0.7, 1 };
+		double[][] mCol = brass ? new[] { Hex(0xfbe6a8), Hex(0xc79a44), Hex(0x7a5418), Hex(0x3e2a0a) } : new[] { Hex(0xf2f5f8), Hex(0xa9b2bb), Hex(0x5c646d), Hex(0x2a2f35) };
+		double[][] pin = brass ? new[] { Hex(0xfff0b8), Hex(0xb88a36), Hex(0x5a3e12) } : new[] { Hex(0xffffff), Hex(0xa8b0b8), Hex(0x4a5058) };
+		double[] sAt = { 0, 0.3, 0.55, 1 }; double[][] sCol = { Hex(0xe4e9ee), Hex(0xa7b0b9), Hex(0x7b858f), Hex(0x5d6670) };
+		double[] orange = { 1, 130/255.0, 50/255.0 };
+		var bbHaft = Bbox(haft); var bbPom = Bbox(pommel); var bbBol = Bbox(bolster); var bbHead = Bbox(head); var bbBack = Bbox(back);
+		double m = 0.03;
+		for (int y = 0; y < s.Img.H; y++) for (int x = 0; x < s.Img.W; x++)
+		{
+			double lx = X0 + (x + 0.5)/PX, ly = Y0 + (y + 0.5)/PX, r = 0, g = 0, b = 0, a = 0;
+			// haft: wood or antler, as the knife's handle; forge light along its underside
+			if (Near(bbHaft, lx, ly, m))
+			{
+				double cov = Cover(haft, lx, ly, PX);
+				if (cov > 0)
+				{
+					var c = Stops((ly + th)/(2*th), hAt, hCol);
+					double uu = (lx - hx0)/(hx1 - hx0);
+					if (antler)
+						foreach (var k in knobs)
+						{
+							double kx = Lerp(hx0, hx1, k[0]), ky = k[1]*th, kr = k[2], d = Math.Sqrt((lx - kx + kr*0.3)*(lx - kx + kr*0.3) + (ly - ky + kr*0.3)*(ly - ky + kr*0.3))/kr;
+							if (d < 1) { double t = d < 0.6 ? 0.35*(1 - d/0.6) : 0, dk = d >= 0.6 ? 0.25*(1 - (d - 0.6)/0.4) : 0; for (int q = 0; q < 3; q++) c[q] = Lerp(Lerp(c[q], 1.0, t), 0.35, dk); }
+						}
+					foreach (var gr in grain)
+					{
+						double gy = gr[0]*th*0.9 + Math.Sin(uu*gr[2] + gr[3])*gr[1]*th;
+						double k = InkP(Math.Abs(ly - gy), 0.01, PX)*(antler ? 0.35 : 0.25 + gr[1]*2);
+						double[] gc = antler ? new[] { 70/255.0, 52/255.0, 34/255.0 } : new[] { 30/255.0, 14/255.0, 4/255.0 };
+						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], gc[q], k);
+					}
+					double top = 0.28*Clamp(1 - (ly + th)/(th*0.6));
+					c[0] = Lerp(c[0], 1, top); c[1] = Lerp(c[1], 0.96, top); c[2] = Lerp(c[2], 0.88, top);
+					double fl = (0.12 + 0.25*glow)*Clamp((ly + th)/(2*th));
+					for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], orange[q], fl);
+					Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
+					foreach (double pu in new[] { 0.22, 0.55 })
+					{
+						double px0 = Lerp(hx0, hx1, pu), prr = th*0.3, d = Math.Sqrt((lx - px0)*(lx - px0) + ly*ly);
+						if (d < prr + 0.02)
+						{
+							double dl = Math.Sqrt((lx - px0 + prr*0.35)*(lx - px0 + prr*0.35) + (ly + prr*0.35)*(ly + prr*0.35))/prr;
+							var pc = Stops(dl, new[] { 0, 0.55, 1 }, pin);
+							Over(ref r, ref g, ref b, ref a, pc[0], pc[1], pc[2], Clamp((prr - d)*PX + 0.5));
+						}
+					}
+				}
+				Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.3*InkP(LineDist(haft, lx, ly, true), 0.012, PX));
+			}
+			// pommel cap and bolster in the trim metal
+			foreach (var part in new[] { pommel, bolster })
+			{
+				var bb = part == pommel ? bbPom : bbBol;
+				if (!Near(bb, lx, ly, m)) continue;
+				double cov = Cover(part, lx, ly, PX);
+				if (cov > 0) { var c = Stops((ly - bb[1])/(bb[3] - bb[1]), mAt, mCol); Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov); }
+				Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.3*InkP(LineDist(part, lx, ly, true), 0.012, PX));
+			}
+			// steel: the back (spike or claw) and the head, brushed, lit from above, a glint across the middle
+			foreach (var part in new[] { back, head })
+			{
+				var bb = part == back ? bbBack : bbHead;
+				if (!Near(bb, lx, ly, m)) continue;
+				double cov = Cover(part, lx, ly, PX);
+				if (cov > 0)
+				{
+					double y0 = part == back ? yTop - 0.42 : yTop, y1 = part == back ? yTop : yFace;
+					var c = Stops((ly - y0)/(y1 - y0), sAt, sCol);
+					double brush = 1 + 0.04*Noise(lx*8, ly*120, 64, 512, 941);
+					for (int q = 0; q < 3; q++) c[q] = Clamp(c[q]*brush);
+					double gx = Lerp(x0, x1, 0.5), gy = Lerp(y0, y1, 0.3), gd = Math.Sqrt((lx - gx)*(lx - gx) + (ly - gy)*(ly - gy))/(hw*0.35);
+					double gl = 0.5*Math.Max(0, 1 - gd)*Math.Max(0, 1 - gd);
+					for (int q = 0; q < 3; q++) c[q] = Clamp(c[q] + gl);
+					if (part == head)
+					{
+						double tb = 0.35*Clamp(1 - (ly - yTop)/(bev*1.6));                          // top bevel catches the light
+						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], 1, tb);
+						double rs = 0.4*Clamp(1 - (x1 - lx)/(bev*2));                               // right side in shadow
+						for (int q = 0; q < 3; q++) c[q] *= 1 - rs;
+						if (ly > yFace - 0.09) { c[0] = Lerp(c[0], 214/255.0, 0.55); c[1] = Lerp(c[1], 224/255.0, 0.55); c[2] = Lerp(c[2], 232/255.0, 0.55); }   // ground striking face
+						double bl = 0.35*InkP(Math.Abs(ly - (yFace - 0.095)), 0.012, PX);
+						c[0] = Lerp(c[0], 70/255.0, bl); c[1] = Lerp(c[1], 78/255.0, bl); c[2] = Lerp(c[2], 88/255.0, bl);
+						double fg = (ly - yTop)/hh, fa = fg > 0.5 ? Lerp(0.05 + 0.12*glow, 0.2 + 0.6*glow, (fg - 0.5)/0.5) : Lerp(0, 0.05 + 0.12*glow, fg/0.5);
+						for (int q = 0; q < 3; q++) c[q] = Clamp(c[q] + orange[q]*fa);                // the forge's light on the face toward the bar
+					}
+					Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
+				}
+				Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.3*InkP(LineDist(part, lx, ly, true), 0.012, PX));
+			}
+			// bands across the head in the trim metal, with two small pins each
+			for (int bi = 0; bi < 2; bi++)
+			{
+				var band = bands[bi]; double yc = bandY[bi];
+				if (Math.Abs(ly - yc) > bh || lx < x0 - 0.05 || lx > x1 + 0.05) continue;
+				double cov = Cover(band, lx, ly, PX);
+				if (cov > 0) { var c = Stops((ly - (yc - bh/2))/bh, mAt, mCol); Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov); }
+				Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.3*InkP(LineDist(band, lx, ly, true), 0.012, PX));
+				foreach (double fx in new[] { 0.18, 0.82 })
+				{
+					double px0 = x0 + hw*fx, prr = bh*0.22, d = Math.Sqrt((lx - px0)*(lx - px0) + (ly - yc)*(ly - yc));
+					if (d < prr + 0.02)
+					{
+						double dl = Math.Sqrt((lx - px0 + prr*0.35)*(lx - px0 + prr*0.35) + (ly - yc + prr*0.35)*(ly - yc + prr*0.35))/prr;
+						var pc = Stops(dl, new[] { 0, 0.55, 1 }, pin);
+						Over(ref r, ref g, ref b, ref a, pc[0], pc[1], pc[2], Clamp((prr - d)*PX + 0.5));
+					}
+				}
+			}
+			if (a > 0) Put(s, x, y, r/a, g/a, b/a, a);
+		}
+		return s;
+	}
+	public static Img Hammer(bool antler)
+	{
+		var ang = new double[HAM_POSES];
+		for (int i = 0; i < HAM_POSES; i++) ang[i] = -HAM_MAX*i/(HAM_POSES - 1);   // canvas sense: negative lifts the head
+		return Poses(HammerSource(antler), ang, 4, HAM_CELL, HAM_SPAN, HAM_OX, HAM_OY);
+	}
+
+	// ---------------------------------------------------------------- the forged pouring ladle (smelting)
+	// The hand ladle of the smelting concepts (smelt-a3, drawn as in B3): a deep forged-iron bowl, sooty and
+	// heat-tinted under the rim, slag on the metal inside, molten metal spilling over the spout, a forged rod
+	// handle ending in a wooden grip with iron rings. Its own frame, in bar heights (y down): the spout lip at
+	// the origin, the bowl to the right. The atlas holds LADLE_TILT.Length cells, the lip at (LADLE_OX, LADLE_OY)
+	// in each LADLE_SPAN-square cell, tipped by each tilt (the first pours, the last has righted itself).
+	public static readonly double[] LADLE_TILT = { 0.58, 0.40, 0.22, 0.05 };
+	public const int LADLE_CELL = 256; public const double LADLE_SPAN = 2.6, LADLE_OX = 0.3, LADLE_OY = 1.8, LADLE_R = 0.56;
+	static double EllD(double x, double y, double cx, double cy, double a, double b)   // about the distance to an ellipse's outline
+	{ double dx = (x - cx)/a, dy = (y - cy)/b, k = Math.Sqrt(dx*dx + dy*dy); return Math.Abs(k - 1)*Math.Min(a, b); }
+	static Src LadleSource()
+	{
+		const double PX = 96, X0 = -0.3, Y0 = -0.75;
+		var s = new Src { X0 = X0, Y0 = Y0, PX = PX, Img = new Img((int)(2.7*PX), (int)(1.6*PX)) };
+		double R = LADLE_R, full = 0.7;
+		var bowl = new List<double[]> { new[]{ -0.24*R, -0.06*R }, new[]{ -0.04*R, 0.2*R } };
+		bowl.AddRange(Bez(-0.04*R, 0.2*R, -0.02*R, 0.95*R, 0.42*R, 1.32*R, R, 1.32*R, 16));
+		bowl.AddRange(Bez(R, 1.32*R, 1.58*R, 1.32*R, 2.02*R, 0.95*R, 2*R, 0, 16));
+		bowl.Add(new[]{ 0.0, 0.0 });
+		double hx0 = 1.8*R, hy0 = 0.2*R, ha = -0.5, HL = 2.5*R, ux = Math.Cos(ha), uy = Math.Sin(ha);
+		var rnd = new Random(951);
+		var soot = new List<double[]>(); for (int i = 0; i < 6; i++) soot.Add(new[] { Rnd(rnd, 0.2, 1.8), Rnd(rnd, 0.04, 0.1), Rnd(rnd, 0.3, 0.9), Rnd(rnd, 0.12, 0.3) });
+		var slag = new List<double[]>(); for (int i = 0; i < 4; i++) slag.Add(new[] { Rnd(rnd, 0.35, 1.6), Rnd(rnd, -0.05, 0.05), Rnd(rnd, 0.08, 0.14) });
+		var bbBowl = Bbox(bowl);
+		double[] bAt = { 0, 0.4, 1 }; double[][] bCol = { Hex(0x4a4c53), Hex(0x2c2d32), Hex(0x121315) };
+		for (int y = 0; y < s.Img.H; y++) for (int x = 0; x < s.Img.W; x++)
+		{
+			double lx = X0 + (x + 0.5)/PX, ly = Y0 + (y + 0.5)/PX, r = 0, g = 0, b = 0, a = 0;
+			// handle: along v (0 at the bowl, 1 at the grip's end), w across it
+			double hv = ((lx - hx0)*ux + (ly - hy0)*uy)/HL, hwid = -(lx - hx0)*uy + (ly - hy0)*ux;
+			if (hv > -0.05 && hv < 1.05)
+			{
+				if (hv < 0.6)   // forged iron rod, heat-tinted near the bowl
+				{
+					double w = 0.07*R, cov = Clamp((w - Math.Abs(hwid))*PX + 0.5)*Clamp(hv*HL*PX + 0.5);
+					if (cov > 0)
+					{
+						double t = hwid/w;   // -1 top .. 1 bottom
+						double[] c = { Lerp(0.36, 0.14, (t + 1)/2), Lerp(0.37, 0.15, (t + 1)/2), Lerp(0.41, 0.17, (t + 1)/2) };
+						double tint = hv < 0.2 ? Lerp(0.55, 0.4, hv/0.2) : Lerp(0.4, 0, (hv - 0.2)/0.25);
+						double[] tc = hv < 0.12 ? new[] { 165/255.0, 115/255.0, 60/255.0 } : new[] { 80/255.0, 90/255.0, 150/255.0 };
+						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], tc[q], Clamp(tint));
+						double hl = 0.45*Clamp(1 - Math.Abs(t + 0.55)/0.25);
+						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], 0.74, hl);
+						Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
+					}
+				}
+				if (hv > 0.58)   // wooden grip with grain and iron rings
+				{
+					double w = 0.1*R, cov = Clamp((w - Math.Abs(hwid))*PX + 0.5)*Clamp((1 - hv)*HL*PX + 0.5)*Clamp((hv - 0.58)*HL*PX + 0.5);
+					if (cov > 0)
+					{
+						double t = (hwid/w + 1)/2;
+						var c = Stops(t, new[] { 0, 0.5, 1 }, new[] { Hex(0x6a4a30), Hex(0x46301d), Hex(0x24170d) });
+						for (int k = 1; k < 4; k++) { double o = (k - 2)*R*0.045; double gk = 0.35*InkP(Math.Abs(hwid - o), Math.Max(0.006, R*0.012), PX); for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], new[] { 25/255.0, 14/255.0, 6/255.0 }[q], gk); }
+						Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
+					}
+					foreach (double rv in new[] { 0.62, 0.97 })
+					{
+						double rc = Clamp((0.035*R - Math.Abs(hv - rv)*HL)*PX + 0.5)*Clamp((0.12*R - Math.Abs(hwid))*PX + 0.5);
+						if (rc > 0) Over(ref r, ref g, ref b, ref a, 0.16, 0.17, 0.19, rc);
+					}
+				}
+			}
+			// bowl: dark forged iron, dull red where the metal sits, temper colours under the rim, soot, a soft flank light
+			if (Near(bbBowl, lx, ly, 0.03))
+			{
+				double cov = Cover(bowl, lx, ly, PX);
+				if (cov > 0)
+				{
+					double gt = ((lx - 0.2*R)*1.2*R + ly*1.35*R)/(1.2*R*1.2*R + 1.35*R*1.35*R);
+					var c = Stops(gt, bAt, bCol);
+					double d1 = Math.Sqrt((lx - R)*(lx - R) + (ly - 1.25*R)*(ly - 1.25*R))/(1.1*R), red = (0.22 + 0.16*full)*Math.Max(0, 1 - d1);
+					c[0] = Clamp(c[0] + 210/255.0*red); c[1] = Clamp(c[1] + 60/255.0*red); c[2] = Clamp(c[2] + 14/255.0*red);
+					double d2 = Math.Sqrt((lx - R)*(lx - R) + (ly - 1.6*R)*(ly - 1.6*R))/(1.2*R), lit = 0.22*Math.Max(0, 1 - d2);
+					c[0] = Clamp(c[0] + lit); c[1] = Clamp(c[1] + 130/255.0*lit); c[2] = Clamp(c[2] + 40/255.0*lit);
+					double bv = ly/(0.6*R);
+					if (bv > 0 && bv < 1)
+					{
+						double[] tc = bv < 0.35 ? new[] { 90/255.0, 100/255.0, 160/255.0 } : new[] { 165/255.0, 120/255.0, 60/255.0 };
+						double ta = bv < 0.35 ? Lerp(0.2, 0.18, bv/0.35) : Lerp(0.18, 0, (bv - 0.35)/0.65);
+						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], tc[q], ta);
+					}
+					foreach (var st in soot)
+						if (lx > st[0]*R && lx < (st[0] + st[1])*R && ly > 0 && ly < st[2]*R) for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], 0.025, st[3]);
+					if (lx > 1.45*R && lx < 1.95*R) { double f = (lx - 1.45*R)/(0.5*R), k = 0.14*(f < 0.6 ? f/0.6 : (1 - f)/0.4); for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], 0.8, k); }
+					Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
+				}
+				Over(ref r, ref g, ref b, ref a, 0, 0, 0, 0.35*InkP(LineDist(bowl, lx, ly, true), Math.Max(0.008, R*0.025), PX));
+			}
+			// the metal inside, with a skin of slag
+			{
+				double ex = (lx - R)/(0.92*R), ey = (ly + 0.02*R)/(0.2*R), k = Math.Sqrt(ex*ex + ey*ey);
+				if (k < 1.05)
+				{
+					double cov = Clamp((1 - k)*0.2*R*PX + 0.5);
+					double gi = Math.Sqrt((lx - 0.55*R)*(lx - 0.55*R) + ly*ly)/R;
+					var c0 = HeatCol(MELT_HEAT, 0.8 + 0.2*full); var c1 = HeatCol(MELT_HEAT, 0.45 + 0.25*full);
+					double[] c = { Lerp(c0[0], c1[0], Clamp(gi)), Lerp(c0[1], c1[1], Clamp(gi)), Lerp(c0[2], c1[2], Clamp(gi)) };
+					foreach (var sl in slag)
+					{
+						double sx = (lx - sl[0]*R)/(sl[2]*R), sy = (ly - sl[1]*R)/(sl[2]*R*0.45), sd = Math.Sqrt(sx*sx + sy*sy);
+						double sa = 0.82*Clamp((1 - sd)*sl[2]*R*0.45*PX + 0.5);
+						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], new[] { 50/255.0, 42/255.0, 38/255.0 }[q], sa);
+					}
+					Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
+				}
+			}
+			// rolled rim: iron, a cool light along its far edge, the metal's glow along its near edge
+			Over(ref r, ref g, ref b, ref a, 42/255.0, 43/255.0, 48/255.0, InkP(EllD(lx, ly, R, -0.02*R, 0.95*R, 0.22*R), 0.13*R, PX));
+			if (ly < -0.04*R) Over(ref r, ref g, ref b, ref a, 195/255.0, 200/255.0, 210/255.0, 0.25*InkP(EllD(lx, ly, R, -0.04*R, 0.95*R, 0.22*R), 0.03*R, PX));
+			if (ly > 0.02*R) { var hc = HeatCol(MELT_HEAT, 0.9); Over(ref r, ref g, ref b, ref a, hc[0], hc[1], hc[2], 0.45*InkP(EllD(lx, ly, R, 0, 0.88*R, 0.18*R), 0.035*R, PX)); }
+			// molten metal spilling over the spout
+			{
+				var spill = Quad(0.12*R, -0.02*R, -0.05*R, -0.07*R, -0.22*R, -0.05*R, 10);
+				double d = LineDist(spill, lx, ly, false);
+				if (d < 0.1*R) { var hc = HeatCol(MELT_HEAT, 0.85); Over(ref r, ref g, ref b, ref a, hc[0], hc[1], hc[2], 0.95*InkP(d, 0.1*R, PX)); }
+			}
+			if (a > 0) Put(s, x, y, r/a, g/a, b/a, a);
+		}
+		return s;
+	}
+	public static Img Ladle()
+	{
+		var ang = new double[LADLE_TILT.Length];
+		for (int i = 0; i < ang.Length; i++) ang[i] = -LADLE_TILT[i];   // canvas sense: the concept's rotate(-tilt)
+		return Poses(LadleSource(), ang, 2, LADLE_CELL, LADLE_SPAN, LADLE_OX, LADLE_OY);
+	}
+
+	// The falling stream of molten metal, tiling downward (the addon scrolls it): a hot pale core, orange edges,
+	// brighter knots running down it.
+	public static Img SmeltStream()
+	{
+		var img = new Img(32, 128);
+		for (int y = 0; y < 128; y++) for (int x = 0; x < 32; x++)
+		{
+			double u = (x + 0.5)/32 - 0.5, v = (y + 0.5)/128;
+			double wob = 0.05*Noise(v*4, 0.5, 4, 1, 961), d = Math.Abs(u - wob)/0.32;
+			double knot = 0.5 + 0.5*Noise(u*2, v*8, 2, 8, 962);
+			double core = Smooth(0.6, 0.15, d), body = Smooth(1.0, 0.75, d), haze = 0.25*Smooth(1.55, 0.9, d);
+			var hot = HeatCol(MELT_HEAT, 0.8 + 0.2*knot); double[] edge = { 235/255.0, 105/255.0, 22/255.0 };
+			double r = Lerp(edge[0], Lerp(hot[0], 1, 0.4*knot), core), g = Lerp(edge[1], Lerp(hot[1], 0.94, 0.4*knot), core), b = Lerp(edge[2], Lerp(hot[2], 0.75, 0.4*knot), core);
+			img.Set(x, y, r, g, b, Math.Max(body, haze));
+		}
+		return img;
+	}
+
+	// Cooled molten steel (the smelting fill): dark crust plates, their seams still glowing dull red, a lit skin on top.
+	public static Img SmeltCrust()
 	{
 		var img = new Img(W, H);
 		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
 		{
-			double u = (double)x/W, v = (double)y/H;
-			double stain = Smooth(-0.10, 0.25, Fbm(u, v, 12, 2, 4, 611)) * Smooth(0.55, 0.90, v);
-			double drip = Hash(x/2, y/2, 612) > 0.992 && v > 0.55 ? 0.9 : 0;
-			double a = Clamp(Math.Max(stain*0.85, drip));
-			double dark = 0.6 + 0.4*Fbm(u, v, 24, 3, 2, 613);
-			img.Set(x, y, .42*dark, .02, .03, a);
+			double u = (x + 0.5)/W, v = (y + 0.5)/H;
+			double wu = u + 0.012*Fbm(u, v, 16, 2, 2, 971), wv = v + 0.1*Fbm(u, v + 0.3, 16, 2, 2, 972);
+			double f1, f2; int cell;
+			Voronoi(wu, wv, 16, 2, 973, out f1, out f2, out cell);
+			double seam = Smooth(0.16, 0.03, f2 - f1);
+			double warm = 0.16 + 0.12*Fbm(u, v, 6, 1, 2, 974);
+			var baseC = HeatCol(MELT_HEAT, warm);
+			double pv = 0.85 + 0.15*Hash(cell, 1, 975);
+			double[] plate = { Lerp(baseC[0], 40/255.0, 0.45)*pv, Lerp(baseC[1], 38/255.0, 0.45)*pv, Lerp(baseC[2], 42/255.0, 0.45)*pv };
+			double sheen = 0.18*Smooth(0.5, 0.05, f1)*Smooth(0.0, 0.3, f2 - f1);
+			for (int k = 0; k < 3; k++) plate[k] = Lerp(plate[k], new[] { 200/255.0, 205/255.0, 215/255.0 }[k], sheen*0.6);
+			var seamC = HeatCol(MELT_HEAT, 0.34 + 0.18*(0.5 + 0.5*Fbm(u, v, 24, 2, 2, 976)));
+			double[] c = { Lerp(plate[0], seamC[0], seam), Lerp(plate[1], seamC[1], seam), Lerp(plate[2], seamC[2], seam) };
+			double top = 0.22*Clamp(1 - v/0.25), dark = 0.42*Smooth(0.25, 1, v);
+			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k], new[] { 1, 235/255.0, 180/255.0 }[k], top)*(1 - dark));
+			img.Set(x, y, c[0], c[1], c[2], 1);
 		}
 		return img;
 	}
-	static double Ell(double x, double y, double cx, double cy, double a, double b) { double dx = (x - cx)/a, dy = (y - cy)/b; return Math.Sqrt(dx*dx + dy*dy); }
-	static double Bar(double x, double y, double x0, double y0, double x1, double y1, double w)   // distance to a thick segment, 0 inside
+
+	// The fresh pour, stretched behind the landing point: transparent at the left, where it has cooled to crust,
+	// through red and orange to pale yellow at the right edge (the landing point; the addon clamps past it).
+	public static Img SmeltHot()
 	{
-		double px = x - x0, py = y - y0, vx = x1 - x0, vy = y1 - y0;
-		double t = Clamp((px*vx + py*vy) / (vx*vx + vy*vy));
-		double dx = px - vx*t, dy = py - vy*t;
-		return Math.Sqrt(dx*dx + dy*dy) - w;
-	}
-	public static Img Cow()            // a little cow facing right, feet on the bottom
-	{
-		var img = new Img(64, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		var img = new Img(256, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 256; x++)
 		{
-			double u = x/63.0, v = y/63.0, r = 0, g = 0, b = 0, a = 0;
-			bool legs = false;
-			foreach (double lx in new[] { .26, .36, .56, .66 }) if (Bar(u, v, lx, .60, lx, .88, .035) < 0) legs = true;
-			double body = Ell(u, v, .46, .52, .30, .16), head = Ell(u, v, .79, .44, .11, .10), snout = Ell(u, v, .87, .50, .06, .05);
-			double horn = Math.Min(Bar(u, v, .74, .36, .70, .29, .015), Bar(u, v, .84, .36, .88, .29, .015));
-			double tail = Bar(u, v, .17, .48, .11, .66, .012);
-			if (legs || tail < 0) { r = g = b = .85; a = 1; if (v > .84 && legs) { r = g = b = .15; } }
-			if (body < 1 || head < 1)
-			{
-				double patch = Fbm(u, v, 3, 3, 2, 621) > 0.12 && head > 1 ? 1 : 0;
-				double sh = 0.75 + 0.25*Clamp(-(v - .45)*4);
-				r = g = b = patch > 0 ? .12*sh : .92*sh; a = 1;
-			}
-			if (snout < 1) { r = .95; g = .65; b = .65; a = 1; }
-			if (horn < 0) { r = .9; g = .85; b = .7; a = 1; }
-			if (Ell(u, v, .81, .41, .018, .018) < 1) { r = g = b = .05; }   // eye
-			img.Set(x, y, r, g, b, a);
+			double u = (x + 0.5)/256, v = (y + 0.5)/64;
+			double temp = Math.Exp(-(1 - u)*3.2) * (1 + 0.06*Fbm(u, v, 12, 2, 2, 981));
+			var c = HeatCol(MELT_HEAT, Clamp(temp));
+			double streak = 0.08*Smooth(0.2, 0.7, Fbm(u*1, v, 24, 4, 2, 982))*Clamp(temp*1.5);
+			double top = 0.22*Clamp(1 - v/0.25), dark = 0.42*Smooth(0.25, 1, v);
+			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(Clamp(c[k] + streak), new[] { 1, 235/255.0, 180/255.0 }[k], top)*(1 - dark));
+			img.Set(x, y, c[0], c[1], c[2], Smooth(0.4, 0.9, temp));   // the crust shows through from about 0.4 heat down
 		}
 		return img;
 	}
-	public static Img Pig()            // a little pink pig facing right, curly tail
+
+	static double[] BoxBlur(double[] src, int w, int h, int rad)
 	{
-		var img = new Img(64, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
-		{
-			double u = x/63.0, v = y/63.0, r = 0, g = 0, b = 0, a = 0;
-			bool legs = false;
-			foreach (double lx in new[] { .28, .38, .56, .66 }) if (Bar(u, v, lx, .66, lx, .88, .04) < 0) legs = true;
-			double body = Ell(u, v, .46, .56, .30, .18), head = Ell(u, v, .77, .50, .12, .11), snout = Ell(u, v, .89, .53, .045, .055);
-			double ear = Bar(u, v, .74, .40, .70, .32, .03);
-			double tr = Math.Sqrt((u - .14)*(u - .14) + (v - .48)*(v - .48));
-			double tail = Math.Abs(tr - .045) - .012;
-			double sh = 0.75 + 0.25*Clamp(-(v - .5)*4);
-			if (legs) { r = .90*sh; g = .58*sh; b = .62*sh; a = 1; if (v > .85) { r = .45; g = .25; b = .25; } }
-			if (tail < 0 && u < .16) { r = .95; g = .62; b = .66; a = 1; }
-			if (body < 1 || head < 1 || ear < 0) { r = .98*sh; g = .66*sh; b = .70*sh; a = 1; }
-			if (snout < 1) { r = .90; g = .48; b = .55; a = 1; if (Ell(u, v, .885, .515, .01, .016) < 1 || Ell(u, v, .9, .55, .01, .016) < 1) { r = .4; g = .15; b = .2; } }
-			if (Ell(u, v, .79, .46, .016, .016) < 1) { r = g = b = .05; }   // eye
-			img.Set(x, y, r, g, b, a);
-		}
-		return img;
-	}
-	public static Img Bones()          // a skull and crossed bones on a blood stain
-	{
-		var img = new Img(64, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
-		{
-			double u = x/63.0, v = y/63.0, r = 0, g = 0, b = 0, a = 0;
-			double pool = Ell(u, v, .50, .87, .40, .08) + 0.15*Noise(u*6, v*6, 64, 64, 631);
-			if (pool < 1) { r = .45; g = .03; b = .04; a = .9; }
-			double bone1 = Bar(u, v, .22, .82, .74, .64, .035), bone2 = Bar(u, v, .24, .62, .76, .80, .035);
-			double knob = Math.Min(Math.Min(Ell(u, v, .21, .80, .05, .05), Ell(u, v, .75, .62, .05, .05)), Math.Min(Ell(u, v, .23, .60, .05, .05), Ell(u, v, .77, .82, .05, .05)));
-			double skull = Ell(u, v, .50, .55, .16, .14), jaw = Ell(u, v, .50, .69, .09, .06);
-			if (bone1 < 0 || bone2 < 0 || knob < 1) { r = .86; g = .82; b = .72; a = 1; }
-			if (skull < 1 || jaw < 1)
-			{
-				double sh = 0.7 + 0.3*Clamp(-(v - .5)*5 - (u - .5)*2);
-				r = .93*sh; g = .90*sh; b = .80*sh; a = 1;
-				if (Ell(u, v, .44, .55, .04, .045) < 1 || Ell(u, v, .56, .55, .04, .045) < 1) { r = g = b = .1; }   // eye sockets
-				if (Ell(u, v, .50, .63, .015, .02) < 1) { r = g = b = .15; }
-			}
-			img.Set(x, y, r, g, b, a);
-		}
-		return img;
-	}
-	public static Img Cleaver()        // handle straight down from the centre; the blade off the top, edge on its right
-	{
-		var img = new Img(64, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
-		{
-			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0;
-			double handle = Smooth(0.07, 0.05, Math.Abs(dx)) * Smooth(0.95, 0.9, dy) * Smooth(-0.40, -0.36, dy);
-			bool blade = dx > -0.07 && dx < 0.58 && dy > -0.95 && dy < -0.36;
-			double r = 0, g = 0, bl = 0, a = 0;
-			if (handle > 0.01) { double s = 0.8 + 0.2*Noise(dy*12, dx*4, 64, 64, 641); r = .30*s; g = .17*s; bl = .09*s; a = handle; }
-			if (blade)
-			{
-				double s = 0.55 + 0.35*Clamp((dx + 0.07)/0.65) + 0.25*Math.Exp(-Math.Pow((dx - 0.55)*30, 2));   // bright cutting edge
-				r = .70*s; g = .72*s; bl = .76*s; a = 1;
-				if (Ell(dx, dy, .05, -.80, .05, .05) < 1) { r = .15; g = .15; bl = .17; }                       // the hanging hole
-			}
-			img.Set(x, y, r, g, bl, a);
-		}
-		return img;
+		var tmp = new double[w*h]; var dst = new double[w*h];
+		for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+		{ double s = 0; int n = 0; for (int k = -rad; k <= rad; k++) { int xx = x + k; if (xx < 0 || xx >= w) continue; s += src[y*w + xx]; n++; } tmp[y*w + x] = s/(2*rad + 1); }
+		for (int y = 0; y < h; y++) for (int x = 0; x < w; x++)
+		{ double s = 0; for (int k = -rad; k <= rad; k++) { int yy = y + k; if (yy < 0 || yy >= h) continue; s += tmp[yy*w + x]; } dst[y*w + x] = s/(2*rad + 1); }
+		return dst;
 	}
 
 	// ================================================================ live-drawn pieces (vines, flowers, twinkles)
@@ -1130,9 +1990,17 @@ $jobs = [ordered]@{
 	'p_bobber'   = { [CastbarArt]::Bobber() };      'p_ripple'    = { [CastbarArt]::Ripple() }
 	'p_cart'     = { [CastbarArt]::Cart() };        'p_wheel'     = { [CastbarArt]::Wheel() }
 	'p_pickaxe'  = { [CastbarArt]::Pickaxe() }
-	'skin_base'  = { [CastbarArt]::SkinBase() };    'skin_blood'  = { [CastbarArt]::SkinBlood() }
-	'p_cow'      = { [CastbarArt]::Cow() };         'p_pig'       = { [CastbarArt]::Pig() }
-	'p_bones'    = { [CastbarArt]::Bones() };       'p_cleaver'   = { [CastbarArt]::Cleaver() }
+	'skin_fur'   = { [CastbarArt]::SkinFur() };     'skin_fur_hi' = { [CastbarArt]::SkinFurHi() }
+	'skin_meat'  = { [CastbarArt]::SkinMeat() };    'p_pool'      = { [CastbarArt]::PoolBlots() }
+	'p_roll_fur' = { [CastbarArt]::RollFur() };     'p_roll_mask' = { [CastbarArt]::RollMask() }
+	'p_roll_shade' = { [CastbarArt]::RollShade() }; 'p_roll_end'  = { [CastbarArt]::RollEnd() }
+	'p_roll_spiral' = { [CastbarArt]::RollSpiral() }
+	'p_knife_wood' = { [CastbarArt]::Knife($false) }; 'p_knife_antler' = { [CastbarArt]::Knife($true) }
+	'smith_iron' = { [CastbarArt]::SmithIron() };   'smith_hot'   = { [CastbarArt]::SmithHot() }
+	'smith_cold' = { [CastbarArt]::SmithCold() };   'smith_temper' = { [CastbarArt]::SmithTemper() }
+	'p_hammer_wood' = { [CastbarArt]::Hammer($false) }; 'p_hammer_antler' = { [CastbarArt]::Hammer($true) }
+	'smelt_crust' = { [CastbarArt]::SmeltCrust() }; 'smelt_hot'   = { [CastbarArt]::SmeltHot() }
+	'smelt_stream' = { [CastbarArt]::SmeltStream() }; 'p_ladle'   = { [CastbarArt]::Ladle() }
 	'p_chip'     = { [CastbarArt]::Chip() };        'p_flower'    = { [CastbarArt]::Flower() }
 	'fire_base'  = { [CastbarArt]::FireBase() };    'fire_flow'   = { [CastbarArt]::FireFlow() }
 	'shadow_base'= { [CastbarArt]::ShadowBase() };  'shadow_flow' = { [CastbarArt]::ShadowFlow() }
