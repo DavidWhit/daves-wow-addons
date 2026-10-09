@@ -1,7 +1,7 @@
 # Dave's Cast Bar (daves_castbar)
 
-An animated, elemental player cast bar for WoW Forever. Each spell gets one of seventeen looks (seven elements,
-four gathering and five crafting professions, and a plain bar), and every cast is different:
+An animated, elemental player cast bar for WoW Forever. Each spell gets one of nineteen looks (seven elements,
+four gathering and six crafting professions, Disenchant, and a plain bar), and every cast is different:
 
 | Element | Look |
 | --- | --- |
@@ -9,7 +9,7 @@ four gathering and five crafting professions, and a plain bar), and every cast i
 | Fire | Scrolling flames rising up the bar; embers rise from the bottom and carry on off the top |
 | Shadow | Black smoke with purple seams, dark wisps drifting up |
 | Nature | Vines that grow with the cast, twisting around each other, with leaves and thorns |
-| Lightning | A dark storm: painted clouds, a far row of small ones and a near bank of big ones laid out afresh every cast, drift at their own pace; forked bolts strike inside the bar and light the clouds near them from within; now and then a dim sheet of lightning. Lightning, Thunder and Storm spells (and Elemental shamans) |
+| Lightning | A dark storm: a painted indigo cloud (the one in `tools/ref_cloud.jpg`), laid out afresh every cast as a far row of small copies and a near bank of big ones, some mirrored, drifting at their own pace; forked bolts strike inside the bar and light the clouds near them from within; now and then a dim sheet of lightning. Lightning, Thunder and Storm spells (and Elemental shamans) |
 | Arcane | Rune circles at random heights and sizes, held still (turning made them shimmer); glyphs flare up |
 | Holy | Soft gold with four-point stars twinkling in and out |
 | Fishing | A pond: lily pads drift on top, fish swim below, the bobber rides the cast edge with ripples |
@@ -17,12 +17,12 @@ four gathering and five crafting professions, and a plain bar), and every cast i
 | Mining | Rails along a rock wall: a gem cart rolls to the cast edge while a pickaxe strikes the wall at the end |
 | Skinning | The pelt rolls back over marbled meat: fur ahead of the cast (a different pelt every cast: bear, wolf, tawny cat, red fox, arctic white, black bear, nightsaber, boar), the hide rolling up at the cast edge, a pool of blood spreading behind the knife, which stands against the roll with its edge on it, sawing up and down |
 | Smelting | A forged-iron ladle rides the cast edge, pouring a glowing stream; the molten steel is pale yellow where it lands and cools through orange to dark crust behind it, its seams still glowing; sparks fly where the stream lands. At the end the ladle tips back and lifts away |
-| Blacksmithing | Red-hot iron, hottest at the cast edge, cold iron ahead; a forge hammer (wood and brass, or antler and steel) strikes the edge in rhythm, each blow a flash, sparks, a puff of steam and a flare that cools; steam rises more as it heats. Finishing quenches it: a cloud of steam and tempered steel, straw to blue |
+| Blacksmithing | Red-hot iron, hottest at the cast edge, cold iron ahead; a forge hammer (wood and brass, or antler and steel) strikes the edge in rhythm, each blow a flash, sparks, a puff of steam and a flare that cools; steam rises more as it heats. Finishing quenches it: a cloud of steam and grey tempered steel with a faint straw-to-blue sheen |
 | Alchemy | A bench of glassware stands on the bar, shuffled every cast: a flask boiling over a burner, a retort, measuring cylinders, a condenser, a glass coil, a vial rack, a funnel dripping into a beaker, joined by glass, bent glass and hoses with brass valves. The potion works its way through, lighting burners and filling each in turn, and pours into the bar, which fills like a liquid (it spreads, sloshes and bubbles) and brims at the end |
-| Tailoring | A small loom: taut warp ahead of the cast, woven cloth behind it (linen, wool, silk, mageweave, runecloth or mooncloth, one per cast in turn, with a slow sheen); at the cast edge a small worn boat shuttle crosses the shed with the weft and a slim steel reed beats each pick in, fluff flying; loose weft ends poke out of the selvedges |
+| Tailoring | A small loom: taut warp ahead of the cast, woven cloth behind it (linen, wool, silk, mageweave, runecloth or mooncloth, one per cast in turn, with a slow sheen); at the cast edge a small worn boat shuttle crosses the shed with the weft and a slim steel reed beats each pick in, fluff flying; the loom is clipped to the bar, so nothing of it shows past the bar's lines |
 | Leatherworking | Tooled leather panels (five tones; the tooling changes each cast: basket-weave, scrolling vine, diamond lattice, bordered shells, knotwork band) lie across the bar with their lacing holes punched, apart by the gaps still open. As the cast reaches each joint the gap closes and a steel needle cross-laces it shut with a thong; running stitches follow along both edges |
 | Enchanting | Dark velvet the magic settles on (a palette per cast: violet, sea-blue, orchid or indigo): behind the cast edge it shimmers with flowing bands of light and glitter; at the edge a vortex of spinning rings pulls glittering dust out of the unfilled part and spins it in |
-| Disenchant | The bar starts solid with magic; the vortex comes in at the right end and moves left, drawing the magic out of the solid part ahead of it (it fades as it is drawn off) and throwing it out behind as glittering dust and essence motes that settle on the cloth it leaves spent. For the spell Disenchant |
+| Disenchant | The bar starts solid with magic; the vortex comes in at the right end and moves left, drawing the magic out of the solid part ahead of it (it fades as it is drawn off) and throwing it out behind as glittering dust and small shimmers that settle on the cloth it leaves spent; the vortex leads the edge and is clipped away by the time the cast completes. For the spell Disenchant |
 | Plain | Blizzard's own cast bar art (its filling, green for channels, full when done, red when interrupted), no effects. The default for casts the addon can't place (the "Other casts" setting) |
 
 Spell looks mark the cast edge with a spark, like Blizzard's bar for damage and healing casts; casts that are not spells (the gathering and crafting professions) get no marker, and their own art shows the progress.
@@ -55,7 +55,7 @@ with "Flame", ...), then your class and specialization, then the "Other casts" s
 | Link into the game | `Deploy-WowAddon.ps1 -Path . -Flavor forever` |
 | Rebuild the art | `& .\tools\Make-CastbarMedia.ps1` |
 | Animated preview in the browser | `& .\tools\Show-Preview.ps1` |
-| Profession concepts (not in game yet) | open `tools/concepts/index.html` (see its README) |
+| Concepts the looks were designed from | open `tools/concepts/index.html` (see its README) |
 | Reload after editing Lua | `/reload` in game (new files, textures or TOC changes need a full restart) |
 
 The approved look is kept in `tools/reference/` for future changes.
