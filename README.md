@@ -15,13 +15,13 @@ World of Warcraft addons for **WoW: Forever** (Interface 16001), plus the Claude
 
 ### Dave's Cast Bar
 
-An animated cast bar that replaces Blizzard's. Each spell gets a look, and every cast is different. There are six elements plus four gathering professions: Fishing, Herbalism, Mining and Skinning are picked automatically from the spell.
+An animated cast bar that replaces Blizzard's. Each spell gets a look, and every cast is different. There are seven elements, four gathering professions (Fishing, Herbalism, Mining, Skinning), six crafting professions (Smelting, Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting), a Disenchant look and Blizzard's plain bar, all picked automatically from the spell or its recipe. Framed or borderless, square, soft or rounded corners, flat or bevelled.
 
-![Dave's Cast Bar: frost, fire, shadow, nature, arcane, holy, fishing, herbalism, mining and skinning](docs/images/daves_castbar.png)
+![Dave's Cast Bar: every look](docs/images/daves_castbar.png)
 
 ```text
 /castbar                 options
-/castbar test fishing    play a pretend cast of one look (frost, fire, shadow, nature, lightning, arcane, holy, fishing, herbalism, mining, skinning, smelting, blacksmithing, alchemy, plain)
+/castbar test fishing    play a pretend cast of one look (frost, fire, shadow, nature, lightning, arcane, holy, fishing, herbalism, mining, skinning, smelting, blacksmithing, alchemy, tailoring, leatherworking, enchanting, disenchant, plain)
 /castbar set frost       right after casting a spell: always give that spell this look (/castbar set auto undoes it)
 /castbar unlock          move and resize the bar outside Edit Mode (/castbar lock, /castbar reset)
 ```
