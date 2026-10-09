@@ -5,9 +5,9 @@
 -- templates where the client has them and fall back to plain widgets plus our
 -- own art (Media\thumb) where it doesn't.
 
-local ADDON, ns = ...
+local _, ns = ...
 local M = ns.MEDIA
-local floor, format = math.floor, string.format
+local floor, max, format = math.floor, math.max, string.format
 
 local opt
 local controls = {}
@@ -64,7 +64,14 @@ local function Slider(x, y, width, label, minV, maxV, step, fmt, get, set)
 	s:SetOrientation("HORIZONTAL")
 	s:SetHeight(20)
 	s:SetPoint("BOTTOMLEFT"); s:SetPoint("BOTTOMRIGHT")
-	s:SetMinMaxValues(minV, maxV)
+	-- A limit may be a function: the window's hard size limits move with the
+	-- screen, the gold and the reagent bag, so they're re-read on every Refresh.
+	local function Bounds()
+		local lo = type(minV) == "function" and minV() or minV
+		local hi = type(maxV) == "function" and maxV() or maxV
+		return lo, max(lo, hi)
+	end
+	s:SetMinMaxValues(Bounds())
 	s:SetValueStep(step)
 	if s.SetObeyStepOnDrag then s:SetObeyStepOnDrag(true) end
 	s:SetThumbTexture(M .. "thumb")
@@ -89,6 +96,7 @@ local function Slider(x, y, width, label, minV, maxV, step, fmt, get, set)
 
 	function f:Refresh()
 		self.syncing = true
+		s:SetMinMaxValues(Bounds())
 		local v = get()
 		s:SetValue(v); self.value:SetText(fmt(v))
 		self.syncing = false
@@ -178,6 +186,8 @@ local function Build()
 		})
 		border:SetBackdropColor(0, 0, 0, 0.8)
 	end
+	ns.optionsBorder = border
+	ns.ApplyBackground()
 
 	local title = Label(opt, "Bag Settings", "GameFontHighlightLarge")
 	title:SetPoint("TOP", 0, -15)
@@ -199,10 +209,10 @@ local function Build()
 
 	-- Left column: Size ------------------------------------------------------
 	Header("Size", LEFT_X, -50, LEFT_W)
-	Slider(LEFT_X, -72, LEFT_W, "Columns", ns.MIN_COLS, ns.MAX_COLS, 1,
+	Slider(LEFT_X, -72, LEFT_W, "Columns", ns.MinColumns, ns.MaxColumns, 1,
 		function(v) return format("%d", v) end,
 		function() return db.columns end,
-		function(v) db.columns = v; ns.Relayout() end)
+		function(v) db.columns = ns.ClampColumns(v); ns.Relayout() end)
 	Slider(LEFT_X, -120, LEFT_W, "Scale", 0.5, 2, 0.05,
 		function(v) return format("%d%%", floor(v * 100 + 0.5)) end,
 		function() return db.scale end,
@@ -210,14 +220,21 @@ local function Build()
 	Check(LEFT_X, -166, LEFT_W, "Fit height to my items",
 		function() return db.viewHeight == nil end,
 		function(on)
-			db.viewHeight = (not on) and floor(ns.CurrentViewHeight() + 0.5) or nil
+			db.viewHeight = (not on) and ns.ClampViewHeight(ns.CurrentViewHeight()) or nil
 			ns.Relayout(); RefreshAll()
 		end,
 		"The window fits your items each time you open your bags (up to 80% of the screen), then keeps that size while open: new items scroll instead of resizing it. Untick to set your own height.")
-	controls.height = Slider(LEFT_X, -196, LEFT_W, "Height", ns.MIN_VIEW, 1400, 10,
+	controls.height = Slider(LEFT_X, -196, LEFT_W, "Height", ns.MIN_VIEW, ns.MaxViewHeight, 10,
 		function(v) return format("%d", v) end,
 		function() return db.viewHeight or floor(ns.CurrentViewHeight() + 0.5) end,
-		function(v) db.viewHeight = v; ns.ApplyView() end)
+		function(v) db.viewHeight = ns.ClampViewHeight(v); ns.ApplyView() end)
+
+	-- Left column: Look -------------------------------------------------------
+	Header("Look", LEFT_X, -246, LEFT_W)
+	Slider(LEFT_X, -268, LEFT_W, "Background", 0.2, 1, 0.05,
+		function(v) return format("%d%%", floor(v * 100 + 0.5)) end,
+		function() return db.background or 0.8 end,
+		function(v) db.background = v; ns.ApplyBackground() end)
 
 	-- Right column: Sub-categories + Show -------------------------------------
 	local y = -50
@@ -265,9 +282,19 @@ local function Build()
 		function(on) db.autoPlaceSplit = on end,
 		"After you split a stack, the new stack goes straight into a free slot next to the original. Paused while a merchant, mailbox, trade, bank or auction window is open, so you can drop it there.")
 	y = y - 26
+	local reagent = Check(RIGHT_X, y, RIGHT_W, "Prefer the reagent bag",
+		function() return db.preferReagentBag ~= false end,
+		function(on) db.preferReagentBag = on end,
+		ns.REAGENT_BAG and "Reagents you drop on the window (and split reagent stacks) go into your reagent bag first, while it has room. Everything else goes into your bags."
+			or "This version of the game has no reagent bag.")
+	if not ns.REAGENT_BAG then
+		if reagent.Disable then reagent:Disable() end
+		reagent:SetAlpha(0.4)
+	end
+	y = y - 26
 
 	-- Full width: Start collapsed (3 x 3) -------------------------------------
-	local foldY = math.min(-236, y) - 20          -- below whichever column is longer
+	local foldY = math.min(-308, y) - 20          -- below whichever column is longer
 	Header("Start collapsed", LEFT_X, foldY, FULL_W)
 	local names = {}
 	for i, n in ipairs(ns.CATEGORY_NAMES) do names[i] = n end
@@ -295,11 +322,11 @@ local function Build()
 	local defaults = PanelButton("Restore Defaults", 150)
 	defaults:SetPoint("TOPRIGHT", -24, resetY - 22)
 	defaults:SetScript("OnClick", function()
-		db.columns, db.scale, db.viewHeight, db.pos = 10, 1, nil, nil
+		db.columns, db.scale, db.viewHeight, db.pos, db.background = ns.ClampColumns(10), 1, nil, nil, 0.8
 		db.splitReagents, db.splitConsumables = true, true
-		db.showCurrencies, db.showFreeSpace, db.autoPlaceSplit = true, true, true
+		db.showCurrencies, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag = true, true, true, true
 		wipe(db.collapsed); wipe(db.startFolded); wipe(db.offGroups)
-		ns.ApplyScale(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies(); RefreshAll()
+		ns.ApplyScale(); ns.ApplyBackground(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies(); RefreshAll()
 	end)
 
 	local tips = Label(opt, ns.TIPS or "", "GameFontDisableSmall")

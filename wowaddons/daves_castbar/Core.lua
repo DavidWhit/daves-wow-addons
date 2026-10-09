@@ -13,12 +13,15 @@ ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
 
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 
+-- The bar's size limits. The minimum keeps each look's art visible and the text (which scales
+-- with the bar, Bar.lua LayoutText) readable; ns:Layout holds saved sizes to it too.
+ns.MIN_W, ns.MAX_W, ns.MIN_H, ns.MAX_H = 200, 800, 20, 80
+
 local DEFAULTS = {
 	enabled = true,
 	width = 300,
 	height = 26,
 	scale = 1.0,
-	borderless = true,      -- soft ragged edges; false draws a thin frame in the element's colour
 	showName = true,
 	showTime = true,
 	showIcon = false,
@@ -29,7 +32,10 @@ local DEFAULTS = {
 	hideBlizzard = true,    -- hide Blizzard's player cast bar while ours is enabled
 	locked = true,          -- unlocked: drag the bar any time, not just in Edit Mode
 	point = "BOTTOM", relPoint = "BOTTOM", x = 0, y = 190,
-	fallback = "arcane",    -- element for casts we can't place (professions, hearthstone, ...)
+	style = "framed",      -- "framed" (a thin line in the look's colour) or "borderless" (none); edges are always clean
+	corners = "soft",      -- "square", "soft" (slightly rounded) or "rounded"
+	depth = "flat",        -- "flat" or "bevel" (light along the top, shade along the bottom, a shadow inside the frame)
+	fallback = "plain",     -- the look for casts we can't place (other professions, hearthstone, ...): Blizzard's own bar art
 	spellElements = {},     -- [spellID] = element, set with /castbar set
 }
 
@@ -61,6 +67,7 @@ function ns:ADDON_LOADED(name)
 			DavesCastbarDB[k] = type(v) == "table" and {} or v
 		end
 	end
+	DavesCastbarDB.borderless = nil   -- the old ragged-edge style's key (removed in 0.4.0); db.style replaces it, with clean edges
 	ns.db = DavesCastbarDB
 
 	ns:InitBar()

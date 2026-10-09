@@ -4,7 +4,7 @@
 --                           centre, and Edit Mode frames beside it, like Blizzard's own (Shift: place freely)
 --   drag the corner grip    resize it; the right and bottom edges snap the same way
 --   click                   the bar's settings (the kit's shared Edit Mode dialog, EditModeDialog.lua):
---                           size, scale, style, text, a preview of each element
+--                           size, scale, style, corners, depth, text, a preview of each element
 --   right-click             reset position and size
 -- While Edit Mode is open the bar plays pretend casts so its look can be judged in place.
 --
@@ -38,7 +38,7 @@ local function DragUpdate()
 end
 
 -- Resizing keeps the top-left corner where it is.
-local MIN_W, MAX_W, MIN_H, MAX_H = 80, 800, 10, 80
+local MIN_W, MAX_W, MIN_H, MAX_H = ns.MIN_W, ns.MAX_W, ns.MIN_H, ns.MAX_H
 local function ResizeUpdate()
 	local scale, ui = bar:GetEffectiveScale(), UIParent:GetEffectiveScale()
 	local cx, cy = GetCursorPosition()
@@ -67,8 +67,18 @@ local function CreateDialog()
 	dialog:AddSlider({ label = "Width", min = MIN_W, max = MAX_W, step = 1, format = "%d", get = Number("width"), set = SetAndLayout("width") })
 	dialog:AddSlider({ label = "Height", min = MIN_H, max = MAX_H, step = 1, format = "%d", get = Number("height"), set = SetAndLayout("height") })
 	dialog:AddSlider({ label = "Scale", min = .5, max = 2, step = .05, format = "%.2f", get = Number("scale"), set = SetAndLayout("scale") })
-	dialog:AddCheckbox({ label = "Borderless (soft edges)", get = Flag("borderless"), set = SetFlag("borderless"),
-		tooltip = "On: the bar's edges fade out raggedly. Off: a thin frame in the element's colour." })
+	dialog:AddButtonGrid({ label = "Style", columns = 2,
+		buttons = { { key = "framed", text = "Framed" }, { key = "borderless", text = "Borderless" } },
+		onClick = function(key) db.style = key; ns:Layout() end,
+		isActive = function(key) return (db.style or "framed") == key end })
+	dialog:AddButtonGrid({ label = "Corners", columns = 3,
+		buttons = { { key = "square", text = "Square" }, { key = "soft", text = "Soft" }, { key = "rounded", text = "Rounded" } },
+		onClick = function(key) db.corners = key; ns:Layout() end,
+		isActive = function(key) return (db.corners or "soft") == key end })
+	dialog:AddButtonGrid({ label = "Depth", columns = 2,
+		buttons = { { key = "flat", text = "Flat" }, { key = "bevel", text = "Bevel" } },
+		onClick = function(key) db.depth = key; ns:Layout() end,
+		isActive = function(key) return (db.depth or "flat") == key end })
 	dialog:AddCheckbox({ label = "Show spell name", get = Flag("showName"), set = SetFlag("showName") })
 	dialog:AddCheckbox({ label = "Show time left", get = Flag("showTime"), set = SetFlag("showTime") })
 	dialog:AddCheckbox({ label = "Show spell icon", get = Flag("showIcon"), set = SetFlag("showIcon") })

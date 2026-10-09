@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cast bar concepts</title>
+<style>
+	:root { --text: #e8e6e1; --muted: #9a978f; --accent: #d4a94e; --panel: rgba(0,0,0,.45); }
+	* { box-sizing: border-box; }
+	body { margin: 0; color: var(--text); font: 14px/1.4 "Segoe UI", system-ui, sans-serif; min-height: 100vh; background: radial-gradient(ellipse at 30% 20%, #2a2f3a, #0e0f12 70%) fixed #101114; }
+	header { position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 12px 20px; background: var(--panel); backdrop-filter: blur(6px); }
+	h1 { font-size: 15px; margin: 0 8px 0 0; color: var(--accent); letter-spacing: .02em; }
+	label { display: flex; gap: 6px; align-items: center; color: var(--muted); white-space: nowrap; }
+	input[type=range] { width: 110px; }
+	button { background: #262830; color: var(--text); border: 1px solid #444; border-radius: 4px; padding: 3px 8px; font: inherit; }
+	main { padding: 10px 20px 40px; max-width: 100%; overflow-x: hidden; }
+	h2 { font-size: 15px; color: var(--accent); margin: 26px 0 4px; font-weight: 600; letter-spacing: .03em; }
+	.row { display: grid; grid-template-columns: 220px auto; align-items: center; gap: 4px 14px; }
+	.row .name { color: var(--text); }
+	.row .name b { color: var(--accent); margin-right: 6px; }
+	.row .name small { display: block; color: var(--muted); font-size: 12px; line-height: 1.3; }
+	canvas { display: block; }
+	#errors { color: #ff7a7a; white-space: pre-wrap; padding: 0 20px; }
+	footer { padding: 0 20px 30px; color: var(--muted); max-width: 760px; }
+	@media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+	<h1>Cast bar concepts</h1>
+	<label>Width <input id="w" type="range" min="200" max="560" value="340"></label>
+	<label>Height <input id="h" type="range" min="18" max="60" value="30"></label>
+	<label>Speed <input id="speed" type="range" min="0.25" max="2" step="0.05" value="1"></label>
+	<label><input id="freeze" type="checkbox"> Hold at <input id="hold" type="range" min="0" max="100" value="70"></label>
+	<button id="restart">Restart all</button>
+</header>
+<div id="errors"></div>
+<main id="bars"></main>
+<footer>Concepts only, drawn in the browser, so each can be judged before any game art is made. Showing the final draft per profession; add <code>?all</code> to the address to see every variant.</footer>
+
+<script>
+window.onerror = (m, src, line) => { document.getElementById('errors').textContent += `${m} (${(src || '').split('/').pop()}:${line})\n`; };
+const CONCEPTS = [];
+// The final drafts (2026-10-08). ?all shows every variant, ?only=skin,smith-a a selection.
+const PICKS = ['skin-c2', 'light-c2', 'smelt-a3', 'smith-a', 'alch-b2', 'tail-a2', 'ench-c', 'ench-c3', 'lw-b'];   // final drafts
+
+// ------------------------------------------------------------------ helpers for concept files
+const rand = (a, b) => a + Math.random() * (b - a);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a = 0, b = 1) => v < a ? a : v > b ? b : v;
+const lerp = (a, b, t) => a + (b - a) * t;
+const rgba = (c, a = 1) => `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`;
+const mix = (c1, c2, t) => [lerp(c1[0], c2[0], t), lerp(c1[1], c2[1], t), lerp(c1[2], c2[2], t)];
+const easeOut = t => 1 - (1 - t) * (1 - t);
+const easeIn = t => t * t;
+const easeOutBack = t => { const c = 1.7; t -= 1; return 1 + t * t * ((c + 1) * t + c); };
+// smooth random signal in -1..1 that never visibly loops
+function wobble(scale = 1) {
+	const f = [rand(.07, .12), rand(.17, .26), rand(.37, .53)].map(v => v * scale), p = f.map(() => rand(0, 6.283));
+	return t => Math.sin(t * f[0] * 6.283 + p[0]) * .5 + Math.sin(t * f[1] * 6.283 + p[1]) * .3 + Math.sin(t * f[2] * 6.283 + p[2]) * .2;
+}
+// 1-D value noise, seeded per call
+function noise1(seed = Math.random() * 1000) {
+	const h = i => { const x = Math.sin((i + seed) * 127.1) * 43758.5453; return x - Math.floor(x); };
+	return x => { const i = Math.floor(x), f = x - i, u = f * f * (3 - 2 * f); return lerp(h(i), h(i + 1), u) * 2 - 1; };
+}
+function roundRectPath(g, x, y, w, h, r) {
+	r = Math.min(r, h / 2, w / 2);
+	g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+	g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+}
+
+// Particles. kinds: dot, spark (streak along velocity), smoke (soft puff that grows), drop (teardrop), glow (additive soft dot)
+class Particles {
+	constructor() { this.list = []; }
+	emit(o) { this.list.push(Object.assign({ x: 0, y: 0, vx: 0, vy: 0, ay: 0, drag: 0, life: 1, age: 0, size: 2, grow: 0, color: [255, 255, 255], alpha: 1, kind: 'dot', add: false }, o)); }
+	update(dt) {
+		for (const q of this.list) {
+			q.age += dt; q.vy += q.ay * dt;
+			const d = Math.max(0, 1 - q.drag * dt); q.vx *= d; q.vy *= d;
+			q.x += q.vx * dt; q.y += q.vy * dt; q.size += q.grow * dt;
+		}
+		this.list = this.list.filter(q => q.age < q.life);
+	}
+	draw(g, filter) {
+		for (const q of this.list) {
+			if (filter && !filter(q)) continue;
+			const t = q.age / q.life, a = q.alpha * (q.kind === 'smoke' ? Math.sin(Math.PI * Math.min(1, t * 1.4 + .05)) * (1 - t) : 1 - t * t);
+			g.globalCompositeOperation = q.add || q.kind === 'glow' || q.kind === 'spark' ? 'lighter' : 'source-over';
+			if (q.kind === 'spark') {
+				g.strokeStyle = rgba(q.color, a); g.lineWidth = q.size; g.lineCap = 'round';
+				g.beginPath(); g.moveTo(q.x, q.y); g.lineTo(q.x - q.vx * .035, q.y - q.vy * .035); g.stroke();
+			} else if (q.kind === 'smoke' || q.kind === 'glow') {
+				const r = Math.max(.5, q.size), gr = g.createRadialGradient(q.x, q.y, 0, q.x, q.y, r);
+				gr.addColorStop(0, rgba(q.color, a)); gr.addColorStop(1, rgba(q.color, 0));
+				g.fillStyle = gr; g.beginPath(); g.arc(q.x, q.y, r, 0, 6.283); g.fill();
+			} else if (q.kind === 'drop') {
+				const ang = Math.atan2(q.vy, q.vx), r = q.size;
+				g.fillStyle = rgba(q.color, a); g.save(); g.translate(q.x, q.y); g.rotate(ang);
+				g.beginPath(); g.arc(0, 0, r, Math.PI / 2, -Math.PI / 2); g.lineTo(-r * 2.6, 0); g.closePath(); g.fill(); g.restore();
+			} else {
+				g.fillStyle = rgba(q.color, a); g.beginPath(); g.arc(q.x, q.y, Math.max(.3, q.size), 0, 6.283); g.fill();
+			}
+		}
+		g.globalCompositeOperation = 'source-over';
+	}
+}
+
+// ------------------------------------------------------------------ the bar
+const settings = { W: 340, H: 30, speed: 1, freeze: false, hold: .7 };
+const dpr = Math.min(2, window.devicePixelRatio || 1);
+
+class Bar {
+	constructor(c, parent) {
+		this.c = c;
+		const row = document.createElement('div'); row.className = 'row';
+		row.innerHTML = `<div class="name"><b>${c.letter}</b>${c.name}<small>${c.desc}</small></div>`;
+		this.cv = document.createElement('canvas'); row.appendChild(this.cv); parent.appendChild(row);
+		this.g = this.cv.getContext('2d');
+		this.newCast();
+	}
+	newCast() {
+		const c = this.c;
+		this.state = 'cast'; this.elapsed = 0; this.stateT = 0;
+		this.dur = rand(...(c.dur || [2.8, 3.6]));
+		this.s = { W: settings.W, H: settings.H, t: 0, dt: 0, p: 0, fill: 0, casting: true, done: false, doneT: 0, parts: new Particles() };
+		this.cv.style.opacity = 1;
+		try { c.init && c.init(this.s); } catch (e) { window.onerror(c.id + ' init: ' + e.message); }
+	}
+	frame(dt) {
+		const c = this.c, s = this.s, W = settings.W, H = settings.H;
+		const padX = Math.round(H * (c.padX || .7)), padT = Math.round(H * (c.padTop || 1.6)), padB = Math.round(H * (c.padBottom || .7));
+		const cw = W + padX * 2, ch = H + padT + padB;
+		if (this.cv.width !== Math.round(cw * dpr) || this.cv.height !== Math.round(ch * dpr)) {
+			this.cv.width = Math.round(cw * dpr); this.cv.height = Math.round(ch * dpr);
+			this.cv.style.width = cw + 'px'; this.cv.style.height = ch + 'px';
+		}
+		if (s.W !== W || s.H !== H) { this.newCast(); return; }
+		const sdt = dt * settings.speed;
+		if (this.state === 'cast') {
+			this.elapsed += sdt;
+			if (settings.freeze) this.elapsed = Math.min(this.elapsed, settings.hold * this.dur);
+			if (this.elapsed >= this.dur) { this.state = 'done'; this.stateT = 0; }
+		} else {
+			this.stateT += sdt;
+			this.cv.style.opacity = this.stateT < .7 ? 1 : clamp((1.2 - this.stateT) / .5);
+			if (this.stateT > 1.5) { this.newCast(); return; }
+		}
+		s.dt = sdt; s.t += sdt; s.p = clamp(this.elapsed / this.dur); s.fill = W * (c.channel ? 1 - s.p : s.p);
+		s.casting = this.state === 'cast'; s.done = this.state === 'done'; s.doneT = this.stateT;
+
+		const g = this.g;
+		g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, cw, ch);
+		g.translate(padX, padT);
+		// empty track
+		roundRectPath(g, 0, 0, W, H, H * .18); g.fillStyle = 'rgba(6,6,10,.7)'; g.fill();
+		g.save();
+		try { c.draw(g, s); } catch (e) { if (!this.err) { this.err = 1; window.onerror(c.id + ' draw: ' + e.message); } }
+		g.restore();
+		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.shadowColor = 'transparent'; g.filter = 'none';
+		// finished: a bright flash that fades
+		if (s.done) {
+			g.save(); roundRectPath(g, 0, 0, W, H, H * .18); g.clip();
+			g.globalCompositeOperation = 'lighter'; g.globalAlpha = clamp(1 - this.stateT / .35) * .7;
+			g.fillStyle = rgba(c.flash || [255, 240, 200]); g.fillRect(0, 0, W, H); g.restore();
+			g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+		}
+		// thin dark frame so every concept reads as a bar
+		roundRectPath(g, -.5, -.5, W + 1, H + 1, H * .18); g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 1.5; g.stroke();
+		// tools held in front of the bar (knife, hammer, ladle) draw over its frame line
+		if (c.over) {
+			g.save();
+			try { c.over(g, s); } catch (e) { if (!this.errOver) { this.errOver = 1; window.onerror(c.id + ' over: ' + e.message); } }
+			g.restore();
+			g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.shadowColor = 'transparent'; g.filter = 'none';
+		}
+		// text
+		const fs = Math.max(10, Math.round(H * .44));
+		g.font = `600 ${fs}px Georgia, "Times New Roman", serif`; g.textBaseline = 'middle';
+		g.shadowColor = 'rgba(0,0,0,.95)'; g.shadowBlur = 3; g.shadowOffsetY = 1; g.fillStyle = '#fff';
+		g.textAlign = 'left'; g.fillText(c.spell, H * .4, H / 2 + 1);
+		if (s.casting) { g.textAlign = 'right'; g.fillText(Math.max(0, this.dur - this.elapsed).toFixed(1), W - H * .4, H / 2 + 1); }
+		g.shadowColor = 'transparent'; g.shadowBlur = 0; g.shadowOffsetY = 0;
+	}
+}
+
+// ------------------------------------------------------------------ wiring
+const bars = [];
+const $ = id => document.getElementById(id);
+function bind() {
+	const upd = () => {
+		settings.W = +$('w').value; settings.H = +$('h').value; settings.speed = +$('speed').value;
+		settings.freeze = $('freeze').checked; settings.hold = $('hold').value / 100;
+	};
+	['w', 'h', 'speed', 'freeze', 'hold'].forEach(id => $(id).addEventListener('input', upd));
+	$('restart').addEventListener('click', () => bars.forEach(b => b.newCast()));
+	upd();
+}
+function start() {
+	// URL options, e.g. ?only=skin&h=40&hold=60&sim=2 (sim: seconds to pre-run, for screenshots)
+	const q = new URLSearchParams(location.search);
+	for (const id of ['w', 'h', 'speed', 'hold']) if (q.has(id)) $(id).value = q.get(id);
+	if (q.has('hold')) $('freeze').checked = true;
+	bind();
+	const main = $('bars');
+	let group = null;
+	for (const c of CONCEPTS) {
+		if (q.get('only') && !q.get('only').split(',').some(k => c.id === k || c.id.startsWith(k + '-'))) continue;
+		if (!q.get('only') && !q.has('all') && !PICKS.includes(c.id)) continue;
+		if (c.group !== group) { group = c.group; const h = document.createElement('h2'); h.textContent = group; main.appendChild(h); }
+		bars.push(new Bar(c, main));
+	}
+	for (let i = 0; i < (+q.get('sim') || 0) * 60; i++) for (const b of bars) b.frame(1 / 60);
+	let last = performance.now();
+	const tick = now => {
+		const dt = Math.max(0, Math.min(.05, (now - last) / 1000)); last = now;
+		for (const b of bars) b.frame(dt);
+		requestAnimationFrame(tick);
+	};
+	requestAnimationFrame(tick);
+}
+</script>
+<!--CONCEPTS-->
+<script src="skinning.js"></script>
+<script src="lightning.js"></script>
+<script src="lightning_painted.js"></script>
+<script src="ref_cloud_data.js"></script>
+<script src="lightning_sprites.js"></script>
+<script src="smelting.js"></script>
+<script src="smelting_foundry.js"></script>
+<script src="blacksmithing.js"></script>
+<script src="alchemy.js"></script>
+<script src="tailoring.js"></script>
+<script src="enchanting.js"></script>
+<script src="leatherworking.js"></script>
+<!--/CONCEPTS-->
+<script>start();</script>
+</body>
+</html>
