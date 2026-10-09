@@ -10,8 +10,10 @@
 --   fx        spark, particles and live effects; not clipped, so they can spill past the edges
 --   tools     (Effects.lua) things held in front of the bar, over its frame line: the skinning roll and knife
 --   text      spell name, time, icon
--- Borderless style: three mask textures per frame (ragged top/bottom edge, soft left and right
--- ends) fade the bar out instead of ending in a box. A mask must live in the frame it masks.
+-- Edges: framed or borderless (db.style); either way they are always clean - never frayed, ragged or torn (a
+-- ragged-edge style was removed in 0.4.0); new looks keep their art inside the bar with clean edges.
+-- Corners (db.corners): square, soft or rounded, by masks on every texture that reaches the edges (ns.MaskCorners).
+-- Depth (db.depth): flat, or a bevel laid over the fill (light along the top, shade along the bottom, an inner shadow).
 --
 -- Cast times come from UnitCastingInfo/UnitChannelInfo("player"). They are only secret for
 -- restricted units (SecretWhenUnitSpellCastRestricted, UnitDocumentation.lua), not for the player,
@@ -35,60 +37,60 @@ function ns.Wobble(scale)
 end
 ns.rand = rand
 
-local bar, track, clip, fx, textFrame, glowFrame, border
+local bar, track, clip, fx, textFrame, glowFrame, border, depth
 local contents = {}                -- [element] = content frame
 local W, H = 300, 26
 
--- The track's layers at their scroll offsets, keeping the texture's proportions on any bar size.
-local function TrackCoords()
-	local span = W / (TEX_W * H / 64)
-	track.tex:SetTexCoord(track.u, track.u + span, 0, 1)
-	track.hi:SetTexCoord(track.u2, track.u2 + span, 0, 1)
-end
-
 ---------------------------------------------------------------------------
--- Masks (borderless style)
+-- Corners (db.corners): "square", "soft" (rounded by .18 bar heights, the look so far) or "rounded" (.36).
+-- A mask on every texture that reaches the bar's edges rounds them: each frame holding such textures gets
+-- two masks, the bar's left end square and its right one (mirrored), wrapped CLAMP so they change nothing
+-- beyond their square. A hidden mask stops masking, so they are never hidden: square is an all-white mask.
+-- A texture takes three masks at most (Blizzard's EncounterTimelineTrackView checks that); the looks' own
+-- masks (the storm's glow, the spent velvet) make one each, so there is room for these two.
 ---------------------------------------------------------------------------
-local function CreateMasks(frame)
-	local v = frame:CreateMaskTexture()
-	v:SetAllPoints(bar)
-	v:SetTexture(MEDIA .. "edge_v", "REPEAT", "CLAMPTOWHITE")
-	local l = frame:CreateMaskTexture()
-	l:SetPoint("LEFT", bar, "LEFT")
-	l:SetTexture(MEDIA .. "edge_h", "CLAMPTOWHITE", "CLAMPTOWHITE")
-	local r = frame:CreateMaskTexture()
-	r:SetPoint("RIGHT", bar, "RIGHT")
-	r:SetTexture(MEDIA .. "edge_h", "CLAMPTOWHITE", "CLAMPTOWHITE")
-	r:SetTexCoord(1, 0, 0, 1)
-	frame.masks = { v, l, r }
-	frame.maskable = {}
-	frame.masked = ns.db.borderless      -- textures added later follow this
-end
+local CORNERS = { square = { r = 0, mask = "corner_square" }, soft = { r = .18, mask = "corner_soft" }, rounded = { r = .36, mask = "corner_rounded" } }
+local cornerMasks = {}             -- every mask made, for Layout to size and retexture
+local function CornerStyle() return CORNERS[ns.db and ns.db.corners] or CORNERS.soft end
 
-local function LayoutMasks(frame)
-	local v, l, r = frame.masks[1], frame.masks[2], frame.masks[3]
-	v:SetTexCoord(0, W / (256 * H / 64), 0, 1)       -- keep the ragged edge's proportions on any width
-	local cap = math.min(W / 3, H * 1.4)
-	l:SetSize(cap, H); r:SetSize(cap, H)
-end
-
-local function SetMasked(frame, tex, on)
-	for _, m in ipairs(frame.masks) do
-		if on then tex:AddMaskTexture(m) else tex:RemoveMaskTexture(m) end
+local function CornerMasksFor(frame)
+	if frame.cornerMasks then return frame.cornerMasks end
+	local file = MEDIA .. CornerStyle().mask
+	local m = {}
+	for i = 1, 2 do
+		local mask = frame:CreateMaskTexture()
+		mask:SetTexture(file, "CLAMP", "CLAMP")
+		mask.file = file
+		mask:SetSnapToPixelGrid(false); mask:SetTexelSnappingBias(0)
+		if i == 1 then mask:SetPoint("TOPLEFT", bar, "TOPLEFT")
+		else mask:SetPoint("TOPRIGHT", bar, "TOPRIGHT"); mask:SetTexCoord(1, 0, 0, 1) end
+		mask:SetSize(H, H)
+		m[i] = mask
+		cornerMasks[#cornerMasks + 1] = mask
 	end
+	frame.cornerMasks = m
+	return m
 end
 
--- Remember a texture as one the borderless masks apply to.
-function ns.Maskable(frame, tex)
-	frame.maskable[#frame.maskable + 1] = tex
-	if frame.masked then SetMasked(frame, tex, true) end
+-- Round a texture's corners where it meets the bar's edges (with the masks of the frame it belongs to).
+function ns.MaskCorners(tex)
+	local m = CornerMasksFor(tex:GetParent())
+	tex:AddMaskTexture(m[1]); tex:AddMaskTexture(m[2])
 	return tex
 end
 
-local function ApplyMasks(frame, on)
-	if frame.masked == on then return end
-	frame.masked = on
-	for _, tex in ipairs(frame.maskable) do SetMasked(frame, tex, on) end
+-- Every texture made on this frame from now on gets the corner masks (the track, each element's content).
+function ns.MaskAllTextures(frame)
+	local CreateTexture = frame.CreateTexture
+	frame.CreateTexture = function(self, ...) return ns.MaskCorners(CreateTexture(self, ...)) end
+end
+
+-- The track's layers at their scroll offsets, keeping the texture's proportions on any bar size.
+local function TrackCoords()
+	if track.atlas then return end      -- an atlas (the plain look's Blizzard background) keeps its own coordinates
+	local span = W / (TEX_W * H / 64)
+	track.tex:SetTexCoord(track.u, track.u + span, 0, 1)
+	track.hi:SetTexCoord(track.u2, track.u2 + span, 0, 1)
 end
 
 ---------------------------------------------------------------------------
@@ -99,7 +101,7 @@ local function LayerTexture(content, name, blend, sublevel)
 	tex:SetAllPoints(content)
 	tex:SetTexture(MEDIA .. name, "REPEAT", "REPEAT")
 	tex:SetBlendMode(blend)
-	return ns.Maskable(content, tex)
+	return tex
 end
 
 local function GetContent(key)
@@ -109,9 +111,9 @@ local function GetContent(key)
 	content:SetPoint("TOPLEFT", bar, "TOPLEFT")
 	content:SetSize(W, H)
 	content.key, content.cfg = key, cfg
-	CreateMasks(content)
+	ns.MaskAllTextures(content)   -- its art follows the corners
 
-	local black = ns.Maskable(content, content:CreateTexture(nil, "BACKGROUND"))
+	local black = content:CreateTexture(nil, "BACKGROUND")
 	black:SetAllPoints(content)
 	black:SetColorTexture(0, 0, 0, 1)
 
@@ -123,7 +125,7 @@ local function GetContent(key)
 	content.veil = LayerTexture(content, "veil", "ADD", 6)
 	content.veil:SetVertexColor(cfg.veil[1], cfg.veil[2], cfg.veil[3])
 
-	local flash = ns.Maskable(content, content:CreateTexture(nil, "OVERLAY", nil, 7))
+	local flash = content:CreateTexture(nil, "OVERLAY", nil, 7)
 	flash:SetAllPoints(content)
 	flash:SetColorTexture(1, 1, 1, 1)
 	flash:SetBlendMode("ADD")
@@ -139,7 +141,6 @@ end
 
 local function LayoutContent(content)
 	content:SetSize(W, H)
-	LayoutMasks(content)
 	ns.FX:LayoutContent(content, W, H)
 end
 
@@ -178,14 +179,15 @@ function ns:InitBar()
 	track = CreateFrame("Frame", nil, bar)
 	track:SetAllPoints()
 	track:SetFrameLevel(bar:GetFrameLevel() + 1)
-	CreateMasks(track)
-	track.bg = ns.Maskable(track, track:CreateTexture(nil, "BACKGROUND"))
+	ns.MaskAllTextures(track)
+	track.bg = track:CreateTexture(nil, "BACKGROUND")
 	track.bg:SetAllPoints()
 	track.bg:SetColorTexture(.024, .024, .04, 1)
-	track.tex = ns.Maskable(track, track:CreateTexture(nil, "ARTWORK"))
+	track.bg:SetAlpha(.85)
+	track.tex = track:CreateTexture(nil, "ARTWORK")
 	track.tex:SetAllPoints()
 	track.tex:SetAlpha(.16)
-	track.hi = ns.Maskable(track, track:CreateTexture(nil, "ARTWORK", nil, 1))   -- an element's own track can add a bright layer
+	track.hi = track:CreateTexture(nil, "ARTWORK", nil, 1)   -- an element's own track can add a bright layer
 	track.hi:SetAllPoints()
 	track.hi:SetBlendMode("ADD")
 	track.hi:Hide()
@@ -196,29 +198,60 @@ function ns:InitBar()
 	clip:SetClipsChildren(true)
 	clip:SetFrameLevel(bar:GetFrameLevel() + 2)
 
+	-- live effects (particles, sprites, the spark, vines, the pond, the mine cart): above the frame line (border, + 7),
+	-- so embers, flakes, wisps, twinkles, the bobber and the cart overlap the frame when the bar is framed, on
+	-- every look alike. Only the loom's tools are clipped to the bar (Effects_Tailor.lua), on purpose.
 	fx = CreateFrame("Frame", nil, bar)
 	fx:SetAllPoints()
-	fx:SetFrameLevel(bar:GetFrameLevel() + 6)
+	fx:SetFrameLevel(bar:GetFrameLevel() + 8)
 	ns.fxFrame = fx
 	local spark = fx:CreateTexture(nil, "OVERLAY", nil, 6)
 	spark:SetTexture(MEDIA .. "spark"); spark:SetBlendMode("ADD")
 	fx.spark, fx.sparkWob = spark, ns.Wobble(6)
 
-	-- framed style: a dark outline and a thin line in the element's colour
+	-- the frame: a dark outline and a thin line in the element's colour. Edges are clean - never frayed,
+	-- ragged or torn (a ragged-edge style was removed in 0.4.0; don't bring one back for new looks)
 	border = CreateFrame("Frame", nil, bar)
 	border:SetAllPoints()
 	border:SetFrameLevel(bar:GetFrameLevel() + 7)
-	border.dark, border.lit = {}, {}
+	border.dark, border.lit, border.capDark, border.capLit = {}, {}, {}, {}
 	for i = 1, 4 do border.dark[i] = EdgeTexture(border, "BORDER", 0); border.lit[i] = EdgeTexture(border, "BORDER", 1) end
 	for _, t in ipairs(border.dark) do t:SetVertexColor(0, 0, 0, .8) end
-	local function Frame4(t, inset, size)
-		t[1]:SetPoint("TOPLEFT", -inset, inset); t[1]:SetPoint("TOPRIGHT", inset, inset); t[1]:SetHeight(size)
-		t[2]:SetPoint("BOTTOMLEFT", -inset, -inset); t[2]:SetPoint("BOTTOMRIGHT", inset, -inset); t[2]:SetHeight(size)
-		t[3]:SetPoint("TOPLEFT", -inset, inset); t[3]:SetPoint("BOTTOMLEFT", -inset, -inset); t[3]:SetWidth(size)
-		t[4]:SetPoint("TOPRIGHT", inset, inset); t[4]:SetPoint("BOTTOMRIGHT", inset, -inset); t[4]:SetWidth(size)
+	-- rounded corners: the lines run into painted end caps (cap_dark_*, cap_lit_*; LayoutShape places them)
+	for i = 1, 2 do
+		border.capDark[i] = border:CreateTexture(nil, "BORDER", nil, 0)
+		border.capDark[i]:SetVertexColor(0, 0, 0, .8)
+		border.capLit[i] = border:CreateTexture(nil, "BORDER", nil, 1)
+		if i == 2 then border.capDark[i]:SetTexCoord(1, 0, 0, 1); border.capLit[i]:SetTexCoord(1, 0, 0, 1) end
 	end
-	Frame4(border.dark, 2, 3)
-	Frame4(border.lit, 1.5, 1.5)
+	-- the plain look's frame: Blizzard's own (CastingBarFrameBaseTemplate's Border, Mainline/CastingBarFrame.xml)
+	border.blizz = border:CreateTexture(nil, "BORDER", nil, 2)
+	border.blizz:SetAtlas("ui-castingbar-frame")
+	border.blizz:SetPoint("TOPLEFT", -2, 2); border.blizz:SetPoint("BOTTOMRIGHT", 2, -2)
+	border.blizz:Hide()
+
+	-- depth: the bevel, laid over the fill and under the effects: light along the top, shade along the bottom
+	-- and a shadow just inside the frame, all following the corners (LayoutShape sizes it, db.depth shows it)
+	depth = CreateFrame("Frame", nil, bar)
+	depth:SetAllPoints()
+	depth:SetFrameLevel(bar:GetFrameLevel() + 5)
+	ns.MaskAllTextures(depth)
+	local function Bevel(sub, r, g, b, a, ...)
+		local t = depth:CreateTexture(nil, "ARTWORK", nil, sub)
+		t:SetTexture(MEDIA .. "bevel_v")   -- alpha 1 along its top fading to 0 at its bottom
+		if select("#", ...) > 0 then t:SetTexCoord(...) end
+		t:SetVertexColor(r, g, b, a)
+		return t
+	end
+	depth.top = Bevel(1, 1, 1, 1, .28)
+	depth.bottom = Bevel(1, 0, 0, 0, .5, 0, 1, 1, 0)
+	depth.shadow = {
+		Bevel(2, 0, 0, 0, .35),                               -- strongest at the top
+		Bevel(2, 0, 0, 0, .35, 0, 1, 1, 0),                   -- at the bottom
+		Bevel(2, 0, 0, 0, .35, 0, 0, 1, 0, 0, 1, 1, 1),       -- turned: strongest at the left
+		Bevel(2, 0, 0, 0, .35, 0, 1, 1, 1, 0, 0, 1, 0),       -- at the right
+	}
+	depth:Hide()
 
 	textFrame = CreateFrame("Frame", nil, bar)
 	textFrame:SetAllPoints()
@@ -321,6 +354,75 @@ local function LayoutText()
 	time:SetShown(showTime)
 end
 
+-- The frame line (db.style): "framed" draws our two-line frame (for the plain look Blizzard's own cast bar
+-- frame); "borderless" draws none, leaving the bar's own clean shape. Never a frayed edge. With rounded corners
+-- the end caps stand in for the left and right lines.
+local function ShowBorder(cfg)
+	local framed = ns.db.style ~= "borderless"
+	local blizz = cfg and cfg.plain and true or false
+	local ours = framed and not blizz
+	border.blizz:SetShown(framed and blizz)
+	for i = 1, 4 do
+		local shown = ours and not (i > 2 and border.caps)
+		border.dark[i]:SetShown(shown); border.lit[i]:SetShown(shown)
+	end
+	for i = 1, 2 do border.capDark[i]:SetShown(ours and border.caps); border.capLit[i]:SetShown(ours and border.caps) end
+end
+
+-- The bar's shape: the corner masks sized to the bar and switched to the corners setting; the frame lines, whose
+-- thickness scales with the bar (the dark line .1 of its height with 2/3 of that outside the bar, the lit line
+-- half as thick, inside it and ending at the edge), with the painted caps at both ends when the corners are
+-- rounded; and the bevel.
+local function LayoutShape()
+	local db = ns.db
+	local style = CornerStyle()
+	local file = MEDIA .. style.mask
+	for _, mask in ipairs(cornerMasks) do
+		mask:SetSize(H, H)
+		if mask.file ~= file then mask.file = file; mask:SetTexture(file, "CLAMP", "CLAMP") end
+	end
+	local td = H * .1
+	local tl, e = td / 2, td * 2 / 3
+	border.caps = style.r > 0
+	local capS = border.caps and H + 2 * e or 0
+	local function Frame4(t, inset, size)
+		for i = 1, 4 do t[i]:ClearAllPoints() end
+		t[1]:SetPoint("TOPLEFT", -inset + capS, inset); t[1]:SetPoint("TOPRIGHT", inset - capS, inset); t[1]:SetHeight(size)
+		t[2]:SetPoint("BOTTOMLEFT", -inset + capS, -inset); t[2]:SetPoint("BOTTOMRIGHT", inset - capS, -inset); t[2]:SetHeight(size)
+		t[3]:SetPoint("TOPLEFT", -inset, inset); t[3]:SetPoint("BOTTOMLEFT", -inset, -inset); t[3]:SetWidth(size)
+		t[4]:SetPoint("TOPRIGHT", inset, inset); t[4]:SetPoint("BOTTOMRIGHT", inset, -inset); t[4]:SetWidth(size)
+	end
+	Frame4(border.dark, e, td)
+	Frame4(border.lit, tl, tl)
+	if border.caps then
+		local key = style.r > .2 and "rounded" or "soft"
+		for i = 1, 2 do
+			local cd, cl = border.capDark[i], border.capLit[i]
+			cd:SetTexture(MEDIA .. "cap_dark_" .. key); cl:SetTexture(MEDIA .. "cap_lit_" .. key)
+			cd:ClearAllPoints(); cl:ClearAllPoints()
+			if i == 1 then cd:SetPoint("TOPLEFT", -e, e); cl:SetPoint("TOPLEFT", -e, e)
+			else cd:SetPoint("TOPRIGHT", e, e); cl:SetPoint("TOPRIGHT", e, e) end
+			cd:SetSize(capS, capS); cl:SetSize(capS, capS)
+		end
+	end
+	local bevel = db.depth == "bevel"
+	depth:SetShown(bevel)
+	if bevel then
+		local function Strip(t, top, size)
+			t:ClearAllPoints()
+			if top == "left" then t:SetPoint("TOPLEFT"); t:SetPoint("BOTTOMLEFT"); t:SetWidth(size)
+			elseif top == "right" then t:SetPoint("TOPRIGHT"); t:SetPoint("BOTTOMRIGHT"); t:SetWidth(size)
+			elseif top then t:SetPoint("TOPLEFT"); t:SetPoint("TOPRIGHT"); t:SetHeight(size)
+			else t:SetPoint("BOTTOMLEFT"); t:SetPoint("BOTTOMRIGHT"); t:SetHeight(size) end
+		end
+		Strip(depth.top, true, H * .35)
+		Strip(depth.bottom, false, H * .4)
+		local s = H * .12
+		Strip(depth.shadow[1], true, s); Strip(depth.shadow[2], false, s)
+		Strip(depth.shadow[3], "left", s); Strip(depth.shadow[4], "right", s)
+	end
+end
+
 function ns:Layout()
 	local db = ns.db
 	db.width = math.max(ns.MIN_W, math.min(ns.MAX_W, math.floor(db.width + .5)))      -- older saves may be smaller
@@ -339,15 +441,8 @@ function ns:Layout()
 			ns:SavePosition()
 		end
 	end
-	LayoutMasks(track)
-	ApplyMasks(track, db.borderless)
-	for _, content in pairs(contents) do
-		LayoutContent(content)
-		ApplyMasks(content, db.borderless)
-	end
-	track.bg:SetAlpha(db.borderless and .45 or .85)
+	for _, content in pairs(contents) do LayoutContent(content) end
 	if track.u then TrackCoords() end
-	border:SetShown(not db.borderless)
 
 	local glowH = H * 2.2
 	glowFrame:SetHeight(glowH)
@@ -360,6 +455,8 @@ function ns:Layout()
 	textFrame.icon:SetSize(H, H)
 	textFrame.icon:ClearAllPoints(); textFrame.icon:SetPoint("RIGHT", bar, "LEFT", -4, 0)
 	textFrame.icon:SetShown(db.showIcon)
+	LayoutShape()
+	ShowBorder(ns.activeCfg)
 	ns.FX:Layout(W, H)
 end
 
@@ -372,8 +469,8 @@ function ns.TintTrack(tex, hi)
 	if hi then track.hi:SetVertexColor(hi[1], hi[2], hi[3]) end
 end
 
--- A texture on the track (below the fill, ahead of the cast) that follows the borderless masks.
-function ns.TrackTexture(sub) return ns.Maskable(track, track:CreateTexture(nil, "ARTWORK", nil, sub)) end
+-- A texture on the track (below the fill, ahead of the cast).
+function ns.TrackTexture(sub) return track:CreateTexture(nil, "ARTWORK", nil, sub) end
 
 ---------------------------------------------------------------------------
 -- Showing an element
@@ -388,7 +485,6 @@ local function ActivateElement(key)
 	if active and active ~= content then active:Hide() end
 	active = content
 	LayoutContent(content)
-	ApplyMasks(content, ns.db.borderless)
 	content:Show()
 	local cfg = content.cfg
 
@@ -397,6 +493,7 @@ local function ActivateElement(key)
 		layer.u, layer.v = rand(0, 1), layer.cfg.sv and rand(0, 1) or 0
 		layer.tex:SetDesaturated(false)
 		layer.tex:SetVertexColor(1, 1, 1)
+		layer.tint = nil   -- the look may tint it for this cast (ns.TintLayer); an interrupt greys from that
 	end
 	content.veilU = rand(0, 1)
 	content.flash:SetAlpha(0)
@@ -404,8 +501,14 @@ local function ActivateElement(key)
 	-- the track: a dim copy of the element, or the element's own (water flowing ahead of frost, the pond, rails)
 	local T = cfg.track
 	track.cfg = T
-	track.tex:SetTexture(MEDIA .. (T and T.tex or cfg.layers[1].tex), "REPEAT", "REPEAT")
-	track.tex:SetAlpha(T and T.a or .16)
+	track.atlas = T and T.atlas
+	if track.atlas then
+		track.tex:SetAtlas(T.atlas)
+		track.tex:SetAlpha(1)
+	else
+		track.tex:SetTexture(MEDIA .. (T and T.tex or cfg.layers[1].tex), "REPEAT", "REPEAT")
+		track.tex:SetAlpha(T and T.a or .16)
+	end
 	track.hi:SetShown(T and T.hi ~= nil or false)
 	if T and T.hi then track.hi:SetTexture(MEDIA .. T.hi, "REPEAT", "REPEAT") end
 	track.u, track.u2 = rand(0, 1), rand(0, 1)
@@ -413,8 +516,22 @@ local function ActivateElement(key)
 	track.tex:SetVertexColor(1, 1, 1); track.hi:SetVertexColor(1, 1, 1)   -- FX:Begin may tint it (ns.TintTrack)
 	track.tex:SetDesaturation(0); track.hi:SetDesaturation(0)             -- an interrupt greys it (TintInterrupted)
 	for _, t in ipairs({ glowFrame.l, glowFrame.m, glowFrame.r }) do SetColor(t, cfg.glow) end
-	SetColor(fx.spark, cfg.spark)
+	-- the plain look uses Blizzard's own spark and frame; every other look its own
+	if cfg.plain then
+		fx.spark:SetAtlas("ui-castingbar-pip")
+		fx.spark:SetBlendMode("BLEND")
+		fx.spark:SetVertexColor(1, 1, 1)
+		fx.spark:SetSize(math.max(4, H * .4), H)
+	else
+		fx.spark:SetTexture(MEDIA .. "spark")
+		fx.spark:SetBlendMode("ADD")
+		fx.spark:SetSize(H * .9, H * 1.7)
+		SetColor(fx.spark, cfg.spark)
+	end
 	for _, t in ipairs(border.lit) do SetColor(t, cfg.border) end
+	for _, t in ipairs(border.capLit) do SetColor(t, cfg.border) end
+	ns.activeCfg = cfg
+	ShowBorder(cfg)
 
 	ns.FX:Begin(content, W, H)
 	return content
@@ -493,11 +610,21 @@ local function Finish(how)   -- "done" (flash and fade) or "interrupted"
 	if how == "interrupted" then ShowText(INTERRUPTED or "Interrupted") end   -- the tint fades in (OnBarUpdate)
 end
 
--- k = 0..1: from the element's own colours to grey-red.
+-- A look tints one of its layers for this cast (the cloth, the velvet, the storm's sky): remembered, so the
+-- interrupted tint greys that colour instead of replacing it.
+local WHITE = { 1, 1, 1 }
+function ns.TintLayer(content, i, r, g, b)
+	local L = content.layers[i]
+	L.tint = { r, g, b }
+	L.tex:SetVertexColor(r, g, b)
+end
+
+-- k = 0..1: from the element's own colours (or the cast's tint) to grey-red.
 local function TintInterrupted(k)
 	for _, layer in ipairs(active.layers) do
+		local t = layer.tint or WHITE
 		layer.tex:SetDesaturation(k)
-		layer.tex:SetVertexColor(1, 1 - .55 * k, 1 - .55 * k)
+		layer.tex:SetVertexColor(t[1], t[2] * (1 - .55 * k), t[3] * (1 - .55 * k))
 	end
 	-- looks that fill the bar with more than their layers (skinning's fur ahead, roll and pool) grey too
 	track.tex:SetDesaturation(k); track.hi:SetDesaturation(k)
@@ -607,7 +734,7 @@ function ns:OnBarUpdate(dt)
 	end
 	cast.shown = f
 	local fillW = W * f
-	clip:SetWidth(math.max(.01, fillW))
+	clip:SetWidth(active.cfg.wholeBar and W or math.max(.01, fillW))   -- alchemy: the liquid's level is the progress
 
 	-- fades
 	if cast.state == "done" then

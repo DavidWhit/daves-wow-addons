@@ -616,7 +616,7 @@
 			stepPool(P, s, s.dt);
 			// drops falling into it from above, each leaving rings
 			P.dripT -= s.dt;
-			if (s.casting && X > H * .2 && P.dripT <= 0) { P.dripT = rand(.06, .14); P.drops.push({ x: xs + rand(-.08, .08) * H, y: 0, vy: H * rand(.4, 1) }); }
+			if (s.casting && X > H * .2 && P.dripT <= 0) { P.dripT = rand(.25, .5); P.drops.push({ x: xs + rand(-.08, .08) * H, y: 0, vy: H * rand(.4, 1) }); }
 			P.drops = P.drops.filter(dp => {
 				dp.vy += H * 14 * s.dt; dp.y += dp.vy * s.dt;
 				const sy = surfY(P, s, dp.x);
@@ -692,15 +692,9 @@
 					g.beginPath(); g.ellipse(r.x, surfY(P, s, r.x) + 1, rx, rx * .22, 0, 0, 6.283); g.stroke();
 				}
 			}
-			// the falling potion: a thin stream with drops
+			// the odd drop falling in; no stream or glow marking the cast edge: the filling liquid is the marker
 			if (s.casting && X > H * .2) {
-				const sy = surfY(P, s, xs), c = palAt(s.pal, xs / W);
-				if (sy > H * .05) {
-					g.strokeStyle = rgba(light(c, .3), .45); g.lineWidth = Math.max(.8, H * .025);
-					g.beginPath(); g.moveTo(xs, 0); g.lineTo(xs + Math.sin(s.t * 20) * H * .01, sy); g.stroke();
-				}
 				for (const dp of P.drops) { g.fillStyle = rgba(light(palAt(s.pal, dp.x / W), .35), .95); g.beginPath(); g.ellipse(dp.x, dp.y, Math.max(.7, H * .025), Math.max(1, H * .04), 0, 0, 6.283); g.fill(); }
-				glow(g, xs, sy, H * .5, c, .35);
 			}
 			g.fillStyle = 'rgba(255,255,255,.12)'; g.fillRect(0, H * .07, W, Math.max(1, H * .04));
 			g.restore();

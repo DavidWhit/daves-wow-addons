@@ -135,6 +135,28 @@
 		{ top: [110, 126, 206], mid: [46, 53, 116], under: [14, 15, 40], a: 1, y: .58, base: .9, thick: .85, v: .17, cloud: [2.1, 4.9], gap: [2, 4] },
 		{ top: [74, 84, 162], mid: [30, 34, 82], under: [8, 8, 24], a: 1, y: .9, base: 1.3, thick: .9, v: .26, cloud: [2.1, 4.9], gap: [2.4, 4.6] },
 	];
+	// Per-cast weather (2026-10-09): which banks there are, how the clouds are cut, their tint and how they
+	// move. One is picked each cast in turn (?weather=0..4 starts from one), so no two storms look alike.
+	//   cloud/gap/thick/v scale the banks' ranges; tower = how often billows stack up into towers;
+	//   ragged = torn edges and wisps; stray = chance of faint stray rows drifting between the banks;
+	//   back = chance a bank drifts the other way.
+	const WEATHERS = [
+		{ name: 'layered', banks: [0, 1, 2, 3], tint: [1, 1, 1], cloud: 1, gap: 1, thick: 1, v: 1, tower: .45, ragged: 0, stray: .5, back: .2 },
+		{ name: 'towering', banks: [0, 1, 2, 3], tint: [.96, .96, 1.05], cloud: 1.3, gap: .8, thick: 1.25, v: .8, tower: .95, ragged: .1, stray: .3, back: .1 },
+		{ name: 'scattered', banks: [1, 2, 3], tint: [1.06, 1.06, 1], cloud: .6, gap: 1.8, thick: .85, v: 1.3, tower: .3, ragged: .25, stray: .8, back: .35 },
+		{ name: 'overcast', banks: [0, 1, 2, 3], tint: [.86, .88, .96], cloud: 2, gap: .35, thick: .75, v: .6, tower: .15, ragged: 0, stray: .2, back: 0 },
+		{ name: 'ragged squall', banks: [0, 2, 3], tint: [.92, 1, 1.06], cloud: .9, gap: 1.1, thick: .9, v: 1.8, tower: .5, ragged: .85, stray: 1, back: .5 },
+	];
+	let weatherTurn = Math.floor(Math.random() * WEATHERS.length);
+	{ const q = new URLSearchParams(location.search); if (q.has('weather')) weatherTurn = +q.get('weather'); }
+	const tintCol = (c, t) => [c[0] * t[0], c[1] * t[1], c[2] * t[2]];
+	// a bank's ranges under this weather
+	function weatherBank(B, Wt) {
+		const sc = (r, f) => [r[0] * f, r[1] * f];
+		return Object.assign({}, B, { top: tintCol(B.top, Wt.tint), mid: tintCol(B.mid, Wt.tint), under: tintCol(B.under, Wt.tint),
+			cloud: sc(B.cloud, Wt.cloud), gap: sc(B.gap, Wt.gap), thick: B.thick * Wt.thick, v: B.v * Wt.v * rand(.7, 1.3) * (Math.random() < Wt.back ? -1 : 1),
+			tower: Wt.tower, ragged: Wt.ragged });
+	}
 	const BANK_TOP = .9;   // room above a bank's billows in its canvas, in bar heights
 	// One bank, BW wide (it tiles), painted at k device pixels per bar pixel. A bank is a row of clouds with
 	// sky between them. Each cloud is a run of rounded billows of mixed sizes along its top (overlapping into
@@ -151,8 +173,14 @@
 				const u = (px - cx) / len, dome = Math.sin(Math.PI * clamp(u));        // 0 at the ends, 1 mid-cloud
 				const r = H * rand(.32, .6) * B.thick * (.55 + .45 * dome);
 				lobes.push({ x: px, y: y0 + depth * .25 - dome * H * rand(.12, .28) - r * .35, rx: r * rand(1.4, 1.9), ry: r });
-				// now and then a smaller billow riding on top, for the cauliflower scallops
-				if (Math.random() < .45 * dome) lobes.push({ x: px + rand(-.2, .2) * H, y: lobes[lobes.length - 1].y - r * .5, rx: r * .9, ry: r * .55 });
+				// now and then a smaller billow riding on top, for the cauliflower scallops; under a towering
+				// weather they stack two or three high into towers
+				const tower = B.tower ?? .45;
+				let last = lobes[lobes.length - 1], stack = 0;
+				while (Math.random() < tower * dome && stack < (tower > .7 ? 3 : 1)) {
+					last = { x: last.x + rand(-.2, .2) * H, y: last.y - last.ry * .55, rx: last.rx * .75, ry: last.ry * .6 };
+					lobes.push(last); stack++;
+				}
 			}
 			// rounded ends: a round billow capping each end
 			for (const ex of [cx + H * .35, cx + len - H * .35]) lobes.push({ x: ex, y: y0 + depth * .3, rx: H * .38 * B.thick, ry: H * .32 * B.thick });
@@ -160,6 +188,14 @@
 			for (let px = cx + H * .4; px < cx + len - H * .4; px += H * rand(.6, 1)) {
 				const dome = Math.sin(Math.PI * clamp((px - cx) / len));
 				bellies.push({ x: px, y: y0 + depth * (.45 + .15 * dome), rx: H * rand(.6, .95), ry: depth * (.35 + .2 * dome) });
+			}
+			// ragged weather: torn tufts around the cloud's ends and small wisps hanging under it
+			const ragged = B.ragged || 0;
+			for (let i = 0; i < ragged * len / H * 2; i++) {
+				const nearEnd = Math.random() < .5, px = nearEnd ? (Math.random() < .5 ? cx + rand(-.3, .4) * H : cx + len + rand(-.4, .3) * H) : cx + rand(.2, .8) * len;
+				const r = H * rand(.1, .25) * B.thick;
+				if (nearEnd) lobes.push({ x: px, y: y0 + depth * rand(.1, .5), rx: r * rand(1.2, 2), ry: r });
+				else bellies.push({ x: px, y: y0 + depth * rand(.6, .9), rx: r * rand(1.5, 2.5), ry: r * .6 });
 			}
 			cx += len + H * rand(...B.gap);
 		}
@@ -208,28 +244,42 @@
 	}
 	CONCEPTS.push({
 		group: 'Lightning', id: 'light-a3', letter: 'A3', name: 'Thunderhead, layered',
-		desc: 'A\'s bolts, flashes and blues, over layered cloud banks at four depths: scalloped rounded billows, gently bulging dark undersides, each drifting and slowly swelling at its own pace',
+		desc: 'A\'s bolts, flashes and blues, over layered cloud banks at up to four depths: scalloped rounded billows, gently bulging dark undersides, each drifting and slowly swelling at its own pace. The weather changes every cast: layered, towering, scattered, overcast, ragged squall (banks, cloud sizes, gaps, tint, drift, towers, torn edges and stray rows all differ)',
 		spell: 'Lightning Bolt', padTop: .9, padBottom: .6, flash: [190, 215, 255],
 		init(s) {
 			const H = s.H, k = Math.min(2, window.devicePixelRatio || 1);
 			const BW = Math.max(s.W, H * 8) + H * 4;
-			s.banks = BANKS.map(B => Object.assign(paintBank(B, BW, H, k), { B, u: rand(0, BW), ph: rand(0, 6.283) }));
+			const Wt = s.weather = WEATHERS[weatherTurn++ % WEATHERS.length];
+			s.banks = Wt.banks.map(i => { const B = weatherBank(BANKS[i], Wt); return Object.assign(paintBank(B, BW, H, k), { B, u: rand(0, BW), ph: rand(0, 6.283), breath: rand(.03, .08), a: B.a }); });
+			// stray rows: a faint copy of a bank drifting between the others at its own height and pace
+			s.loose = [];
+			for (let i = 0; i < 2; i++) if (Math.random() < Wt.stray) {
+				const K = pick(s.banks);
+				s.loose.push({ K, y: rand(-.3, .7) * H, a: rand(.25, .45), u: rand(0, BW), v: K.B.v * rand(.6, 1.6) * (Math.random() < .4 ? -1 : 1), ph: rand(0, 6.283) });
+			}
 			s.bolts = []; s.nextBolt = .15; s.flash = 0; s.flashX = 0; s.sheet = 0; s.sheetX = 0;
 			s.roll = wobble(2);
 		},
 		draw(g, s) {
-			const { H, fill, dt } = s;
+			const { H, fill, dt } = s, tint = s.weather.tint;
 			g.save(); clipBar(g, s, fill);
 			const bg = g.createLinearGradient(0, 0, 0, H);
-			bg.addColorStop(0, '#161a3c'); bg.addColorStop(.6, '#0e1031'); bg.addColorStop(1, '#07081a');
+			bg.addColorStop(0, rgba(tintCol([22, 26, 60], tint))); bg.addColorStop(.6, rgba(tintCol([14, 16, 49], tint))); bg.addColorStop(1, rgba(tintCol([7, 8, 26], tint)));
 			g.fillStyle = bg; g.fillRect(0, 0, fill, H);
 			// occasional dim sheet lightning somewhere in the banks
 			if (Math.random() < dt * .8) { s.sheet = rand(.35, .6); s.sheetX = rand(0, fill); }
 			s.sheet = Math.max(0, s.sheet - dt * 3);
+			// the stray rows lie behind the banks they were copied from
+			for (const L of s.loose) {
+				L.u = ((L.u + L.v * H * dt) % L.K.BW + L.K.BW) % L.K.BW;
+				g.globalAlpha = L.a;
+				for (let x = -L.u; x < fill; x += L.K.BW) g.drawImage(L.K.c, x, L.y + Math.sin(s.t * .25 + L.ph) * H * .04, L.K.BW, L.K.BH);
+				g.globalAlpha = 1;
+			}
 			for (const K of s.banks) {
-				K.u = (K.u + K.B.v * H * dt) % K.BW;
+				K.u = ((K.u + K.B.v * H * dt) % K.BW + K.BW) % K.BW;
 				// slow rise and fall, and the billows slowly swelling (the bank breathes taller and shorter, pinned at its base)
-				const sw = 1 + .05 * Math.sin(s.t * .45 + K.ph * 1.7), bh = K.BH * sw;
+				const sw = 1 + K.breath * Math.sin(s.t * .45 + K.ph * 1.7), bh = K.BH * sw;
 				const y = K.oy + Math.sin(s.t * .3 + K.ph) * H * .03 - (bh - K.BH) * .6;
 				const tiles = [];
 				for (let x = -K.u; x < fill; x += K.BW) tiles.push(x);
@@ -285,6 +335,14 @@
 				const e = fill, eg = g.createLinearGradient(e - H * 1.2, 0, e, 0), f = .25 + .2 * (s.roll(s.t * 6) + 1) / 2 + (Math.random() < .08 ? .3 : 0);
 				eg.addColorStop(0, 'rgba(120,150,255,0)'); eg.addColorStop(1, rgba([150, 180, 255], f));
 				g.globalCompositeOperation = 'lighter'; g.fillStyle = eg; g.fillRect(e - H * 1.2, 0, H * 1.2, H);
+				g.restore();
+				// the leading-edge spark every spell look has (the addon's spark texture), in the bolts' blue-white
+				const sa = .75 + .25 * s.roll(s.t * 9), sw = H * .45, sh = H * .85;
+				g.save(); g.globalCompositeOperation = 'lighter'; g.translate(e, H / 2); g.scale(1, sh / sw);
+				const sg = g.createRadialGradient(0, 0, 0, 0, 0, sw);
+				sg.addColorStop(0, rgba([235, 245, 255], sa)); sg.addColorStop(.25, rgba([200, 225, 255], .7 * sa)); sg.addColorStop(1, rgba([130, 170, 255], 0));
+				g.fillStyle = sg; g.beginPath(); g.arc(0, 0, sw, 0, 6.283); g.fill();
+				g.fillStyle = rgba([255, 255, 255], .85 * sa); g.fillRect(-Math.max(.6, H * .025), -sw * .8, Math.max(1.2, H * .05), sw * 1.6);
 				g.restore();
 			}
 		},

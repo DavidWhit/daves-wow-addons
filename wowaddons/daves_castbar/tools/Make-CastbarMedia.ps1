@@ -300,6 +300,10 @@ public static class CastbarArt
 	}
 
 	// ================================================================ MINING: rails along a rock wall, a cart, a pickaxe
+	// Mining art, painted rather than outlined (as the skinning knife and the forge hammer): soft shading, brushed
+	// metal, wood grain, one soft shadow. The rails run along the very bottom of the bar, with no ground strip under
+	// them, so the cart fits inside the bar's height.
+	static void OverP(double[] p, double r, double g, double b, double a) { p[0] = Lerp(p[0], r, a); p[1] = Lerp(p[1], g, a); p[2] = Lerp(p[2], b, a); p[3] = p[3] + a*(1 - p[3]); }
 	public static Img MineRails()
 	{
 		var img = new Img(W, H);
@@ -309,28 +313,36 @@ public static class CastbarArt
 			Voronoi(u, v, 24, 3, 501, out f1, out f2, out cell);            // stones in the wall
 			double stone = 0.55 + 0.25*Hash(cell, 1, 502) + 0.15*Fbm(u, v, 32, 4, 3, 503);
 			double seam = Smooth(0.0, 0.12, f2 - f1);
-			double r = .20*stone*seam, g = .17*stone*seam, b = .15*stone*seam;
-			if (Hash(x/2, y/2, 504) > 0.996)                                   // ore glints in the wall
+			double dim = 1 - 0.35*Smooth(0.55, 1.0, v);                     // the wall darkens toward the track
+			double r = .20*stone*seam*dim, g = .17*stone*seam*dim, b = .15*stone*seam*dim;
+			if (Hash(x/2, y/2, 504) > 0.997 && v < 0.8)                        // a few ore glints in the wall
 			{
 				int k = (int)(Hash(x/2, y/2, 505)*4);
 				double[][] gem = { new[]{.4,.7,1.0}, new[]{.75,.5,1.0}, new[]{.4,1.0,.6}, new[]{1.0,.8,.35} };
-				r = gem[k][0]; g = gem[k][1]; b = gem[k][2];
+				r = gem[k][0]*.8; g = gem[k][1]*.8; b = gem[k][2]*.8;
 			}
-			// track bed: gravel, sleepers every 32 px, a far rail and the near rail
-			double bed = Smooth(0.66, 0.70, v);
-			double gravel = 0.12 + 0.08*Hash(x/2, y/2, 506);
-			r = Lerp(r, gravel*1.1, bed); g = Lerp(g, gravel, bed); b = Lerp(b, gravel*0.9, bed);
+			// sleepers: dark, weathered wood ties between and under the rails, every 32 px
 			double sx = Mod(x, 32);
-			if (v > 0.73 && v < 0.92 && sx > 4 && sx < 22)
+			double tie = Smooth(3, 5, sx)*Smooth(23, 21, sx)*Smooth(0.86, 0.88, v);
+			if (tie > 0)
 			{
-				double grain = 0.8 + 0.2*Noise(x/3.0, y*1.5, 512, 64, 507);
-				double sh = 0.7 + 0.3*Clamp((0.92 - v)/0.19);
-				r = .42*grain*sh; g = .27*grain*sh; b = .14*grain*sh;
+				double grain = 0.75 + 0.25*Noise(x/2.5, y*1.2, 512, 64, 507);
+				double sh = 0.55 + 0.45*Clamp((v - 0.86)/0.14);
+				r = Lerp(r, .30*grain*sh, tie); g = Lerp(g, .20*grain*sh, tie); b = Lerp(b, .12*grain*sh, tie);
 			}
-			double farRail = Smooth(0.03, 0.0, Math.Abs(v - 0.715)), nearRail = Smooth(0.045, 0.0, Math.Abs(v - 0.80));
-			double rail = Math.Max(farRail*0.75, nearRail);
-			double steel = 0.45 + 0.45*Clamp(1 - (v - 0.775)/0.05);
-			r = Lerp(r, .55*steel, rail); g = Lerp(g, .50*steel, rail); b = Lerp(b, .48*steel, rail);
+			// a soft shadow just above each rail, then the rails: lit top edge, brushed steel, dark underside
+			double shadow = 0.35*Smooth(0.04, 0, Math.Abs(v - 0.86)) + 0.45*Smooth(0.05, 0, Math.Abs(v - 0.925));
+			r *= 1 - shadow; g *= 1 - shadow; b *= 1 - shadow;
+			foreach (var rail in new[] { new[] { 0.885, 0.028, 0.7 }, new[] { 0.955, 0.04, 1.0 } })   // far rail, near rail: centre, half height, brightness
+			{
+				double d = Math.Abs(v - rail[0]);
+				double cover = Smooth(rail[1] + 1.0/H, rail[1], d);
+				if (cover <= 0) continue;
+				double t = (v - (rail[0] - rail[1]))/(2*rail[1]);               // 0 top .. 1 bottom
+				double brush = 0.93 + 0.07*Noise(x/1.5, 0, 512, 1, 508);
+				double steel = (0.62 - 0.38*t + 0.3*Smooth(0.25, 0, t))*brush*rail[2];
+				r = Lerp(r, steel*.92, cover); g = Lerp(g, steel*.9, cover); b = Lerp(b, steel*.9, cover);
+			}
 			img.Set(x, y, r, g, b, 1);
 		}
 		return img;
@@ -346,75 +358,161 @@ public static class CastbarArt
 		}
 		return img;
 	}
-	public static Img Cart()           // 64x64: wooden cart with iron bands and a heap of ore; wheels are separate
+	// 128x128: a wooden ore cart with iron bands and a heap of ore and gems; wheels are separate sprites. The box
+	// spans v .40-.80, the ore heaps above the rim, the brass lantern hangs on the front (u .80, v .60).
+	public static Img Cart()
 	{
-		var img = new Img(64, 64);
-		double[][] gem = { new[]{.35,.65,1.0}, new[]{.70,.45,1.0}, new[]{.35,.95,.55}, new[]{1.0,.80,.30}, new[]{.62,.60,.58} };
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		const int S = 128; double aa = 1.5/S;
+		var img = new Img(S, S);
+		double[][] gem = { new[]{.35,.65,1.0}, new[]{.70,.45,1.0}, new[]{.35,.95,.55}, new[]{1.0,.80,.30} };
+		var rnd = new Random(530);
+		var rocks = new List<double[]>();   // x, y, rx, ry, tone, gem index (-1 rock)
+		for (int k = 0; k < 14; k++)
 		{
-			double u = x/63.0, v = y/63.0;
-			double inset = (v - 0.38)*0.10;                                     // the box narrows toward the bottom
-			bool box = v > 0.38 && v < 0.80 && u > 0.06 + inset && u < 0.94 - inset;
-			double r = 0, g = 0, b = 0, a = 0;
-			// ore heap: overlapping chunks above the rim
-			for (int k = 0; k < 9; k++)
+			double cx = 0.14 + 0.72*k/13.0 + Rnd(rnd, -.03, .03), top = 0.42 - 0.16*Math.Sin(Math.PI*(cx - 0.1)/0.8);
+			rocks.Add(new[] { cx, top + Rnd(rnd, 0, .06), Rnd(rnd, .05, .09), Rnd(rnd, .04, .065), Rnd(rnd, .7, 1.1), rnd.NextDouble() < .3 ? rnd.Next(4) : -1 });
+		}
+		for (int y = 0; y < S; y++) for (int x = 0; x < S; x++)
+		{
+			double u = (x + .5)/S, v = (y + .5)/S;
+			var P = new double[4];   // r, g, b, a, painted back to front with OverP
+			// one soft shadow under the box, on the track
+			double sh = Math.Exp(-Math.Pow((u - .5)/.42, 2) - Math.Pow((v - .83)/.025, 2));
+			OverP(P, 0, 0, 0, .45*sh);
+			// the ore heap: rough rocks lit from the upper left, a few gems among them
+			foreach (var k in rocks)
 			{
-				// crystals: tall diamonds leaning a little, lit on the left face
-				double cx = 0.16 + 0.085*k, cy = 0.33 - 0.10*Hash(k, 0, 521), rad = 0.07 + 0.04*Hash(k, 1, 521);
-				double lean = (Hash(k, 3, 521) - 0.5)*0.6;
-				double qx = (u - cx) - lean*(v - cy), qy = v - cy;
-				double dd = Math.Abs(qx)*1.6 + Math.Abs(qy);
-				if (dd < rad*1.6)
+				double dx = (u - k[0])/k[2], dy = (v - k[1])/k[3];
+				double e = Math.Sqrt(dx*dx + dy*dy) + 0.12*Noise(u*24 + k[0]*7, v*24, 64, 64, 531);
+				double cov = Smooth(1 + aa/k[3], 1, e);
+				if (cov <= 0) continue;
+				double lit = Clamp(0.55 - 0.45*dy - 0.25*dx);
+				if (k[5] >= 0)
 				{
-					var c = gem[(int)(Hash(k, 2, 521)*gem.Length)];
-					double lit = (qx < 0 ? 1.1 : 0.7) + (dd < rad*0.4 ? 0.3 : 0);
-					r = c[0]*lit; g = c[1]*lit; b = c[2]*lit; a = 1;
+					var c = gem[(int)k[5]];
+					double facet = Math.Abs(dx) < .15 ? 1.15 : 0.85;
+					double spec = Math.Exp(-((dx + .35)*(dx + .35) + (dy + .45)*(dy + .45))/.03);
+					OverP(P, Clamp(c[0]*(0.45 + 0.6*lit)*facet + spec), Clamp(c[1]*(0.45 + 0.6*lit)*facet + spec), Clamp(c[2]*(0.45 + 0.6*lit)*facet + spec), cov);
+				}
+				else
+				{
+					double t = (0.16 + 0.22*lit)*k[4];
+					OverP(P, t*1.05, t*.98, t*.92, cov);
 				}
 			}
-			if (box)
+			// the box: a trapezoid of three planks
+			double inset = (v - 0.40)*0.10;
+			double l = 0.07 + inset, rr = 0.93 - inset;
+			double bx = Smooth(l - aa, l, u)*Smooth(rr + aa, rr, u)*Smooth(0.40 - aa, 0.40, v)*Smooth(0.80 + aa, 0.80, v);
+			if (bx > 0)
 			{
-				double plank = 0.85 + 0.15*Math.Sin(v*64*1.2) + 0.08*Noise(u*20, v*4, 64, 64, 522);
-				r = .48*plank; g = .30*plank; b = .16*plank; a = 1;
-				bool band = Math.Abs(v - 0.40) < 0.035 || Math.Abs(v - 0.78) < 0.03 || Math.Abs(u - 0.08 - inset) < 0.04 || Math.Abs(u - 0.92 + inset) < 0.04;
-				if (band) { r = .30; g = .30; b = .32; }
-				if (band && Hash(x/4, y/4, 523) > 0.8) { r = .55; g = .52; b = .48; }    // rivets
+				double pv = (v - 0.40)/0.40, plankV = pv*3, seamD = Math.Abs(plankV - Math.Round(plankV));
+				double grain = 0.82 + 0.12*Noise(u*6, v*60, 32, 128, 532) + 0.06*Noise(u*40, v*8, 128, 32, 533);
+				double shade = (0.95 - 0.35*pv)*(0.85 + 0.25*Clamp(1 - (u - l)/(rr - l)));
+				double seamDark = 1 - 0.45*Smooth(0.08, 0.0, seamD)*(pv > 0.02 && pv < 0.98 ? 1 : 0);
+				double t = grain*shade*seamDark;
+				OverP(P, .46*t, .29*t, .16*t, bx);
+				// iron: a band along the rim and the foot, two straps; brushed, with small rivets
+				double band = Math.Max(Smooth(0.045, 0.035, Math.Abs(v - 0.425)), Smooth(0.035, 0.025, Math.Abs(v - 0.775)));
+				double strap = Math.Max(Smooth(0.035, 0.025, Math.Abs(u - (l + 0.09))), Smooth(0.035, 0.025, Math.Abs(u - (rr - 0.09))));
+				double iron = Math.Max(band, strap)*bx;
+				if (iron > 0)
+				{
+					double brush = 0.9 + 0.1*Noise(u*90, v*6, 128, 32, 534);
+					double s = (0.42 + 0.18*Clamp(1 - pv*1.6) + 0.1*Clamp(1 - (u - l)/(rr - l)))*brush;
+					OverP(P, s*.92, s*.92, s*.95, iron);
+					foreach (double ru in new[] { l + 0.09, rr - 0.09, 0.5 })
+						foreach (double rv in new[] { 0.425, 0.775, 0.6 })
+						{
+							if (ru == 0.5 && rv == 0.6) continue;
+							double d = Math.Sqrt((u - ru)*(u - ru) + (v - rv)*(v - rv));
+							double rc = Smooth(0.016 + aa, 0.016, d);
+							if (rc > 0) { double hl = 0.5 + 0.4*Clamp(-(u - ru + v - rv)/0.02); OverP(P, hl, hl*.97, hl*.92, rc*iron); }
+						}
+				}
 			}
-			// lantern on the front face
-			double ld = Math.Sqrt((u - 0.80)*(u - 0.80) + (v - 0.60)*(v - 0.60));
-			if (ld < 0.07) { r = 1.0; g = .80; b = .40; a = 1; }
-			img.Set(x, y, r, g, b, a);
+			// the lantern on the front: a small brass cage with a warm glass
+			{
+				double lu = 0.80, lv = 0.60;
+				double frame = Smooth(0.052, 0.045, Math.Abs(u - lu))*Smooth(0.075, 0.068, Math.Abs(v - lv));
+				if (frame > 0)
+				{
+					double glass = Smooth(0.034, 0.028, Math.Abs(u - lu))*Smooth(0.058, 0.05, Math.Abs(v - lv));
+					double brass = 0.55 + 0.3*Clamp(-(u - lu)/0.05);
+					OverP(P, .75*brass, .58*brass, .30*brass, frame);
+					double glow = Math.Exp(-((u - lu)*(u - lu) + (v - lv)*(v - lv))/0.0015);
+					OverP(P, 1, Clamp(.72 + .2*glow), Clamp(.35 + .3*glow), glass);
+				}
+				double cap = Smooth(0.03, 0.02, Math.Abs(u - lu))*Smooth(0.014, 0.008, Math.Abs(v - (lv - 0.085)));
+				OverP(P, .55, .42, .22, cap);
+			}
+			img.Set(x, y, P[0], P[1], P[2], Clamp(P[3]));
 		}
 		return img;
 	}
-	public static Img Wheel()          // iron wheel with six spokes; the addon turns it as the cart rolls
+	// 128x128: a spoked iron wheel with a flanged tyre; the addon turns it as the cart rolls
+	public static Img Wheel()
 	{
-		var img = new Img(64, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		const int S = 128; double aa = 1.5/S;
+		var img = new Img(S, S);
+		for (int y = 0; y < S; y++) for (int x = 0; x < S; x++)
 		{
-			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0, r = Math.Sqrt(dx*dx + dy*dy), an = Math.Atan2(dy, dx);
-			double rim = Smooth(0.95, 0.88, r) * Smooth(0.66, 0.74, r);
-			double spoke = Smooth(0.10, 0.06, Math.Abs(Math.Sin(an*3)) * r) * Smooth(0.75, 0.6, r);
-			double hub = Smooth(0.22, 0.16, r);
-			double t = Math.Max(rim, Math.Max(spoke, hub));
-			double sh = 0.35 + 0.25*Clamp(-dy) + (hub > 0.5 ? 0.2 : 0);
-			img.Set(x, y, sh, sh*.96, sh*.92, Clamp(t));
+			double dx = (x + .5 - S/2.0)/(S/2.0), dy = (y + .5 - S/2.0)/(S/2.0), rr = Math.Sqrt(dx*dx + dy*dy), an = Math.Atan2(dy, dx);
+			double tyre = Smooth(0.96 + aa, 0.96, rr)*Smooth(0.74 - aa, 0.74, rr);
+			double spoke = Smooth(0.075 + aa, 0.075, Math.Abs(Math.Sin(an*3))*rr)*Smooth(0.78, 0.74, rr);
+			double hub = Smooth(0.24 + aa, 0.24, rr);
+			double cov = Math.Max(tyre, Math.Max(spoke, hub));
+			double light = Clamp(0.5 - 0.35*dy - 0.2*dx);
+			double brush = 0.92 + 0.08*Noise(an*20, rr*8, 64, 16, 541);
+			double s;
+			if (tyre > 0.5) s = (0.32 + 0.3*light + 0.15*Smooth(0.88, 0.95, rr)*Clamp(-dy))*brush;    // the tyre, its outer flange catching light
+			else if (hub > 0.5) s = (0.35 + 0.35*light + 0.25*Smooth(0.09, 0.0, rr))*brush;           // the hub and its bolt
+			else s = (0.28 + 0.3*light)*brush;
+			double rust = 0.06*Noise(dx*10, dy*10, 32, 32, 542);
+			img.Set(x, y, Clamp(s*.95 + rust), Clamp(s*.92), Clamp(s*.9 - rust*.5), Clamp(cov));
 		}
 		return img;
 	}
-	public static Img Pickaxe()        // handle straight down from the centre; the head across the top
+	// 128x128: handle straight down from the centre, the steel head across the top, curving down to both points
+	public static Img Pickaxe()
 	{
-		var img = new Img(64, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		const int S = 128; double aa = 1.5/(S/2.0);
+		var img = new Img(S, S);
+		for (int y = 0; y < S; y++) for (int x = 0; x < S; x++)
 		{
-			double dx = (x - 31.5)/32.0, dy = (y - 31.5)/32.0;
-			double handle = Smooth(0.07, 0.045, Math.Abs(dx)) * Smooth(0.95, 0.9, dy) * Smooth(-0.62, -0.55, dy);
-			double hy = -0.62 + 0.30*dx*dx;                                     // the head curves down at both picks
-			double headW = 0.09*(1 - Math.Abs(dx)/0.95);
-			double head = Smooth(headW + 0.02, headW, Math.Abs(dy - hy)) * Smooth(0.95, 0.85, Math.Abs(dx));
-			double r, g, b;
-			if (head > 0.01) { double s = 0.55 + 0.4*Clamp(-(dy - hy)/0.1 + 0.5); r = .62*s; g = .64*s; b = .68*s; }
-			else { double s = 0.8 + 0.2*Noise(dy*12, dx*4, 64, 64, 541); r = .50*s; g = .32*s; b = .17*s; }
-			img.Set(x, y, r, g, b, Clamp(Math.Max(handle, head)));
+			double dx = (x + .5 - S/2.0)/(S/2.0), dy = (y + .5 - S/2.0)/(S/2.0);
+			var P = new double[4];   // r, g, b, a, painted back to front with OverP
+			// the haft: wood with grain along it, a dark leather wrap near the end
+			double hw = 0.055 + 0.012*Clamp((dy + 0.55)/1.5);
+			double haft = Smooth(hw + aa, hw, Math.Abs(dx))*Smooth(0.95 + aa, 0.95, dy)*Smooth(-0.6 - aa, -0.6, dy);
+			if (haft > 0)
+			{
+				double round = Math.Sqrt(Clamp(1 - (dx/hw)*(dx/hw)));
+				double grain = 0.85 + 0.15*Noise(dx*30, dy*3, 64, 16, 551);
+				double s = (0.55 + 0.45*round - 0.2*Clamp(dx/hw))*grain;
+				if (dy > 0.5 && dy < 0.88)
+				{
+					double turn = Mod((int)Math.Floor((dy - dx*0.6)*22), 2) == 0 ? 1 : 0.85;
+					OverP(P, .30*s*turn, .19*s*turn, .12*s*turn, haft);
+				}
+				else OverP(P, .52*s, .34*s, .19*s, haft);
+			}
+			// the head: steel, thickest at the eye, tapering to points, a bright ground edge along its top
+			double hy = -0.62 + 0.30*dx*dx;
+			double headW = 0.095*(1 - Math.Abs(dx)/0.97) + 0.012;
+			double head = Smooth(headW + aa, headW, Math.Abs(dy - hy))*Smooth(0.97 + aa, 0.97, Math.Abs(dx));
+			if (head > 0)
+			{
+				double t = Clamp((dy - (hy - headW))/(2*headW));                   // 0 top .. 1 bottom
+				double brush = 0.93 + 0.07*Noise(dx*60, dy*4, 128, 16, 552);
+				double s = (0.78 - 0.45*t + 0.25*Smooth(0.2, 0, t))*brush;
+				double glint = 0.35*Math.Exp(-Math.Pow((dx + 0.35)/0.12, 2))*Smooth(0.5, 0.1, t);
+				OverP(P, Clamp(s*.9 + glint), Clamp(s*.92 + glint), Clamp(s*.96 + glint), head);
+			}
+			// the eye's iron collar where head meets haft
+			double collar = Smooth(0.085 + aa, 0.085, Math.Abs(dx))*Smooth(0.07 + aa, 0.07, Math.Abs(dy + 0.5));
+			if (collar > 0) { double s = 0.42 + 0.25*Clamp(-dx/0.08) + 0.1*Clamp(-(dy + 0.5)/0.07); OverP(P, s*.9, s*.88, s*.86, collar); }
+			img.Set(x, y, P[0], P[1], P[2], Clamp(P[3]));
 		}
 		return img;
 	}
@@ -1272,40 +1370,73 @@ public static class CastbarArt
 		return o;
 	}
 
-	// A bar of iron at a heat: scale flecks on it (fewer as it gets hotter), lit along the top, darker underneath.
-	static Img IronBar(double heat, double cold, int seed)
+	// A bar of iron at a heat, as the concept (blacksmithing.js drawMetal): a few dark scale flecks (about nine per
+	// bar height square, fading as it gets hotter), lit along the top, darker underneath.
+	static Img IronBar(double heat, int seed)
 	{
 		var img = new Img(W, H);
 		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
 		{
 			double u = (x + 0.5)/W, v = (y + 0.5)/H;
 			double h = heat + 0.07*Fbm(u, v, 12, 1, 3, seed);
-			double[] c = cold > 0 ? new[] { (58 + 20*Fbm(u, v, 24, 3, 3, seed + 1))/255*0.85, 56/255.0*0.85, 60/255.0*0.85 } : HeatCol(IRON_HEAT, h);
+			double[] c = HeatCol(IRON_HEAT, h);
 			double f1, f2; int cell;
-			Voronoi(u, v, 48, 6, seed + 2, out f1, out f2, out cell);
-			double fleck = Smooth(0.42, 0.22, f1) * (Hash(cell, 3, seed) < 0.55 ? 1 : 0) * (0.25 + 0.35*Hash(cell, 5, seed));
-			double fa = fleck * (cold > 0 ? 0.8 : Clamp(1.15 - h));
+			Voronoi(u, v, 24, 3, seed + 2, out f1, out f2, out cell);   // cells about a third of a bar height
+			double r = 0.12 + 0.2*Hash(cell, 4, seed);
+			double fleck = Smooth(r, r*0.6, f1) * (0.25 + 0.35*Hash(cell, 5, seed));
+			double fa = fleck * Clamp(1.15 - h);
 			for (int k = 0; k < 3; k++) c[k] = Lerp(c[k], new[] { 28/255.0, 10/255.0, 6/255.0 }[k], fa);
-			double top = 0.16*Clamp(1 - v/0.18), dark = v > 0.7 ? 0.5*(v - 0.7)/0.3 : 0.08*Smooth(0.18, 0.7, v);
+			double top = 0.16*Clamp(1 - v/0.18), dark = v > 0.7 ? 0.08 + 0.42*(v - 0.7)/0.3 : 0.08*Smooth(0.18, 0.7, v);
 			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k], 1, top)*(1 - dark));
 			img.Set(x, y, c[0], c[1], c[2], 1);
 		}
 		return img;
 	}
-	public static Img SmithIron() { return IronBar(0.3, 0, 901); }    // the heated part: dull red-hot iron
-	public static Img SmithHot()  { return IronBar(0.78, 0, 901); }   // the same iron near white heat (laid over it as it heats)
-	public static Img SmithCold() { return IronBar(0, 1, 905); }      // ahead of the cast: cold iron
+	// The concept's heat runs .2 at the start of a cast to .6 at its end (base = .2 + .4p): the fill is the iron at .2,
+	// with the iron at .6 laid over it, more opaque as the cast goes on. The cast edge's extra heat is smith_edge.
+	public static Img SmithIron() { return IronBar(0.2, 901); }
+	public static Img SmithHot()  { return IronBar(0.6, 901); }
+	// Ahead of the cast: plain cold iron (58,56,60 at .75 over the dark track), lit along the top, shaded below; no flecks.
+	public static Img SmithCold()
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (x + 0.5)/W, v = (y + 0.5)/H;
+			double n = 1 + 0.04*Fbm(u, v, 16, 2, 2, 905);
+			double[] c = { 58/255.0*n, 56/255.0*n, 60/255.0*n };
+			double top = 0.18*Smooth(0.25, 0, v), dark = 0.45*Smooth(0.25, 1, v);
+			double[] hl = { 170/255.0, 175/255.0, 185/255.0 };
+			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k], hl[k], top)*(1 - dark));
+			img.Set(x, y, c[0], c[1], c[2], 1);
+		}
+		return img;
+	}
+	// The cast edge's extra heat (+.4, falling off over 1.1 bar heights): white, the addon tints it to the heat at the
+	// edge. It spans 4.4 bar heights (256 px = 4 e-folds); its alpha is the falloff, strongest at the right.
+	public static Img SmithEdge()
+	{
+		var img = new Img(256, 32);
+		for (int y = 0; y < 32; y++) for (int x = 0; x < 256; x++)
+		{
+			double u = (x + 0.5)/256, v = (y + 0.5)/32;
+			double dark = v > 0.7 ? 0.08 + 0.42*(v - 0.7)/0.3 : 0.08*Smooth(0.18, 0.7, v);   // the iron's shading, as IronBar
+			img.Set(x, y, 1 - dark, 1 - dark, 1 - dark, Math.Exp(-(1 - u)*4));
+		}
+		return img;
+	}
 
-	// Tempered steel after the quench, stretched across the whole bar: straw at the left to blue at the right.
+	// Tempered steel after the quench, stretched across the whole bar: cool grey steel, with only a faint, narrow
+	// temper sheen (straw, bronze, a hint of blue) toward the right, where the iron was hottest.
 	public static Img SmithTemper()
 	{
 		var img = new Img(256, 64);
-		double[] at = { 0, 0.35, 0.55, 0.75, 1 };
-		double[][] cols = { Hex(0x6c7480), Hex(0x8a8577), Hex(0x9a7d4f), Hex(0x5d5a86), Hex(0x4b6a92) };
+		double[] at = { 0, 0.62, 0.72, 0.8, 0.88, 1 };
+		double[][] cols = { Hex(0x70767e), Hex(0x72777e), Hex(0x86837a), Hex(0x86796a), Hex(0x6c7385), Hex(0x6e757f) };
 		for (int y = 0; y < 64; y++) for (int x = 0; x < 256; x++)
 		{
 			double u = (x + 0.5)/256, v = (y + 0.5)/64;
-			var c = Stops(u + 0.03*Fbm(u, v, 8, 2, 2, 911), at, cols);
+			var c = Stops(u + 0.02*Fbm(u, v, 8, 2, 2, 911), at, cols);
 			double brush = 1 + 0.05*Noise(u*16, v*90, 16, 90, 912);
 			double top = 0.35*Clamp(1 - v/0.25), dark = 0.5*Smooth(0.25, 1, v);
 			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k]*brush, 1, top)*(1 - dark));
@@ -1555,10 +1686,10 @@ public static class CastbarArt
 
 	// ---------------------------------------------------------------- the forged pouring ladle (smelting)
 	// The hand ladle of the smelting concepts (smelt-a3, drawn as in B3): a deep forged-iron bowl, sooty and
-	// heat-tinted under the rim, slag on the metal inside, molten metal spilling over the spout, a forged rod
-	// handle ending in a wooden grip with iron rings. Its own frame, in bar heights (y down): the spout lip at
-	// the origin, the bowl to the right. The atlas holds LADLE_TILT.Length cells, the lip at (LADLE_OX, LADLE_OY)
-	// in each LADLE_SPAN-square cell, tipped by each tilt (the first pours, the last has righted itself).
+	// heat-tinted under the rim, slag on the metal inside, molten metal spilling over the spout; no handle (it
+	// was dropped 2026-10-09, so only the bowl rides the cast edge). Its own frame, in bar heights (y down): the
+	// spout lip at the origin, the bowl to the right. The atlas holds LADLE_TILT.Length cells, the lip at
+	// (LADLE_OX, LADLE_OY) in each LADLE_SPAN-square cell, tipped by each tilt (the first pours, the last has righted itself).
 	public static readonly double[] LADLE_TILT = { 0.58, 0.40, 0.22, 0.05 };
 	public const int LADLE_CELL = 256; public const double LADLE_SPAN = 2.6, LADLE_OX = 0.3, LADLE_OY = 1.8, LADLE_R = 0.56;
 	static double EllD(double x, double y, double cx, double cy, double a, double b)   // about the distance to an ellipse's outline
@@ -1572,7 +1703,6 @@ public static class CastbarArt
 		bowl.AddRange(Bez(-0.04*R, 0.2*R, -0.02*R, 0.95*R, 0.42*R, 1.32*R, R, 1.32*R, 16));
 		bowl.AddRange(Bez(R, 1.32*R, 1.58*R, 1.32*R, 2.02*R, 0.95*R, 2*R, 0, 16));
 		bowl.Add(new[]{ 0.0, 0.0 });
-		double hx0 = 1.8*R, hy0 = 0.2*R, ha = -0.5, HL = 2.5*R, ux = Math.Cos(ha), uy = Math.Sin(ha);
 		var rnd = new Random(951);
 		var soot = new List<double[]>(); for (int i = 0; i < 6; i++) soot.Add(new[] { Rnd(rnd, 0.2, 1.8), Rnd(rnd, 0.04, 0.1), Rnd(rnd, 0.3, 0.9), Rnd(rnd, 0.12, 0.3) });
 		var slag = new List<double[]>(); for (int i = 0; i < 4; i++) slag.Add(new[] { Rnd(rnd, 0.35, 1.6), Rnd(rnd, -0.05, 0.05), Rnd(rnd, 0.08, 0.14) });
@@ -1581,42 +1711,6 @@ public static class CastbarArt
 		for (int y = 0; y < s.Img.H; y++) for (int x = 0; x < s.Img.W; x++)
 		{
 			double lx = X0 + (x + 0.5)/PX, ly = Y0 + (y + 0.5)/PX, r = 0, g = 0, b = 0, a = 0;
-			// handle: along v (0 at the bowl, 1 at the grip's end), w across it
-			double hv = ((lx - hx0)*ux + (ly - hy0)*uy)/HL, hwid = -(lx - hx0)*uy + (ly - hy0)*ux;
-			if (hv > -0.05 && hv < 1.05)
-			{
-				if (hv < 0.6)   // forged iron rod, heat-tinted near the bowl
-				{
-					double w = 0.07*R, cov = Clamp((w - Math.Abs(hwid))*PX + 0.5)*Clamp(hv*HL*PX + 0.5);
-					if (cov > 0)
-					{
-						double t = hwid/w;   // -1 top .. 1 bottom
-						double[] c = { Lerp(0.36, 0.14, (t + 1)/2), Lerp(0.37, 0.15, (t + 1)/2), Lerp(0.41, 0.17, (t + 1)/2) };
-						double tint = hv < 0.2 ? Lerp(0.55, 0.4, hv/0.2) : Lerp(0.4, 0, (hv - 0.2)/0.25);
-						double[] tc = hv < 0.12 ? new[] { 165/255.0, 115/255.0, 60/255.0 } : new[] { 80/255.0, 90/255.0, 150/255.0 };
-						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], tc[q], Clamp(tint));
-						double hl = 0.45*Clamp(1 - Math.Abs(t + 0.55)/0.25);
-						for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], 0.74, hl);
-						Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
-					}
-				}
-				if (hv > 0.58)   // wooden grip with grain and iron rings
-				{
-					double w = 0.1*R, cov = Clamp((w - Math.Abs(hwid))*PX + 0.5)*Clamp((1 - hv)*HL*PX + 0.5)*Clamp((hv - 0.58)*HL*PX + 0.5);
-					if (cov > 0)
-					{
-						double t = (hwid/w + 1)/2;
-						var c = Stops(t, new[] { 0, 0.5, 1 }, new[] { Hex(0x6a4a30), Hex(0x46301d), Hex(0x24170d) });
-						for (int k = 1; k < 4; k++) { double o = (k - 2)*R*0.045; double gk = 0.35*InkP(Math.Abs(hwid - o), Math.Max(0.006, R*0.012), PX); for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], new[] { 25/255.0, 14/255.0, 6/255.0 }[q], gk); }
-						Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
-					}
-					foreach (double rv in new[] { 0.62, 0.97 })
-					{
-						double rc = Clamp((0.035*R - Math.Abs(hv - rv)*HL)*PX + 0.5)*Clamp((0.12*R - Math.Abs(hwid))*PX + 0.5);
-						if (rc > 0) Over(ref r, ref g, ref b, ref a, 0.16, 0.17, 0.19, rc);
-					}
-				}
-			}
 			// bowl: dark forged iron, dull red where the metal sits, temper colours under the rim, soot, a soft flank light
 			if (Near(bbBowl, lx, ly, 0.03))
 			{
@@ -1700,33 +1794,108 @@ public static class CastbarArt
 		return img;
 	}
 
-	// Cooled molten steel (the smelting fill): dark crust plates, their seams still glowing dull red, a lit skin on top.
+	// The smelting bar, as the concept (smelting.js smelt-a, drawMolten). The molten body lies under a thin dark strip
+	// at the top of the bar (its surface SMELT_BASE bar heights down, a bright skin along it) and its colour is the heat
+	// along the bar; crust plates float on it: angular polygons a bit under half a bar height across in two rows,
+	// overlapping into crazy paving, darker than the metal round them, each edged with a brighter line of the heat.
+	//   smelt_crust  the cold steel (the fill layer): the dark metal with the plates, their cold sheen, no glow
+	//   smelt_seam   the heat map laid over it, white: the addon colours it with a gradient of the heat along the bar;
+	//                its alpha is the metal between the plates (.7), the plates (.4) and their edges (1), so the
+	//                plates stay darker than the metal and their edges brighter, as the concept paints them
+	//   smelt_hot    the fresh pour behind the landing point, opaque where the metal is molten (the plates are gone)
+	//   smelt_front  the pour's rounded front: a cap of the bar's dark over the fill's last SMELT_FRONT bar heights
+	//   smelt_dark   the track: the bar's dark interior ahead of the pour
+	const double SMELT_BASE = 0.09, SMELT_SKIN = 0.135, SMELT_FRONT = 0.45;
+	static readonly double[] SMELT_DARK = { 16/255.0, 15/255.0, 20/255.0 };
+	class Plate { public double X, Y; public List<double[]> Pts, Hi; public double Var; }
+	static List<Plate> plates;
+	static List<Plate> SmeltPlates()
+	{
+		if (plates != null) return plates;
+		plates = new List<Plate>();
+		var rnd = new Random(991);
+		foreach (double row in new[] { .32, .7 })
+			for (double x = H*.2; x < W + H; x += H*Rnd(rnd, .3, .4))
+			{
+				var p = new Plate { X = x + Rnd(rnd, -.1, .1)*H, Y = H*(row + Rnd(rnd, -.06, .06)), Var = 0.85 + 0.3*rnd.NextDouble() };
+				double r = H*Rnd(rnd, .24, .32); int n = 5 + rnd.Next(3);
+				p.Pts = new List<double[]>(); p.Hi = new List<double[]>();
+				for (int i = 0; i < n; i++)
+				{
+					double a = (i + Rnd(rnd, -.3, .3))/n*2*Math.PI, d = r*Rnd(rnd, .7, 1.1);
+					double px = Math.Cos(a)*d, py = Math.Sin(a)*d*.75;
+					p.Pts.Add(new[] { p.X + px, p.Y + py });
+					p.Hi.Add(new[] { p.X - .02*H + px*.6, p.Y - .03*H + py*.5 });   // the concept's smaller, lighter polygon up and left
+				}
+				plates.Add(p);
+			}
+		return plates;
+	}
+	// the topmost plate under (px, py) on the tiling bar, how far inside its edge, and whether in its highlight
+	static Plate PlateAt(double px, double py, out double edge, out bool hi)
+	{
+		var ps = SmeltPlates(); edge = 0; hi = false;
+		for (int i = ps.Count - 1; i >= 0; i--)
+		{
+			var p = ps[i];
+			foreach (double o in new[] { 0.0, -W, W })
+			{
+				if (Math.Abs(px + o - p.X) > H*.4) continue;
+				if (InPoly(p.Pts, px + o, py)) { edge = LineDist(p.Pts, px + o, py, true); hi = InPoly(p.Hi, px + o, py); return p; }
+			}
+		}
+		return null;
+	}
+	// the bar's vertical make-up: the dark strip above the metal, the bright skin along its surface, shade toward the bottom
+	static void SmeltDepth(double[] c, double v)
+	{
+		if (v < SMELT_BASE) { c[0] = SMELT_DARK[0]; c[1] = SMELT_DARK[1]; c[2] = SMELT_DARK[2]; return; }
+		double skin = 0.4*Smooth(SMELT_SKIN + 0.02, SMELT_BASE + 0.01, v), dark = 0.42*Smooth(0.3, 1, v);
+		for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k], new[] { 1, 240/255.0, 190/255.0 }[k], skin)*(1 - dark));
+	}
 	public static Img SmeltCrust()
 	{
 		var img = new Img(W, H);
+		double[] sheen = { 200/255.0, 205/255.0, 215/255.0 }, rimc = { 78/255.0, 72/255.0, 80/255.0 };
 		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
 		{
-			double u = (x + 0.5)/W, v = (y + 0.5)/H;
-			double wu = u + 0.012*Fbm(u, v, 16, 2, 2, 971), wv = v + 0.1*Fbm(u, v + 0.3, 16, 2, 2, 972);
-			double f1, f2; int cell;
-			Voronoi(wu, wv, 16, 2, 973, out f1, out f2, out cell);
-			double seam = Smooth(0.16, 0.03, f2 - f1);
-			double warm = 0.16 + 0.12*Fbm(u, v, 6, 1, 2, 974);
-			var baseC = HeatCol(MELT_HEAT, warm);
-			double pv = 0.85 + 0.15*Hash(cell, 1, 975);
-			double[] plate = { Lerp(baseC[0], 40/255.0, 0.45)*pv, Lerp(baseC[1], 38/255.0, 0.45)*pv, Lerp(baseC[2], 42/255.0, 0.45)*pv };
-			double sheen = 0.18*Smooth(0.5, 0.05, f1)*Smooth(0.0, 0.3, f2 - f1);
-			for (int k = 0; k < 3; k++) plate[k] = Lerp(plate[k], new[] { 200/255.0, 205/255.0, 215/255.0 }[k], sheen*0.6);
-			var seamC = HeatCol(MELT_HEAT, 0.34 + 0.18*(0.5 + 0.5*Fbm(u, v, 24, 2, 2, 976)));
-			double[] c = { Lerp(plate[0], seamC[0], seam), Lerp(plate[1], seamC[1], seam), Lerp(plate[2], seamC[2], seam) };
-			double top = 0.22*Clamp(1 - v/0.25), dark = 0.42*Smooth(0.25, 1, v);
-			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(c[k], new[] { 1, 235/255.0, 180/255.0 }[k], top)*(1 - dark));
+			double px = x + 0.5, py = y + 0.5, u = px/W, v = py/H;
+			double edge; bool hi;
+			var p = PlateAt(px, py, out edge, out hi);
+			double[] c;
+			if (p == null)
+			{
+				double n = 1 + 0.08*Fbm(u, v, 16, 2, 2, 971);
+				c = new[] { 52/255.0*n, 50/255.0*n, 56/255.0*n };
+			}
+			else
+			{
+				c = new[] { 40/255.0*p.Var, 38/255.0*p.Var, 42/255.0*p.Var };
+				if (hi) for (int k = 0; k < 3; k++) c[k] = Lerp(c[k], sheen[k], 0.16);           // the cold plates' dull sheen
+				double rim = Smooth(2.4, 0.9, edge);
+				for (int k = 0; k < 3; k++) c[k] = Lerp(c[k], rimc[k], 0.6*rim);                 // a faint lighter edge
+			}
+			SmeltDepth(c, v);
 			img.Set(x, y, c[0], c[1], c[2], 1);
 		}
 		return img;
 	}
-
-	// The fresh pour, stretched behind the landing point: transparent at the left, where it has cooled to crust,
+	public static Img SmeltSeam()
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double px = x + 0.5, py = y + 0.5, v = py/H;
+			double edge; bool hi;
+			var p = PlateAt(px, py, out edge, out hi);
+			double a = p == null ? 0.7 : Lerp(0.4, 1, Smooth(2.4, 0.9, edge));   // the plates' edges brighter than the metal between them
+			if (v < SMELT_BASE) a = 0; else if (v < SMELT_SKIN) a = 1;
+			double dark = 0.42*Smooth(0.3, 1, v);
+			img.Set(x, y, 1 - dark, 1 - dark, 1 - dark, a);
+		}
+		return img;
+	}
+	// The fresh pour, stretched behind the landing point: clear at the left, where the crust has formed, growing opaque
 	// through red and orange to pale yellow at the right edge (the landing point; the addon clamps past it).
 	public static Img SmeltHot()
 	{
@@ -1737,12 +1906,486 @@ public static class CastbarArt
 			double temp = Math.Exp(-(1 - u)*3.2) * (1 + 0.06*Fbm(u, v, 12, 2, 2, 981));
 			var c = HeatCol(MELT_HEAT, Clamp(temp));
 			double streak = 0.08*Smooth(0.2, 0.7, Fbm(u*1, v, 24, 4, 2, 982))*Clamp(temp*1.5);
-			double top = 0.22*Clamp(1 - v/0.25), dark = 0.42*Smooth(0.25, 1, v);
-			for (int k = 0; k < 3; k++) c[k] = Clamp(Lerp(Clamp(c[k] + streak), new[] { 1, 235/255.0, 180/255.0 }[k], top)*(1 - dark));
-			img.Set(x, y, c[0], c[1], c[2], Smooth(0.4, 0.9, temp));   // the crust shows through from about 0.4 heat down
+			for (int k = 0; k < 3; k++) c[k] = Clamp(c[k] + streak);
+			SmeltDepth(c, v);
+			img.Set(x, y, c[0], c[1], c[2], Smooth(0.38, 0.78, temp));   // the plates fade out where the metal is molten
 		}
 		return img;
 	}
+	// The pour's rounded front, as the concept's quarter-round nose: the bar's dark where there is no metal yet,
+	// over the fill's last SMELT_FRONT bar heights (64 px square, drawn SMELT_FRONT wide and a bar high).
+	public static Img SmeltFront()
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = (x + 0.5)/64, v = (y + 0.5)/64;
+			double top = SMELT_BASE + (1 - SMELT_BASE)*(1 - Math.Sqrt(Math.Max(0, 1 - u*u)));   // the metal's surface here
+			double a = 1 - Smooth(top - 0.05, top + 0.05, v);   // a soft edge, so the nose rounds off instead of cutting a block
+			a = Math.Max(a, Smooth(0.93, 0.99, u));             // the last columns fully dark: no hot sliver at the fill edge
+			img.Set(x, y, SMELT_DARK[0], SMELT_DARK[1], SMELT_DARK[2], a);
+		}
+		return img;
+	}
+	public static Img SmeltDark()
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double n = 1 + 0.1*Fbm((x + 0.5)/64, (y + 0.5)/64, 4, 4, 2, 983);
+			img.Set(x, y, Clamp(SMELT_DARK[0]*n), Clamp(SMELT_DARK[1]*n), Clamp(SMELT_DARK[2]*n), 1);
+		}
+		return img;
+	}
+
+	// ================================================================ TAILORING: the loom (tail-a2), and LEATHERWORKING: laced, tooled panels (lw-b)
+	// Painting on a transparent image, in bar heights at px pixels per bar height: a straight-alpha "over" on a pixel,
+	// strokes and fills of polylines (wrapping left-right for tiles), and the embossed strokes the leather tooling uses.
+	static void OverPx(Img img, int x, int y, double cr, double cg, double cb, double ca)
+	{
+		if (x < 0 || y < 0 || x >= img.W || y >= img.H || ca <= 0) return;
+		int i = y*img.W + x;
+		double a0 = img.A[i], r = img.R[i]*a0, g = img.G[i]*a0, b = img.B[i]*a0, a = a0;
+		Over(ref r, ref g, ref b, ref a, cr, cg, cb, ca);
+		if (a > 0) { img.R[i] = r/a; img.G[i] = g/a; img.B[i] = b/a; }
+		img.A[i] = a;
+	}
+	static void StrokeH(Img img, List<double[]> pts, double w, double px, double[] c, double alpha, bool closed, bool wrapX)
+	{
+		var bb = Bbox(pts); double pad = w/2 + 1.5/px;
+		int x0 = (int)Math.Floor((bb[0] - pad)*px), x1 = (int)Math.Ceiling((bb[2] + pad)*px), y0 = (int)Math.Floor((bb[1] - pad)*px), y1 = (int)Math.Ceiling((bb[3] + pad)*px);
+		for (int y = Math.Max(0, y0); y <= Math.Min(img.H - 1, y1); y++) for (int x = x0; x <= x1; x++)
+		{
+			int xx = wrapX ? Mod(x, img.W) : x;
+			if (xx < 0 || xx >= img.W) continue;
+			double d = LineDist(pts, (x + 0.5)/px, (y + 0.5)/px, closed);
+			OverPx(img, xx, y, c[0], c[1], c[2], alpha*InkP(d, w, px));
+		}
+	}
+	static void FillH(Img img, List<double[]> pts, double px, double[] c, double alpha, bool wrapX)
+	{
+		var bb = Bbox(pts); double pad = 1.5/px;
+		int x0 = (int)Math.Floor((bb[0] - pad)*px), x1 = (int)Math.Ceiling((bb[2] + pad)*px), y0 = (int)Math.Floor((bb[1] - pad)*px), y1 = (int)Math.Ceiling((bb[3] + pad)*px);
+		for (int y = Math.Max(0, y0); y <= Math.Min(img.H - 1, y1); y++) for (int x = x0; x <= x1; x++)
+		{
+			int xx = wrapX ? Mod(x, img.W) : x;
+			if (xx < 0 || xx >= img.W) continue;
+			OverPx(img, xx, y, c[0], c[1], c[2], alpha*Cover(pts, (x + 0.5)/px, (y + 0.5)/px, px));
+		}
+	}
+	static List<double[]> Shift(List<double[]> pts, double dx, double dy)
+	{
+		var o = new List<double[]>(); foreach (var p in pts) o.Add(new[] { p[0] + dx, p[1] + dy }); return o;
+	}
+	static List<double[]> Seg(double x0, double y0, double x1, double y1) { return new List<double[]> { new[] { x0, y0 }, new[] { x1, y1 } }; }
+	static List<double[]> Circle(double cx, double cy, double r)
+	{
+		var p = new List<double[]>(); for (int i = 0; i < 20; i++) { double a = 2*Math.PI*i/20; p.Add(new[] { cx + Math.Cos(a)*r, cy + Math.Sin(a)*r }); } return p;
+	}
+	// A rounded rectangle's signed distance (negative inside), for the cloth's strands.
+	static double RRDist(double x, double y, double cx, double cy, double hw, double hh, double r)
+	{
+		double qx = Math.Abs(x - cx) - (hw - r), qy = Math.Abs(y - cy) - (hh - r);
+		double ox = Math.Max(qx, 0), oy = Math.Max(qy, 0);
+		return Math.Sqrt(ox*ox + oy*oy) + Math.Min(Math.Max(qx, qy), 0) - r;
+	}
+	// a soft shadow of the image's own alpha, down and to the right (as under the knife)
+	static void DropShadow(Img img, int ox, int oy, int rad, double k)
+	{
+		var sh = new double[img.W*img.H];
+		for (int i = 0; i < sh.Length; i++) sh[i] = img.A[i];
+		for (int pass = 0; pass < 3; pass++) sh = BoxBlur(sh, img.W, img.H, rad);
+		for (int y = 0; y < img.H; y++) for (int x = 0; x < img.W; x++)
+		{
+			int sx = x - ox, sy = y - oy;
+			double s = (sx >= 0 && sy >= 0) ? k*sh[sy*img.W + sx] : 0;
+			int i = y*img.W + x;
+			double ka = img.A[i], oa = ka + s*(1 - ka);
+			if (oa <= 0) continue;
+			img.R[i] = img.R[i]*ka/oa; img.G[i] = img.G[i]*ka/oa; img.B[i] = img.B[i]*ka/oa; img.A[i] = oa;
+		}
+	}
+
+	// ---------------------------------------------------------------- the woven cloth (the tailoring fill) and the warp ahead of it
+	// Plain weave, as the concept's weaveTile: cells WEAVE_C px square (twelve per bar height), the warp running along the
+	// bar in the cells where (column + row) is even, the weft across it in the others, each thread a rounded strand lit
+	// across its width. Painted in brightness (1 = the cloth's colour; the addon tints it per cast), the weft a shade
+	// lighter than the warp, the dark between them at .42. Slubs, soft mottling and the cloth curving away top and bottom.
+	public const double WEAVE_C = 64.0/12;
+	static double StrandLum(double t)   // across a strand: shaded edge, the lit crown, the body, the far edge in shade
+	{
+		return t < 0.42 ? Lerp(0.6, 1.0, t/0.42) : t < 0.6 ? Lerp(1.0, 0.9, (t - 0.42)/0.18) : Lerp(0.9, 0.55, (t - 0.6)/0.4);
+	}
+	public static Img TailCloth()
+	{
+		var img = new Img(W, H); double c = WEAVE_C, th = c*0.8;
+		var rnd = new Random(1021);
+		var slub = new double[W/(int)Math.Round(c) + 2]; for (int i = 0; i < slub.Length; i++) { double r = rnd.NextDouble(); slub[i] = r < 0.1 ? 0.07 : r < 0.2 ? -0.1 : 0; }
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double sx = x + 0.5, sy = y + 0.5; int ci = (int)Math.Floor(sx/c), cj = (int)Math.Floor(sy/c);
+			double lum = 0.42; bool hit = false;
+			for (int pass = 0; pass < 2 && !hit; pass++)   // the weft (vertical strands) lies over the warp
+			{
+				bool vert = pass == 0;
+				for (int k = -1; k <= 1 && !hit; k++)
+				{
+					int i = vert ? ci : ci + k, j = vert ? cj + k : cj;
+					if (Mod(i + j, 2) != (vert ? 1 : 0)) continue;
+					double cx = (i + 0.5)*c, cy = (j + 0.5)*c, d = vert ? RRDist(sx, sy, cx, cy, th/2, c*0.6, th/2) : RRDist(sx, sy, cx, cy, c*0.6, th/2, th/2);
+					double cov = Clamp(0.5 - d);
+					if (cov <= 0) continue;
+					double t = vert ? (sx - (cx - th/2))/th : (sy - (cy - th/2))/th;
+					double l = StrandLum(Clamp(t))*(vert ? 1.0 : 0.93);
+					lum = Lerp(lum, l, cov); hit = cov >= 0.999;
+				}
+			}
+			int su = Math.Min(slub.Length - 1, (int)Math.Floor(sx/c));
+			if (slub[su] > 0) lum = Lerp(lum, 1, slub[su]); else lum *= 1 + slub[su];
+			double v = sy/H, curve = v < 0.2 ? 0.3*(1 - v/0.2) : v > 0.75 ? 0.38*(v - 0.75)/0.25 : 0;
+			lum *= 1 - curve;
+			img.Set(x, y, lum, lum, lum, 1);
+		}
+		for (int n = 0; n < 64; n++)   // soft mottling
+		{
+			double cx = Rnd(rnd, 0, W), cy = Rnd(rnd, 0, H), r = H*Rnd(rnd, 0.3, 0.9); bool dark = rnd.NextDouble() < 0.55;
+			for (int y = (int)(cy - r); y <= (int)(cy + r); y++) { if (y < 0 || y >= H) continue; for (int x = (int)(cx - r); x <= (int)(cx + r); x++)
+			{
+				double d = Math.Sqrt((x - cx)*(x - cx) + (y - cy)*(y - cy)), t = (dark ? 0.12 : 0.06)*Clamp(1 - d/r); int j = y*W + Mod(x, W);
+				img.R[j] = Lerp(img.R[j], dark ? 0 : 1, t); img.G[j] = img.R[j]; img.B[j] = img.R[j];
+			} }
+		}
+		return img;
+	}
+	// The warp ahead of the fell: taut threads along the bar, one per weave unit (six per bar height), on a dark ground.
+	// Brightness .55 of the cloth's colour (the addon tints it); tail_warp_hi is the light along their tops, added.
+	static Img warpHi;
+	public static Img TailWarp()
+	{
+		var img = new Img(W, H); warpHi = new Img(W, H);
+		double lw = Math.Max(0.8, WEAVE_C*0.5);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double sy = y + 0.5, a = 0, hi = 0;
+			for (int j = 0; j < 6; j++)
+			{
+				double cy = (j + 0.5)*2*WEAVE_C + 0.15*Math.Sin(x/37.0 + j);
+				a = Math.Max(a, Clamp(lw/2 - Math.Abs(sy - cy) + 0.5));
+				hi = Math.Max(hi, Clamp(lw*0.35/2 - Math.Abs(sy - cy + lw*0.2) + 0.5));
+			}
+			double l = Lerp(0.03, 0.55, a*0.9);
+			img.Set(x, y, l, l, l, 1);
+			warpHi.Set(x, y, 1, 1, 1, 0.55*hi*a);
+		}
+		return img;
+	}
+	public static Img TailWarpHi() { if (warpHi == null) TailWarp(); return warpHi; }
+	// The shed: one bar height square laid on the track just past the fell, where alternate threads part by .45 of a cell
+	// over the first .7, then run on and close again while the square fades out, so it meets the taut warp behind it.
+	// Flipped top to bottom (texcoords) for the other shed.
+	public static Img TailShed()
+	{
+		var img = new Img(64, 64); double px = 64, lw = Math.Max(0.8, WEAVE_C*0.5)/64, cell = 1.0/12;
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double u = (x + 0.5)/px, v = (y + 0.5)/px, a = 0, hi = 0;
+			double part = u < 0.7 ? u/0.7 : u < 0.85 ? 1 : 1 - (u - 0.85)/0.15;
+			for (int j = 0; j < 6; j++)
+			{
+				double cy = (j + 0.5)*2*cell + (j % 2 == 1 ? 1 : -1)*0.45*cell*part;
+				a = Math.Max(a, Clamp((lw/2 - Math.Abs(v - cy))*px + 0.5));
+				hi = Math.Max(hi, Clamp((lw*0.35/2 - Math.Abs(v - cy + lw*0.2))*px + 0.5));
+			}
+			double l = Lerp(0.03, Lerp(0.55, 0.9, hi), a*0.9), alpha = u < 0.8 ? 1 : 1 - (u - 0.8)/0.2;
+			img.Set(x, y, l, l, l, alpha);
+		}
+		return img;
+	}
+	// ---------------------------------------------------------------- the loom's tools (tail-a2): small boat shuttle, pirn, reed, loose weft ends
+	// All at 160 px per bar height, painted as the concept's drawShuttleSmall / drawReedSmall: worn, muted wood, no brass, soft shadows.
+	public const double SHUTTLE_L = 0.6, SHUTTLE_W = 0.14;
+	public static Img Shuttle()   // 64x128 (.4 x .8 bar heights), standing upright, centred; its cavity is empty (p_pirn fills it)
+	{
+		var img = new Img(64, 128); double px = 160, cx = 0.2, cy = 0.4, L = SHUTTLE_L, w = SHUTTLE_W;
+		var body = Bez(cx, cy - L/2, cx + w*0.62, cy - L*0.28, cx + w*0.62, cy + L*0.28, cx, cy + L/2, 24);
+		body.AddRange(Bez(cx, cy + L/2, cx - w*0.62, cy + L*0.28, cx - w*0.62, cy - L*0.28, cx, cy - L/2, 24));
+		double[] at = { 0, 0.4, 0.6, 1 }; double[][] wood = { Hex(0x2e1c10), Hex(0x6b4a2c), Hex(0x7c5a38), Hex(0x2a1a0e) };
+		var bb = Bbox(body);
+		for (int y = 0; y < img.H; y++) for (int x = 0; x < img.W; x++)
+		{
+			double lx = (x + 0.5)/px, ly = (y + 0.5)/px;
+			if (!Near(bb, lx, ly, 0.02)) continue;
+			double cov = Cover(body, lx, ly, px);
+			if (cov <= 0) continue;
+			var c = Stops((lx - (cx - w/2))/w, at, wood);
+			for (int i = -1; i <= 1; i++)   // grain
+			{
+				var gr = Bez(cx + i*w*0.15, cy - L/2, cx + i*w*0.25, cy - L*0.15, cx + i*w*0.05, cy + L*0.15, cx + i*w*0.18, cy + L/2, 12);
+				double k = 0.3*InkP(LineDist(gr, lx, ly, false), 0.008, px);
+				for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], new[] { 30/255.0, 16/255.0, 6/255.0 }[q], k);
+			}
+			OverPx(img, x, y, c[0], c[1], c[2], cov);
+		}
+		FillH(img, RoundRect(cx - w*0.2, cy - L*0.21, w*0.4, L*0.42, w*0.2), px, new[] { 16/255.0, 8/255.0, 2/255.0 }, 0.85, false);
+		StrokeH(img, Bez(cx - w*0.22, cy - L*0.32, cx - w*0.34, cy - L*0.1, cx - w*0.34, cy + L*0.1, cx - w*0.22, cy + L*0.32, 12), 0.012, px, new[] { 1, 236/255.0, 210/255.0 }, 0.22, false, false);
+		DropShadow(img, 4, 5, 4, 0.4);
+		return img;
+	}
+	public static Img Pirn()      // 32x128 (.2 x .8): the pirn of thread in the shuttle's cavity, white (tinted to the cloth's thread)
+	{
+		var img = new Img(32, 128); double px = 160, cx = 0.1, cy = 0.4, bw = SHUTTLE_W*0.4*0.78, bl = SHUTTLE_L*0.42*0.8;
+		var body = RoundRect(cx - bw/2, cy - bl/2, bw, bl, bw*0.3);
+		for (int y = 0; y < img.H; y++) for (int x = 0; x < img.W; x++)
+		{
+			double lx = (x + 0.5)/px, ly = (y + 0.5)/px, cov = Cover(body, lx, ly, px);
+			if (cov <= 0) continue;
+			double t = (lx - (cx - bw/2))/bw, l = t < 0.45 ? Lerp(0.45, 1, t/0.45) : Lerp(1, 0.45, (t - 0.45)/0.55);
+			double wind = 0.45*InkP(Math.Abs(Frac((ly - lx*0.15)/0.025) - 0.5)*0.025, 0.004, px);   // the wound thread, slightly slanted
+			l = Lerp(l, 0.45, wind);
+			OverPx(img, x, y, l, l, l, cov);
+		}
+		return img;
+	}
+	public static Img Reed()      // 32x256 (.2 x 1.6): the slim steel reed in dark wood caps, from .1 above the bar to .1 below it; the bar's top is .3 down the sprite
+	{
+		var img = new Img(32, 256); double px = 160, cx = 0.1, top = 0.3 - 0.1, bot = 0.3 + 1.1, w = 0.075, cap = 0.06, cw = 0.12;
+		double[] sAt = { 0, 0.5, 1 }; double[][] steel = { Hex(0x4a4e55), Hex(0xa2a8b0), Hex(0x55595f) };
+		double[][] wood = { Hex(0x2e1c10), Hex(0x6b4a2c), Hex(0x2a1a0e) };
+		var plate = RoundRect(cx - w/2, top + cap, w, bot - top - 2*cap, 0.004);
+		var caps = new[] { RoundRect(cx - cw/2, top, cw, cap, cap*0.3), RoundRect(cx - cw/2, bot - cap, cw, cap, cap*0.3) };
+		for (int y = 0; y < img.H; y++) for (int x = 0; x < img.W; x++)
+		{
+			double lx = (x + 0.5)/px, ly = (y + 0.5)/px, cov = Cover(plate, lx, ly, px);
+			if (cov > 0)
+			{
+				var c = Stops((lx - (cx - w/2))/w, sAt, steel);
+				double dent = ly > top + cap + 0.02 && ly < bot - cap ? 0.5*InkP(Math.Abs(Frac((ly - top - cap - 0.02)/0.06) - 0.5)*0.06, 0.007, px) : 0;
+				for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], new[] { 30/255.0, 32/255.0, 36/255.0 }[q], dent);
+				OverPx(img, x, y, c[0], c[1], c[2], cov);
+			}
+			foreach (var k in caps)
+			{
+				double cc = Cover(k, lx, ly, px);
+				if (cc > 0) { var c = Stops((lx - (cx - cw/2))/cw, sAt, wood); OverPx(img, x, y, c[0], c[1], c[2], cc); }
+			}
+		}
+		DropShadow(img, 4, 2, 3, 0.4);
+		return img;
+	}
+	public static Img WeftTail()  // 32x32 (.2 x .2): a loose weft end poking out of the top selvedge: up from the bottom middle, curling right. White (tinted); flipped for the bottom edge and the other curl
+	{
+		var img = new Img(32, 32); double px = 160, x = 0.1, y0 = 0.16, len = 0.15;
+		var pts = Bez(x, 0.2, x + 0.05, y0 - len*0.5, x + 0.14, y0 - len*0.7, x + 0.08, y0 - len, 16);
+		StrokeH(img, pts, 0.033, px, new[] { 1.0, 1.0, 1.0 }, 0.9, false, false);
+		return img;
+	}
+
+	// ---------------------------------------------------------------- tanned leather (the leatherworking panels), tooled patterns, holes, lace, stitches, the needle
+	// Leather in brightness (.88 = the tone's colour the addon tints it to, highlights up to 1): a soft top light and
+	// darker lower half, mottling, fine crinkled grain mostly along the hide, pores, light flecks and a few pale scuffs.
+	public const double LEATHER_NOM = 0.88;
+	public static Img Leather()
+	{
+		var img = new Img(W, H); double nom = LEATHER_NOM, hp = H;
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double v = (y + 0.5)/H, l = v < 0.55 ? Lerp(nom*1.06, nom, v/0.55) : Lerp(nom, nom*0.72, (v - 0.55)/0.45);
+			img.Set(x, y, l, l, l, 1);
+		}
+		var rnd = new Random(1031); double area = W*H/(hp*hp);
+		for (int n = 0; n < (int)(area*5); n++)   // mottling
+		{
+			double cx = Rnd(rnd, 0, W), cy = Rnd(rnd, 0, H), r = hp*Rnd(rnd, 0.2, 0.7); bool dark = rnd.NextDouble() < 0.6;
+			for (int y = (int)(cy - r); y <= (int)(cy + r); y++) { if (y < 0 || y >= H) continue; for (int x = (int)(cx - r); x <= (int)(cx + r); x++)
+			{
+				double d = Math.Sqrt((x - cx)*(x - cx) + (y - cy)*(y - cy)), t = (dark ? 0.22 : 0.1)*Clamp(1 - d/r); int j = y*W + Mod(x, W);
+				img.R[j] = Lerp(img.R[j], dark ? nom*0.72 : 1, t); img.G[j] = img.R[j]; img.B[j] = img.R[j];
+			} }
+		}
+		double[] xs, ys;
+		for (int n = 0; n < (int)(area*150); n++)   // grain: short crinkles, mostly along the hide
+		{
+			double x = Rnd(rnd, 0, W), y = Rnd(rnd, 0, H), a = Rnd(rnd, -0.6, 0.6) + (rnd.NextDouble() < 0.25 ? 1.57 : 0), l = hp*Rnd(rnd, 0.025, 0.07);
+			HairPts(x, y, a, l, 0, 0, 1, out xs, out ys);
+			Stroke(img, xs, ys, Math.Max(0.4, hp*0.01), nom*0.72, Rnd(rnd, 0.12, 0.26), false);
+		}
+		for (int n = 0; n < (int)(area*90); n++)    // pores
+		{
+			double x = Rnd(rnd, 0, W), y = Rnd(rnd, 0, H);
+			xs = new[] { x, x }; ys = new[] { y, y };
+			Stroke(img, xs, ys, Math.Max(0.6, hp*Rnd(rnd, 0.01, 0.026)), nom*0.5, Rnd(rnd, 0.2, 0.4), false);
+		}
+		for (int n = 0; n < (int)(area*40); n++)    // light flecks
+		{
+			double x = Rnd(rnd, 0, W), y = Rnd(rnd, 0, H);
+			xs = new[] { x, x }; ys = new[] { y, y };
+			Stroke(img, xs, ys, Math.Max(0.6, hp*Rnd(rnd, 0.012, 0.03)), 1, Rnd(rnd, 0.05, 0.12), false);
+		}
+		for (int n = 0; n < (int)Math.Max(2, W/hp*0.6); n++)   // scuffs
+		{
+			double x = Rnd(rnd, 0, W), y = Rnd(rnd, 0, H), l = hp*Rnd(rnd, 0.3, 0.8), a = Rnd(rnd, -0.4, 0.4);
+			HairPts(x, y, a, l, hp*Rnd(rnd, -0.08, 0.08), 0, 1, out xs, out ys);
+			Stroke(img, xs, ys, hp*Rnd(rnd, 0.01, 0.025), 1, Rnd(rnd, 0.08, 0.16), false);
+		}
+		return img;
+	}
+	// A tooled pattern, 256x128 at TOOL_PX px per bar height: two bar heights long (tiling along the bar) and one tall,
+	// the pattern in the band .15 to .85 that the addon lays over a panel's middle. Pressed into the leather: a dark
+	// impression with a faintly lit lip below and to the right of it (the concept's emboss), on a clear ground.
+	public const double TOOL_PX = 128;
+	static readonly double[] EMB_LIGHT = { 1, 228/255.0, 192/255.0 }, EMB_DARK = { 26/255.0, 11/255.0, 4/255.0 };
+	static void EmbossStroke(Img img, List<double[]> pts, double w, double px, double depth, bool closed)
+	{
+		StrokeH(img, Shift(pts, 0.014, 0.02), w, px, EMB_LIGHT, 0.28*depth, closed, true);
+		StrokeH(img, Shift(pts, -0.006, -0.008), w, px, EMB_DARK, 0.55*depth, closed, true);
+	}
+	static void EmbossFill(Img img, List<double[]> pts, double px, double depth)
+	{
+		FillH(img, Shift(pts, 0.014, 0.02), px, EMB_LIGHT, 0.3*depth, true);
+		FillH(img, pts, px, EMB_DARK, 0.6*depth, true);
+	}
+	public static Img Tooling(int kind)
+	{
+		var img = new Img(256, 128); double px = TOOL_PX, y0 = 0.15, y1 = 0.85, mid = 0.5, hgt = y1 - y0;
+		if (kind == 0)   // basket-weave: cells of three bars, turned in turn
+		{
+			double cw = 0.24; int cols = 8, rows = 2; double ox = (2 - cols*cw)/2, oy = y0 + (hgt - rows*cw)/2;
+			for (int c = 0; c < cols; c++) for (int r = 0; r < rows; r++)
+			{
+				double cx = ox + c*cw, cy = oy + r*cw; bool vert = (c + r) % 2 == 1;
+				for (int b = 0; b < 3; b++)
+				{
+					double along = cw*0.78, thick = cw*0.16, o = (b - 1)*cw*0.27;
+					double x = vert ? cx + cw/2 + o - thick/2 : cx + cw*0.11, y = vert ? cy + cw*0.11 : cy + cw/2 + o - thick/2;
+					EmbossFill(img, RoundRect(x, y, vert ? thick : along, vert ? along : thick, thick*0.45), px, 0.9);
+				}
+			}
+		}
+		else if (kind == 1)   // scrolling vine: a winding stem, curls and leaves off it in turn
+		{
+			double amp = hgt*0.22;
+			var stem = new List<double[]>(); for (int i = 0; i <= 200; i++) { double x = 2.0*i/200; stem.Add(new[] { x, mid + amp*Math.Sin(x*2*Math.PI) }); }
+			EmbossStroke(img, stem, 0.04, px, 1, false);
+			bool up = true;
+			for (int k = 0; k < 3; k++)
+			{
+				double x = 0.12 + k*(2.0/3), y = mid + amp*Math.Sin(x*2*Math.PI), sg = up ? -1 : 1;
+				var curl = Bez(x, y, x + 0.12, y + sg*0.18, x + 0.3, y + sg*0.2, x + 0.26, y + sg*0.06, 14);
+				curl.AddRange(Bez(x + 0.26, y + sg*0.06, x + 0.22, y - sg*0.02, x + 0.16, y + sg*0.04, x + 0.19, y + sg*0.1, 10));
+				EmbossStroke(img, curl, 0.03, px, 0.85, false);
+				double lx = x + 0.36, ly = mid + amp*Math.Sin(lx*2*Math.PI);
+				var leaf = Quad(lx, ly, lx + 0.06, ly - sg*0.22, lx + 0.2, ly - sg*0.26, 10);
+				leaf.AddRange(Quad(lx + 0.2, ly - sg*0.26, lx + 0.14, ly - sg*0.08, lx, ly, 10));
+				EmbossStroke(img, leaf, 0.03, px, 0.85, true);
+				EmbossStroke(img, Seg(lx + 0.03, ly - sg*0.04, lx + 0.16, ly - sg*0.2), 0.03, px, 0.85, false);
+				up = !up;
+			}
+		}
+		else if (kind == 2)   // diamond lattice: crossed grooves, a dot in each diamond
+		{
+			double sp = 2.0/7;
+			for (int k = -3; k < 10; k++)
+			{
+				EmbossStroke(img, Seg(k*sp, y0, k*sp + hgt, y1), 0.028, px, 0.8, false);
+				EmbossStroke(img, Seg(k*sp + hgt, y0, k*sp, y1), 0.028, px, 0.8, false);
+			}
+			for (int i = 0; i < 7; i++) for (int m = -2; m <= 3; m++)
+			{
+				foreach (var d in new[] { new[] { (i + 0.5)*sp, y0 + m*sp }, new[] { i*sp, y0 + (m + 0.5)*sp } })
+					if (d[1] > y0 + 0.04 && d[1] < y1 - 0.04) EmbossFill(img, Circle(d[0], d[1], 0.028), px, 0.9);
+			}
+		}
+		else if (kind == 3)   // bordered shells: bevelled border grooves and a row of fan stamps, up and down in turn
+		{
+			EmbossStroke(img, Seg(0, y0 + 0.05, 2, y0 + 0.05), 0.03, px, 1, false);
+			EmbossStroke(img, Seg(0, y1 - 0.05, 2, y1 - 0.05), 0.03, px, 1, false);
+			double sp = 2.0/6, R = 0.15;
+			for (int i = 0; i < 6; i++)
+			{
+				double cx = (i + 0.5)*sp; bool up = i % 2 == 0; double bs = mid + (up ? R*0.5 : -R*0.5), sg = up ? -1 : 1;
+				var fan = new List<double[]>();
+				for (int k = 0; k <= 16; k++) { double a = Math.PI*k/16; fan.Add(new[] { cx + Math.Cos(a)*R, bs + sg*Math.Sin(a)*R }); }
+				EmbossStroke(img, fan, 0.025, px, 0.9, true);
+				for (int k = 1; k < 4; k++) { double a = Math.PI*k/4; EmbossStroke(img, Seg(cx, bs, cx + Math.Cos(a)*R*0.85, bs + sg*Math.Sin(a)*R*0.85), 0.025, px, 0.9, false); }
+			}
+		}
+		else   // knotwork band: two strands crossing back and forth
+		{
+			double A = hgt*0.3, k = 1.0/(2*Math.PI);
+			foreach (int sg in new[] { 1, -1 })
+			{
+				var pts = new List<double[]>(); for (int i = 0; i <= 200; i++) { double x = 2.0*i/200; pts.Add(new[] { x, mid + sg*A*Math.Sin(x/k) }); }
+				EmbossStroke(img, pts, 0.05, px, 1, false);
+			}
+			for (int m = 0; m < 4; m++) EmbossStroke(img, Seg(m*Math.PI*k, mid - A*0.18, m*Math.PI*k, mid + A*0.18), 0.02, px, 0.6, false);
+		}
+		return img;
+	}
+	public static Img Hole()      // 32x32 at 320 px per bar height: a punched lacing hole .03 bar heights across, a faint lit lip below it
+	{
+		var img = new Img(32, 32); double px = 320, cx = 0.05, cy = 0.05, r = 0.03;
+		for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++)
+		{
+			double lx = (x + 0.5)/px, ly = (y + 0.5)/px;
+			double ex = (lx - cx)/r, ey = (ly - cy)/(r*0.9), k = Math.Sqrt(ex*ex + ey*ey);
+			OverPx(img, x, y, 22/255.0, 10/255.0, 4/255.0, 0.85*Clamp((1 - k)*r*0.9*px + 0.5));
+			double dx = lx - cx, dy = ly - (cy + r*0.15), ang = Math.Atan2(dy, dx), dist = Math.Sqrt(dx*dx + dy*dy);
+			if (ang > 0.3 && ang < 2.84) OverPx(img, x, y, 1, 226/255.0, 190/255.0, 0.22*InkP(Math.Abs(dist - r*1.05), r*0.45, px));
+		}
+		return img;
+	}
+	public static Img Lace()      // 64x8, along a lacing Line: the thong lit along its top, in shade along its bottom (white, tinted to the thong)
+	{
+		var img = new Img(64, 8);
+		for (int y = 0; y < 8; y++) for (int x = 0; x < 64; x++)
+		{
+			double t = (y + 0.5)/8, l = t < 0.3 ? Lerp(1.0, 0.92, t/0.3) : t < 0.7 ? Lerp(0.92, 0.8, (t - 0.3)/0.4) : Lerp(0.8, 0.5, (t - 0.7)/0.3);
+			img.Set(x, y, l, l, l, y == 0 || y == 7 ? 0.6 : 1);
+		}
+		return img;
+	}
+	public static Img Stitch()    // 64x32 at 320 px per bar height (.2 x .1), tiling along the bar: one running stitch, its shadow under it (white, tinted to the thread)
+	{
+		var img = new Img(64, 32); double px = 320, sp = 0.2, w = 0.035;
+		var seg = Seg(sp*0.1, 0.05, sp*0.1 + sp*0.55, 0.05);
+		StrokeH(img, Shift(seg, 0, w*0.45), w*1.35, px, new[] { 0.0, 0.0, 0.0 }, 0.42, false, true);
+		StrokeH(img, seg, w, px, new[] { 0.88, 0.88, 0.88 }, 1, false, true);
+		StrokeH(img, Shift(seg, -w*0.12, -w*0.22), w*0.32, px, new[] { 1.0, 1.0, 1.0 }, 0.55, false, true);
+		return img;
+	}
+	// The lacing needle: steel, from its eye at the origin to its tip NEEDLE_L along +x, w .055 across. The atlas holds
+	// NEEDLE_POSES cells at NEEDLE_ANG rad (tip pointing down-right, more steeply each cell), the eye at (NEEDLE_OX,
+	// NEEDLE_OY) in each NEEDLE_SPAN-square cell; the addon flips cells left-right for the other lacing diagonal.
+	public const int NEEDLE_POSES = 4, NEEDLE_CELL = 128;
+	public const double NEEDLE_SPAN = 1.0, NEEDLE_OX = 0.25, NEEDLE_OY = 0.3, NEEDLE_L = 0.5;
+	public static readonly double[] NEEDLE_ANG = { 0.44, 0.56, 0.70, 0.82 };
+	static Src NeedleSource()
+	{
+		const double PX = 160, X0 = -0.1, Y0 = -0.1;
+		var s = new Src { X0 = X0, Y0 = Y0, PX = PX, Img = new Img((int)(0.75*PX), (int)(0.2*PX)) };
+		double L = NEEDLE_L, w = 0.055;
+		var body = new List<double[]> { new[] { 0, -w/2 }, new[] { L*0.82, -w*0.36 }, new[] { L, 0 }, new[] { L*0.82, w*0.36 }, new[] { 0, w/2 } };
+		for (int i = 1; i < 8; i++) { double a = Math.PI/2 + Math.PI*i/8; body.Add(new[] { Math.Cos(a)*w/2, Math.Sin(a)*w/2 }); }
+		double[] sAt = { 0, 0.45, 1 }; double[][] steel = { Hex(0xeef0f4), Hex(0xa4a8b0), Hex(0x4c4f57) };
+		var hl = Seg(L*0.25, -w*0.28, L*0.62, -w*0.2);
+		for (int y = 0; y < s.Img.H; y++) for (int x = 0; x < s.Img.W; x++)
+		{
+			double lx = X0 + (x + 0.5)/PX, ly = Y0 + (y + 0.5)/PX, r = 0, g = 0, b = 0, a = 0;
+			double cov = Cover(body, lx, ly, PX);
+			if (cov > 0)
+			{
+				var c = Stops((ly + w/2)/w, sAt, steel);
+				double ex = (lx - w*1.5)/(w*0.95), ey = ly/(w*0.2), eye = 0.9*Clamp((1 - Math.Sqrt(ex*ex + ey*ey))*w*0.2*PX + 0.5);
+				for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], new[] { 20/255.0, 20/255.0, 24/255.0 }[q], eye);
+				double h = 0.7*InkP(LineDist(hl, lx, ly, false), w*0.18, PX);
+				for (int q = 0; q < 3; q++) c[q] = Lerp(c[q], 1, h);
+				Over(ref r, ref g, ref b, ref a, c[0], c[1], c[2], cov);
+			}
+			if (a > 0) Put(s, x, y, r/a, g/a, b/a, a);
+		}
+		return s;
+	}
+	public static Img Needle() { return Poses(NeedleSource(), NEEDLE_ANG, 2, NEEDLE_CELL, NEEDLE_SPAN, NEEDLE_OX, NEEDLE_OY); }
 
 	static double[] BoxBlur(double[] src, int w, int h, int rad)
 	{
@@ -1755,6 +2398,531 @@ public static class CastbarArt
 	}
 
 	// ================================================================ live-drawn pieces (vines, flowers, twinkles)
+	// ================================================================ LIGHTNING: cloud banks at four depths, forked bolts striking inside
+	// storm_sky (the layer) is the dark sky behind the banks. storm_bank1..4 are four tiling cloud banks, far to
+	// near, each 16 bar heights wide and 2 tall (64 px per bar height); a bank's billows hang from BANK_TOP bar
+	// heights below its top edge. p_bolts holds 4x2 forked bolts, each cell 2.5 by 1.25 bar heights (BOLT_PX per bar
+	// height), the bolt running from 0.05 above the bar to 0.05 below it, the cell's top 0.075 above the bar.
+	public static Img StormSky()
+	{
+		var img = new Img(W, H);
+		var ramp = new[] { S(0, 22, 26, 60), S(0.6, 14, 16, 49), S(1, 7, 8, 26) };
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = x/(double)W, v = y/(double)H;
+			var c = Ramp(v, ramp);
+			double n = 1 + Fbm(u, v, 16, 2, 4, 611)*0.12;
+			img.Set(x, y, Clamp(c[0]/255*n), Clamp(c[1]/255*n), Clamp(c[2]/255*n), 1);
+		}
+		return img;
+	}
+
+	// top rgb, mid rgb, underside rgb, y, base, thickness, cloud length min/max, gap min/max (bar heights)
+	static readonly double[][] STORM_BANKS = {
+		new double[] { 84, 88, 160, 52, 56, 116, 30, 32, 78, .06, .36, .7, 2.0, 4.5, 1.6, 3.2 },
+		new double[] { 96, 106, 184, 50, 57, 122, 24, 26, 64, .32, .62, .8, 2.0, 4.0, 1.8, 3.6 },
+		new double[] { 110, 126, 206, 46, 53, 116, 14, 15, 40, .58, .9, .85, 2.0, 3.5, 2, 4 },
+		new double[] { 74, 84, 162, 30, 34, 82, 8, 8, 24, .9, 1.3, .9, 2.0, 3.5, 2.4, 4.6 },
+	};
+	public const double BANK_TOP = 0.9;
+	static double SoftEll(double dx, double dy, double rx, double ry, double blur)   // coverage of a blurred ellipse
+	{
+		double e = Math.Sqrt((dx/rx)*(dx/rx) + (dy/ry)*(dy/ry)), s = blur/Math.Min(rx, ry);
+		return Smooth(1 + s, 1 - s, e);
+	}
+	// A bank is a row of clouds with sky between them. Each cloud is a run of rounded billows of mixed sizes along
+	// its top (overlapping into a scalloped silhouette, tallest mid-cloud, rounded at both ends) over a belly of
+	// lower lobes, so the underside bulges gently. Every billow is lit on its upper side and shaded under its curve,
+	// and the bank darkens toward its underside.
+	// The weathers (as the concept's WEATHERS, lightning.js): the clouds are cut differently for each, so every bank is
+	// painted in four variants and the addon picks the weather's set per cast: cloud length and gap scale, thickness,
+	// how often billows stack into towers, and torn tufts and wisps (ragged).
+	//   storm_bank1..4   layered (the approved look)      storm_tower1..4   towering: longer, thicker, stacked billows
+	//   storm_ragged1..4 scattered / ragged squall: short clouds, wide gaps, torn edges      storm_over1..4  overcast: long flat banks, little sky
+	static readonly double[][] STORM_VARIANTS = {   // cloud, gap, thick, tower, ragged
+		new[] { 1.0, 1.0, 1.0, .45, 0 }, new[] { 1.3, .8, 1.25, .8, .1 }, new[] { 1.0, 1.1, 1.0, .45, .22 }, new[] { 2.0, .35, .75, .15, 0 },
+	};
+	// Every variant keeps the layered set's long scalloped banks with continuous undersides: towers only ride on a
+	// billow that is part of the bank (two high at most, wide enough to merge with it), and the ragged tufts sit inside
+	// the cloud's ends and under its belly where they join the silhouette, never alone in the sky as separate blobs.
+	public static Img StormBank(int k) { return StormBank(k, 0); }
+	public static Img StormBank(int k, int variant)
+	{
+		const int BW = 1024, BH = 128; const double P = 64;
+		var B = STORM_BANKS[k]; var V = STORM_VARIANTS[variant]; var rnd = new Random(620 + k*17 + variant*101);
+		double y0 = BANK_TOP*P, depth = (B[10] - B[9])*P, thick = B[11]*V[2], tower = V[3], ragged = V[4];
+		double cloud0 = B[12]*V[0], cloud1 = B[13]*V[0], gap0 = B[14]*V[1], gap1 = B[15]*V[1];
+		var lobes = new List<double[]>(); var bellies = new List<double[]>();   // x, y, rx, ry in pixels, y down
+		double start = Rnd(rnd, 0, 2*P), cx = start;
+		while (true)
+		{
+			double room = start + BW - P*gap0 - cx;   // leave a gap before the first cloud, which follows across the seam
+			if (room < P*cloud0*0.7) break;
+			double len = Math.Min(P*Rnd(rnd, cloud0, cloud1), room);
+			for (double px = cx + P*.35; px < cx + len - P*.3; px += P*Rnd(rnd, .55, .95))
+			{
+				double dome = Math.Sin(Math.PI*Clamp((px - cx)/len));
+				double r = P*Rnd(rnd, .32, .6)*thick*(.55 + .45*dome);
+				double ly = y0 + depth*.25 - dome*P*Rnd(rnd, .12, .28) - r*.35;
+				lobes.Add(new[] { px, ly, r*Rnd(rnd, 1.4, 1.9), r });
+				// smaller billows riding on top for the cauliflower scallops; under a towering weather they stack into towers
+				double[] last = lobes[lobes.Count - 1]; int stack = 0;
+				while (rnd.NextDouble() < tower*dome && stack < (tower > .7 ? 2 : 1))
+				{
+					// wide and low enough to merge with the billow under it: one mass, not a ball on a ball
+					last = new[] { last[0] + Rnd(rnd, -.15, .15)*P, last[1] - last[3]*.42, last[2]*.88, last[3]*.6, 1 };   // 1: no shading arc under it
+					lobes.Add(last); stack++;
+				}
+			}
+			foreach (double ex in new[] { cx + P*.35, cx + len - P*.35 }) lobes.Add(new[] { ex, y0 + depth*.3, P*.38*thick, P*.32*thick });
+			for (double px = cx + P*.4; px < cx + len - P*.4; px += P*Rnd(rnd, .6, 1))
+			{
+				double dome = Math.Sin(Math.PI*Clamp((px - cx)/len));
+				bellies.Add(new[] { px, y0 + depth*(.45 + .15*dome), P*Rnd(rnd, .6, .95), depth*(.35 + .2*dome) });
+			}
+			// ragged: torn tufts in the cloud's ends and small wisps under its belly, all overlapping the cloud so they
+			// tear its silhouette rather than float beside it
+			for (int i = 0; i < ragged*len/P*2; i++)
+			{
+				bool nearEnd = rnd.NextDouble() < .5;
+				double px = nearEnd ? (rnd.NextDouble() < .5 ? cx + Rnd(rnd, .05, .5)*P : cx + len - Rnd(rnd, .05, .5)*P) : cx + Rnd(rnd, .2, .8)*len;
+				double r = P*Rnd(rnd, .12, .25)*thick;
+				// no lit rim or shading arc of their own (the 1): a tuft tears the edge without reading as another ball
+				if (nearEnd) lobes.Add(new[] { px, y0 + depth*Rnd(rnd, .15, .45), r*Rnd(rnd, 1.4, 2.2), r, 1 });
+				else bellies.Add(new[] { px, y0 + depth*Rnd(rnd, .55, .78), r*Rnd(rnd, 1.6, 2.6), r*.6 });
+			}
+			cx += len + P*Rnd(rnd, gap0, gap1);
+		}
+		var streaks = new List<double[]>();
+		for (int i = 0; i < BW/P*1.2; i++)
+			streaks.Add(new[] { Rnd(rnd, 0, BW), y0 + Rnd(rnd, -.15, .45)*P, P*Rnd(rnd, 1, 2.4), P*Rnd(rnd, .03, .07), rnd.NextDouble() < .5 ? 1 : 0, Rnd(rnd, .12, .25) });
+		double[] top = { B[0]/255, B[1]/255, B[2]/255 }, mid = { B[3]/255, B[4]/255, B[5]/255 }, und = { B[6]/255, B[7]/255, B[8]/255 };
+		var img = new Img(BW, BH);
+		for (int y = 0; y < BH; y++) for (int x = 0; x < BW; x++)
+		{
+			double px = x + .5, py = y + .5, body = 0, light = 0, arc = 0;
+			foreach (var l in lobes)
+			{
+				double dx = WrapDx(px, l[0], BW);
+				if (Math.Abs(dx) > l[2]*1.3 + 8) continue;
+				double dy = py - l[1];
+				body = Math.Max(body, SoftEll(dx, dy, l[2], l[3], .09*P));
+				double g = Clamp((l[1] + .3*l[3] - py)/(1.3*l[3]));
+				if (g > 0) light = Math.Max(light, SoftEll(dx + .08*l[2], dy + .3*l[3], .85*l[2], .75*l[3], .1*P)*g);
+				double ady = py - (l[1] + .05*l[3]);
+				if (l.Length < 5 && ady > 0 && Math.Abs(dx) < .9*l[2])
+				{
+					double e = Math.Sqrt((dx/(.92*l[2]))*(dx/(.92*l[2])) + (ady/(.9*l[3]))*(ady/(.9*l[3])));
+					double d = Math.Abs(e - 1)*Math.Min(l[2], l[3])*.9, w = Math.Max(1.5, l[3]*.3);
+					arc = Math.Max(arc, Smooth(w, 0, d)*.13);
+				}
+			}
+			foreach (var l in bellies)
+			{
+				double dx = WrapDx(px, l[0], BW);
+				if (Math.Abs(dx) > l[2]*1.3 + 8) continue;
+				body = Math.Max(body, SoftEll(dx, py - l[1], l[2], l[3], .09*P));
+			}
+			if (body <= 0.001) { img.Set(x, y, mid[0], mid[1], mid[2], 0); continue; }
+			double r = Lerp(mid[0], top[0], light), gg = Lerp(mid[1], top[1], light), b = Lerp(mid[2], top[2], light);
+			r = Lerp(r, und[0], arc); gg = Lerp(gg, und[1], arc); b = Lerp(b, und[2], arc);
+			double t = .95*Clamp((py - (y0 - .1*P))/(depth + .1*P));
+			r = Lerp(r, und[0], t); gg = Lerp(gg, und[1], t); b = Lerp(b, und[2], t);
+			foreach (var s in streaks)
+			{
+				double dx = WrapDx(px, s[0], BW);
+				if (Math.Abs(dx) > s[2] + 6) continue;
+				double a = s[5]*SoftEll(dx, py - s[1], s[2], s[3], .05*P);
+				double[] c = s[4] == 1 ? top : und;
+				r = Lerp(r, c[0], a); gg = Lerp(gg, c[1], a); b = Lerp(b, c[2], a);
+			}
+			img.Set(x, y, r, gg, b, body);
+		}
+		return img;
+	}
+
+	public const double BOLT_PX = 102.4;
+	static List<double[]> StormJag(Random rnd, double x1, double y1, double x2, double y2, double disp, int levels)
+	{
+		var pts = new List<double[]> { new[] { x1, y1 }, new[] { x2, y2 } };
+		double d = disp;
+		for (int l = 0; l < levels; l++)
+		{
+			var next = new List<double[]> { pts[0] };
+			for (int i = 1; i < pts.Count; i++)
+			{
+				double[] a = pts[i - 1], b = pts[i];
+				double dx = b[0] - a[0], dy = b[1] - a[1], len = Math.Max(1e-6, Math.Sqrt(dx*dx + dy*dy)), o = Rnd(rnd, -d, d);
+				next.Add(new[] { (a[0] + b[0])/2 - dy/len*o, (a[1] + b[1])/2 + dx/len*o }); next.Add(b);
+			}
+			pts = next; d *= .55;
+		}
+		return pts;
+	}
+	// Electricity, additive: a wide faint halo, a blue body and a white-hot core along a jagged bolt with forks.
+	public static Img Bolts()
+	{
+		const int CW = 256, CH = 128; double P = BOLT_PX;
+		var img = new Img(CW*4, CH*2);
+		double[] dxs = { .4, .7, 1.0, 1.25, .55, .85, 1.1, 1.35 };
+		double[] col = { 130/255.0, 170/255.0, 1 }, core = { Lerp(col[0], 1, .75), Lerp(col[1], 1, .75), 1 };
+		var rnd = new Random(733);
+		for (int c = 0; c < 8; c++)
+		{
+			int ox = (c % 4)*CW, oy = (c / 4)*CH;
+			double x1 = CW/2.0 - dxs[c]*P/2, x2 = CW/2.0 + dxs[c]*P/2, y1 = .025*P, y2 = 1.125*P;
+			if (c % 2 == 1) { double t = x1; x1 = x2; x2 = t; }
+			var main = StormJag(rnd, x1, y1, x2, y2, .3*P, 5);
+			var forks = new List<List<double[]>>();
+			double len = Math.Sqrt((x2 - x1)*(x2 - x1) + (y2 - y1)*(y2 - y1)), ang0 = Math.Atan2(y2 - y1, x2 - x1);
+			int nf = 1 + rnd.Next(3);
+			for (int f = 0; f < nf; f++)
+			{
+				var a = main[(int)(Rnd(rnd, .2, .8)*main.Count)];
+				double ang = ang0 + Rnd(rnd, .4, 1.0)*(rnd.NextDouble() < .5 ? -1 : 1), fl = len*Rnd(rnd, .18, .35);
+				forks.Add(StormJag(rnd, a[0], a[1], a[0] + Math.Cos(ang)*fl, a[1] + Math.Sin(ang)*fl, .15*P, 4));
+			}
+			double w = .045*P;
+			for (int y = 0; y < CH; y++) for (int x = 0; x < CW; x++)
+			{
+				double px = x + .5, py = y + .5, sum = 0, cr = 0, cg = 0, cb = 0;
+				for (int s = 0; s <= forks.Count; s++)
+				{
+					var pts = s == 0 ? main : forks[s - 1];
+					double ww = s == 0 ? w : w*.55, d = LineDist(pts, px, py, false);
+					if (d > ww*8) continue;
+					double halo = .10*Math.Exp(-(d/(3*ww))*(d/(3*ww))) + .22*Math.Exp(-(d/(1.6*ww))*(d/(1.6*ww)));
+					double bodyA = .7*Smooth(.8*ww + 1, .8*ww - 1, d), coreA = .95*Smooth(Math.Max(.6, .3*ww) + .7, Math.Max(.6, .3*ww) - .7, d);
+					sum += halo + bodyA + coreA;
+					cr += (halo + bodyA)*col[0] + coreA*core[0]; cg += (halo + bodyA)*col[1] + coreA*core[1]; cb += (halo + bodyA)*col[2] + coreA*core[2];
+				}
+				if (sum <= 0) continue;
+				img.Set(ox + x, oy + y, Clamp(cr/sum), Clamp(cg/sum), Clamp(cb/sum), Clamp(sum));
+			}
+		}
+		return img;
+	}
+
+	// ================================================================ ALCHEMY: a bench of glassware on the bar, a trough of potion in it
+	// alch_glass and alch_liquid are 4x2 atlases of 128x256 cells, one per station kind (boil, retort, cyl, erlen,
+	// funnel, jacket, coil, rack), painted at ALCH_PX per station size S: the station's centre at the cell's middle
+	// column, the bar's top edge at the cell's bottom. alch_glass is the glassware, burners, rods and racks;
+	// alch_liquid is white where liquid can be (the addon crops it to the level and tints it). Station zones and
+	// tube ends (Effects.lua ALCH_KINDS) are in station units: x from the centre, y up from the bar's top.
+	public const double ALCH_PX = 96;
+	static void AComp(Img img, int x, int y, double r, double g, double b, double a)   // straight-alpha "over"
+	{
+		if (a <= 0 || x < 0 || y < 0 || x >= img.W || y >= img.H) return;
+		int i = y*img.W + x; double da = img.A[i], oa = a + da*(1 - a);
+		if (oa <= 0) return;
+		img.R[i] = (r*a + img.R[i]*da*(1 - a))/oa; img.G[i] = (g*a + img.G[i]*da*(1 - a))/oa; img.B[i] = (b*a + img.B[i]*da*(1 - a))/oa;
+		img.A[i] = oa;
+	}
+	class ACell { public Img img; public double ox, oy; public double ylo = -9, yhi = 9; }   // station origin in pixels; paint only ylo..yhi
+	static List<double[]> APix(ACell c, List<double[]> pts)
+	{
+		var o = new List<double[]>();
+		foreach (var p in pts) o.Add(new[] { c.ox + p[0]*ALCH_PX, c.oy - p[1]*ALCH_PX });
+		return o;
+	}
+	static bool AInY(ACell c, double py) { double Y = (c.oy - py)/ALCH_PX; return Y >= c.ylo && Y <= c.yhi; }
+	static void AFill(ACell c, List<double[]> pts, double[] col, double a)
+	{
+		var p = APix(c, pts); var bb = Bbox(p);
+		for (int y = (int)Math.Floor(bb[1]) - 1; y <= (int)Math.Ceiling(bb[3]) + 1; y++)
+		for (int x = (int)Math.Floor(bb[0]) - 1; x <= (int)Math.Ceiling(bb[2]) + 1; x++)
+		{
+			if (!AInY(c, y + .5)) continue;
+			double cov = Cover(p, x + .5, y + .5, 1);
+			if (cov > 0) AComp(c.img, x, y, col[0], col[1], col[2], a*cov);
+		}
+	}
+	static void AStroke(ACell c, List<double[]> pts, bool closed, double w, double[] col, double a)
+	{
+		var p = APix(c, pts); var bb = Bbox(p); double hw = w*ALCH_PX/2;
+		for (int y = (int)Math.Floor(bb[1] - hw) - 1; y <= (int)Math.Ceiling(bb[3] + hw) + 1; y++)
+		for (int x = (int)Math.Floor(bb[0] - hw) - 1; x <= (int)Math.Ceiling(bb[2] + hw) + 1; x++)
+		{
+			if (!AInY(c, y + .5)) continue;
+			double cov = Clamp(hw - LineDist(p, x + .5, y + .5, closed) + .5);
+			if (cov > 0) AComp(c.img, x, y, col[0], col[1], col[2], a*cov);
+		}
+	}
+	static List<double[]> AArc(double cx, double cy, double rx, double ry, double a0, double a1, int n)
+	{
+		var p = new List<double[]>();
+		for (int i = 0; i <= n; i++) { double a = a0 + (a1 - a0)*i/n; p.Add(new[] { cx + Math.Cos(a)*rx, cy + Math.Sin(a)*ry }); }
+		return p;
+	}
+	static List<double[]> ARect(double x0, double y0, double x1, double y1)
+	{ return new List<double[]> { new[] { x0, y0 }, new[] { x1, y0 }, new[] { x1, y1 }, new[] { x0, y1 } }; }
+	static List<double[]> ABez(double[] a, double[] b, double[] c, double[] d, int n)
+	{ return Bez(a[0], a[1], b[0], b[1], c[0], c[1], d[0], d[1], n); }
+	static readonly double[] GLASS_IN = { 160/255.0, 205/255.0, 240/255.0 }, GLASS_LINE = { 215/255.0, 240/255.0, 1 }, WHITE = { 1, 1, 1 };
+	static readonly double[] TUBE_OUT = { 205/255.0, 235/255.0, 1 }, TUBE_DARK = { 8/255.0, 12/255.0, 20/255.0 }, HOSE = { 120/255.0, 52/255.0, 24/255.0 };
+	static void AGlass(ACell c, List<double[]> body, List<double[]> shine, bool liquid)
+	{
+		if (liquid) { AFill(c, body, WHITE, 1); return; }
+		AFill(c, body, GLASS_IN, .12);
+		AStroke(c, body, true, .04, GLASS_LINE, .8);
+		if (shine != null) AStroke(c, shine, false, .035, WHITE, .6);
+	}
+	static void ACork(ACell c, double nw, double yt)
+	{
+		double cw = nw*1.2, ch = .08;
+		AFill(c, ARect(-cw/2, yt - .4*ch, cw/2, yt + .6*ch), Hex(0x8a5a32), 1);
+		AFill(c, ARect(-cw/2, yt + .3*ch, cw/2, yt + .6*ch), new[] { 1, 220/255.0, 170/255.0 }, .3);
+	}
+	static void ABurner(ACell c, double bx)
+	{
+		const double legH = .34, r = .3;
+		AStroke(c, new List<double[]> { new[] { bx - r, 0.0 }, new[] { bx - r*.75, legH } }, false, .045, Hex(0x6e6964), 1);
+		AStroke(c, new List<double[]> { new[] { bx + r, 0.0 }, new[] { bx + r*.75, legH } }, false, .045, Hex(0x6e6964), 1);
+		var baseE = AArc(bx, .03, r*.5, .05, 0, 2*Math.PI, 24);
+		AFill(c, baseE, Hex(0x3d3024), 1); AStroke(c, baseE, true, .012, Hex(0xa07a45), 1);
+		AFill(c, ARect(bx - r*.12, .007, bx + r*.12, .119), Hex(0x5a4a3a), 1);
+		AStroke(c, new List<double[]> { new[] { bx - .26, legH }, new[] { bx + .26, legH } }, false, .045, Hex(0xa09b96), 1);
+	}
+	static void ARod(ACell c, double x, double y1)
+	{
+		AStroke(c, new List<double[]> { new[] { x, 0.0 }, new[] { x, y1 } }, false, .045, Hex(0x787673), 1);
+		AStroke(c, new List<double[]> { new[] { x - .01, 0.0 }, new[] { x - .01, y1 } }, false, .015, Hex(0xe6e6e1), .35);
+		AFill(c, ARect(x - .12, 0, x + .12, .05), Hex(0x2e2a26), 1);
+	}
+	static void AClamp(ACell c, double x0, double x1, double y)
+	{
+		AStroke(c, new List<double[]> { new[] { x0, y }, new[] { x1, y } }, false, .035, Hex(0x8c6a3c), 1);
+		AFill(c, AArc(x0, y, .035, .035, 0, 2*Math.PI, 12), Hex(0xb08a4e), 1);
+	}
+	static void ATube(ACell c, List<double[]> pts, double tw, bool liquid)
+	{
+		if (liquid) { AStroke(c, pts, false, tw*.56, WHITE, 1); return; }
+		AStroke(c, pts, false, tw, TUBE_OUT, .6);
+		AStroke(c, pts, false, tw*.62, TUBE_DARK, .65);
+		var sh = new List<double[]>(); foreach (var p in pts) sh.Add(new[] { p[0] - tw*.1, p[1] + tw*.24 });
+		AStroke(c, sh, false, Math.Max(.006, tw*.14), WHITE, .4);
+	}
+	// vial: a rounded tube w wide, h tall, standing at x
+	static List<double[]> AVial(double x, double w, double h)
+	{
+		var p = new List<double[]>(); double r = w*.4;
+		p.AddRange(AArc(x + w/2 - r, r, r, r, -Math.PI/2, 0, 6)); p.AddRange(AArc(x + w/2 - r, h - r, r, r, 0, Math.PI/2, 6));
+		p.AddRange(AArc(x - w/2 + r, h - r, r, r, Math.PI/2, Math.PI, 6)); p.AddRange(AArc(x - w/2 + r, r, r, r, Math.PI, Math.PI*1.5, 6));
+		return p;
+	}
+	static void AStation(ACell c, int kind, bool liquid)
+	{
+		const double tw = .075;
+		if (kind == 0 || kind == 1)   // boil: a round flask over a burner; retort: a bulb with a long neck, over a burner
+		{
+			double r = .285, yb = .235, bx = kind == 0 ? 0 : -.12, cy = yb + r;
+			if (!liquid) ABurner(c, bx);
+			if (kind == 0)
+			{
+				double nw = .1235, a = Math.Asin(nw/2/r), yt = yb + 2*r + .304;
+				var body = new List<double[]> { new[] { -nw/2, yt } };
+				body.AddRange(AArc(0, cy, r, r, Math.PI/2 + a, Math.PI*2.5 - a, 40));
+				body.Add(new[] { nw/2, yt });
+				if (liquid) c.ylo = .235; if (liquid) c.yhi = .748;
+				AGlass(c, body, AArc(0, cy, r*.7, r*.7, .6*Math.PI, .92*Math.PI, 10), liquid);
+				if (!liquid) ACork(c, nw, yt);
+			}
+			else
+			{
+				double ta = .75, dl = Math.Asin(.057/r), L = .5225, h = .057;
+				double[] d = { Math.Cos(ta), Math.Sin(ta) }, n = { -Math.Sin(ta), Math.Cos(ta) };
+				double[] tip = { bx + d[0]*(r + L), cy + d[1]*(r + L) };
+				var body = new List<double[]> { new[] { tip[0] + n[0]*h, tip[1] + n[1]*h } };
+				body.AddRange(AArc(bx, cy, r, r, ta + dl, ta - dl + 2*Math.PI, 44));
+				body.Add(new[] { tip[0] - n[0]*h, tip[1] - n[1]*h });
+				if (liquid) { c.ylo = .235; c.yhi = .805; }
+				AGlass(c, body, AArc(bx, cy, r*.7, r*.7, .65*Math.PI, Math.PI, 10), liquid);
+			}
+			if (!liquid) AStroke(c, new List<double[]> { new[] { bx - .26, .34 }, new[] { bx + .26, .34 } }, false, .045, Hex(0xa09b96), 1);
+		}
+		else if (kind == 2)   // a tall graduated cylinder on a foot
+		{
+			double w = .22, yb = .07, yt = 1.22, h = yt - yb;
+			if (!liquid) AFill(c, AArc(0, .035, .2, .04, 0, 2*Math.PI, 24), Hex(0x4a4f57), 1);
+			var body = new List<double[]> { new[] { -w/2, yt }, new[] { -w/2, yb }, new[] { w/2, yb }, new[] { w/2, yt - .03 }, new[] { w/2 + .04, yt + .015 } };
+			if (liquid) { c.ylo = .07; c.yhi = 1.105; }
+			AGlass(c, body, new List<double[]> { new[] { -w*.25, yt - h*.1 }, new[] { -w*.25, yb + h*.08 } }, liquid);
+			if (!liquid) for (int k = 1; k < 8; k++)
+			{
+				double y = yb + h*k/8, L = k % 2 == 1 ? .04 : .07;
+				AStroke(c, new List<double[]> { new[] { w/2, y }, new[] { w/2 - L, y } }, false, .012, new[] { 230/255.0, 245/255.0, 1 }, .55);
+			}
+		}
+		else if (kind == 3)   // an erlenmeyer
+		{
+			double bw = .62, nw = .15, ys = .58, yt = .88, k = .05;
+			var body = new List<double[]> { new[] { -nw/2, yt }, new[] { -nw/2, ys }, new[] { -bw/2, k } };
+			body.AddRange(Quad(-bw/2, k, -bw/2, 0, -bw/2 + k, 0, 4)); body.Add(new[] { bw/2 - k, 0.0 });
+			body.AddRange(Quad(bw/2 - k, 0, bw/2, 0, bw/2, k, 4)); body.Add(new[] { nw/2, ys }); body.Add(new[] { nw/2, yt });
+			if (liquid) { c.ylo = 0; c.yhi = .52; }
+			AGlass(c, body, new List<double[]> { new[] { -nw*.3, ys - .06 }, new[] { -bw*.3, .1 } }, liquid);
+			if (!liquid) ACork(c, nw, yt);
+		}
+		else if (kind == 4)   // a separatory funnel on a rod, dripping into a beaker
+		{
+			double w = .437, hb = .399, ybf = .699, bw = .418, nw = .114, ytf = 1.5065;
+			var beaker = new List<double[]> { new[] { -w/2 - .0285, hb }, new[] { -w/2, hb - .0285 }, new[] { -w/2, 0.0 }, new[] { w/2, 0.0 }, new[] { w/2, hb } };
+			var funnel = new List<double[]> { new[] { -nw/2, ytf }, new[] { -nw/2, ytf - .0665 } };
+			funnel.AddRange(ABez(new[] { -nw/2, ytf - .0665 }, new[] { -bw*.75, ytf - .152 }, new[] { -bw*.55, ytf - .494 }, new[] { -.024, ybf }, 16));
+			funnel.Add(new[] { .024, ybf });
+			funnel.AddRange(ABez(new[] { .024, ybf }, new[] { bw*.55, ytf - .494 }, new[] { bw*.75, ytf - .152 }, new[] { nw/2, ytf - .0665 }, 16));
+			funnel.Add(new[] { nw/2, ytf });
+			if (liquid)
+			{
+				c.ylo = .699; c.yhi = 1.288; AFill(c, funnel, WHITE, 1);
+				c.ylo = 0; c.yhi = .319; AFill(c, beaker, WHITE, 1);
+				return;
+			}
+			ARod(c, -.42, ytf + .1);
+			AClamp(c, -.42, -.115, ytf - .2);
+			AStroke(c, AArc(0, ytf - .2, .199, .04, 0, 2*Math.PI, 24), true, .03, Hex(0x969696), .9);
+			AGlass(c, funnel, ABez(new[] { -bw*.28, ytf - .19 }, new[] { -bw*.3, ytf - .35 }, new[] { -bw*.2, ytf - .55 }, new[] { -bw*.08, ybf + .114 }, 10), false);
+			AStroke(c, new List<double[]> { new[] { 0.0, ybf }, new[] { 0.0, .319 } }, false, .045, TUBE_OUT, .75);
+			AFill(c, ARect(-.05, ybf - .09, .05, ybf - .04), Hex(0xe9e4d8), 1);
+			AStroke(c, new List<double[]> { new[] { -.064, ybf - .1 }, new[] { .064, ybf - .03 } }, false, .035, Hex(0x3a6fb0), 1);
+			AGlass(c, beaker, new List<double[]> { new[] { -w*.32, hb - hb*.2 }, new[] { -w*.32, hb*.15 } }, false);
+		}
+		else if (kind == 5)   // a jacketed condenser on a rod: coolant round an inner tube
+		{
+			double y0 = .22, y1 = 1.27, jw = .26;
+			var inner = new List<double[]> { new[] { 0.0, y1 + .12 }, new[] { 0.0, y0 - .1 } };
+			if (liquid) { c.ylo = .12; c.yhi = 1.39; ATube(c, inner, tw*.9, true); return; }
+			ARod(c, -.38, y1 + .05);
+			AClamp(c, -.38, -jw/2, (y0 + y1)/2);
+			var jacket = RoundRect(-jw/2, y0, jw, y1 - y0, jw*.35);
+			AFill(c, jacket, new[] { 90/255.0, 170/255.0, 1 }, .22);
+			AStroke(c, jacket, true, .035, GLASS_LINE, .8);
+			AStroke(c, Quad(jw/2, y1 - .12, jw, y1 - .1, jw*1.05, y1 - .3, 8), false, tw, HOSE, .95);
+			AStroke(c, Quad(-jw/2, y0 + .12, -jw, y0 + .1, -jw*.95, y0 - .05, 8), false, tw, HOSE, .95);
+			for (int k = 0; k < 5; k++) AFill(c, AArc((k % 2 == 1 ? 1 : -1)*jw*.28, y0 + (y1 - y0)*(k + .5)/5, .018, .018, 0, 2*Math.PI, 8), new[] { 220/255.0, 240/255.0, 1 }, .55);
+			ATube(c, inner, tw*.9, false);
+		}
+		else if (kind == 6)   // a glass coil on a rod
+		{
+			double yT = 1.15, yB = .2, turns = 3.5, R = .2;
+			var coil = new List<double[]> { new[] { 0.0, yT + .12 } };
+			double u = 0;
+			for (; u <= 2*Math.PI*turns; u += .15) coil.Add(new[] { R*Math.Sin(u), yT - (yT - yB)*u/(2*Math.PI*turns) - R*.32*Math.Cos(u) });
+			coil.Add(new[] { coil[coil.Count - 1][0], yB - .08 });
+			if (liquid) { c.ylo = .12; c.yhi = 1.27; ATube(c, coil, tw, true); return; }
+			ARod(c, -.36, yT + .12);
+			AClamp(c, -.36, -.2, yT - .08);
+			ATube(c, coil, tw, false);
+		}
+		else   // a rack of three vials joined by little glass arches
+		{
+			double[] xs = { -.3, 0, .3 }, ks = { .62, .7, .58 };
+			var tops = new double[3];
+			for (int k = 0; k < 3; k++) tops[k] = ks[k]*.95;
+			if (liquid) { c.ylo = 0; c.yhi = .565; }
+			for (int k = 0; k < 3; k++)
+			{
+				double w = ks[k]*.26, h = tops[k];
+				AGlass(c, AVial(xs[k], w, h), new List<double[]> { new[] { xs[k] - w*.2, h*.82 }, new[] { xs[k] - w*.2, h*.2 } }, liquid);
+				if (!liquid) ACork(c, w/1.2*1.0, h);
+			}
+			if (liquid) return;
+			for (int k = 0; k < 2; k++)
+			{
+				double top = Math.Max(tops[k], tops[k + 1]) + .12;
+				ATube(c, ABez(new[] { xs[k], tops[k] }, new[] { xs[k], top }, new[] { xs[k + 1], top }, new[] { xs[k + 1], tops[k + 1] }, 16), tw*.8, false);
+			}
+			AFill(c, ARect(-.5, .16, .5, .24), Hex(0x6b4529), 1);
+			AFill(c, ARect(-.5, .215, .5, .24), new[] { 1, 210/255.0, 160/255.0 }, .25);
+			AFill(c, ARect(-.5, 0, -.45, .24), Hex(0x4a2f18), 1); AFill(c, ARect(.45, 0, .5, .24), Hex(0x4a2f18), 1);
+		}
+	}
+	public static Img AlchAtlas(bool liquid)
+	{
+		var img = new Img(512, 512);
+		for (int k = 0; k < 8; k++)
+		{
+			var c = new ACell { img = img, ox = (k % 4)*128 + 64, oy = (k / 4)*256 + 256 };
+			AStation(c, k, liquid);
+		}
+		return img;
+	}
+	// a bunsen flame, additive: blue at the root, warm toward the tip; the addon sizes it with the heat
+	public static Img AlchFlame()
+	{
+		var img = new Img(32, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 32; x++)
+		{
+			double v = 1 - (y + .5)/64, u = (x + .5)/32 - .5;   // v: 0 at the root, 1 at the tip
+			double hw = .46*Math.Pow(Math.Sin(Math.PI*Math.Min(1, (v + .08)/1.08)), .8)*(1 - .55*v);
+			double cov = Smooth(hw + .04, hw - .04, Math.Abs(u)), inner = Smooth(hw*.55 + .04, hw*.55 - .04, Math.Abs(u))*Smooth(.75, .2, v);
+			double r = Lerp(60, 255, Smooth(.2, .9, v))/255, g = Lerp(110, 130, v)/255, b = Lerp(255, 40, Smooth(.2, .9, v))/255;
+			r = Lerp(r, 150/255.0, inner); g = Lerp(g, 200/255.0, inner); b = Lerp(b, 1, inner);
+			img.Set(x, y, r, g, b, Clamp(cov*(1 - v*v*.85) + inner*.4));
+		}
+		return img;
+	}
+	// a brass valve: closed (handle across the tube) in the left cell, open (handle along it) in the right
+	public static Img AlchValve()
+	{
+		var img = new Img(64, 32);
+		for (int cell = 0; cell < 2; cell++)
+		for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++)
+		{
+			double dx = x + .5 - 16, dy = y + .5 - 16, r = Math.Sqrt(dx*dx + dy*dy);
+			double disc = Smooth(9, 8, r), rim = Smooth(1.2, 0, Math.Abs(r - 8.5));
+			double hx = cell == 0 ? dy : dx, hy = cell == 0 ? dx : dy;
+			double handle = Smooth(2.6, 1.6, Math.Abs(hy))*Smooth(14.5, 13.5, Math.Abs(hx));
+			double rr = Lerp(201, 232, handle)/255, gg = Lerp(162, 211, handle)/255, bb = Lerp(90, 160, handle)/255;
+			rr = Lerp(rr, 40/255.0, rim*.8*(1 - handle)); gg = Lerp(gg, 25/255.0, rim*.8*(1 - handle)); bb = Lerp(bb, 5/255.0, rim*.8*(1 - handle));
+			img.Set(cell*32 + x, y, rr, gg, bb, Math.Max(disc, handle));
+		}
+		return img;
+	}
+	// the bench trough (the alchemy layer): dark glass, a faint highlight near the top
+	public static Img AlchTrough()
+	{
+		var img = new Img(W, H);
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = x/(double)W, v = (y + .5)/H, n = Fbm(u, v, 16, 2, 3, 671)*.04;
+			double r = Lerp(32, 8, v)/255 + n, g = Lerp(40, 10, v)/255 + n, b = Lerp(54, 16, v)/255 + n;
+			double hl = Smooth(.06, .08, v)*Smooth(.13, .11, v)*.12;
+			img.Set(x, y, Clamp(Lerp(r, 1, hl)), Clamp(Lerp(g, 1, hl)), Clamp(Lerp(b, 1, hl)), .95);
+		}
+		return img;
+	}
+	// one column of the potion, from its surface (top) down to the trough's floor: a light band under the surface,
+	// darker with depth. White: the addon tints each column with the potion's colour where it stands.
+	public static Img AlchColumn()
+	{
+		// The liquid's body, shaded by height in the BAR (v 0 = the bar's top, 1 = its bottom), not by the column:
+		// every column samples the same rows at the same height, so neighbours match and no vertical lines show.
+		// The surface's highlight is drawn separately as one continuous line (Effects.lua UpdateTrough).
+		// Opaque: the columns overlap by a pixel, and a translucent overlap shows as stripes.
+		var img = new Img(8, 128);
+		for (int y = 0; y < 128; y++) for (int x = 0; x < 8; x++)
+		{
+			double v = (y + .5)/128;
+			double L = Lerp(1, .6, Smooth(0, 1, v));   // as the concept: full colour near the top, half as deep as the bar
+			img.Set(x, y, Clamp(L*.9), Clamp(L*.9), Clamp(L*.9), 1);
+		}
+		return img;
+	}
+	// the light caught just under the potion's surface: a soft white band, brightest along its middle and fading
+	// to both edges. Drawn as Lines along the surface (Effects.lua UpdateTrough), so it follows the surface at any
+	// level, which the columns (shaded by height in the bar) cannot.
+	public static Img AlchBand()
+	{
+		var img = new Img(8, 32);
+		for (int y = 0; y < 32; y++) for (int x = 0; x < 8; x++)
+		{
+			double v = (y + .5)/32, a = Math.Pow(Math.Sin(Math.PI*v), 1.4);
+			img.Set(x, y, 1, 1, 1, a);
+		}
+		return img;
+	}
+
 	public static Img Vine()        // bark strip, tiles along its length; the addon draws it as line segments
 	{
 		var img = new Img(128, 32);
@@ -1850,20 +3018,61 @@ public static class CastbarArt
 		}
 		return img;
 	}
-	// Edge masks for the borderless look. Masks multiply the bar's alpha.
-	// edge_v: top and bottom fade with a ragged, noisy line; tiles left-right so it can drift.
-	// edge_h: left-to-right fade over the texture's width; the addon uses it for both ends.
-	public static Img EdgeV()
+	// edge_h: a left-to-right fade over the texture's width, used as a soft gradient (skinning's shade ahead
+	// of the roll, blacksmithing's hot edge, lightning's leading glow). No ragged edge masks: bars are framed.
+	// ---------------------------------------------------------------- corners and depth (Bar.lua)
+	// Signed distance to a rectangle rounded at its left corners only (it runs on to the right): negative inside.
+	static double RoundLeft(double x, double y, double x0, double y0, double y1, double R)
 	{
-		var img = new Img(256, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 256; x++)
+		double cy = (y0 + y1)/2, hh = (y1 - y0)/2;
+		double qx = (x0 + R) - x, qy = Math.Abs(y - cy) - (hh - R);
+		double ox = Math.Max(qx, 0), oy = Math.Max(qy, 0);
+		return Math.Sqrt(ox*ox + oy*oy) + Math.Min(Math.Max(qx, qy), 0) - R;
+	}
+	static double Cov(double d) { return Clamp(0.5 - d); }
+	// The corner mask: the bar's left end square (64 px = one bar height) with its left corners rounded by r bar
+	// heights, white. Bar.lua anchors it to the bar's left end, and mirrored to its right end, on every texture that
+	// reaches the bar's edges. r = 0 is the all-white square mask.
+	public static Img CornerMask(double r)
+	{
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+			img.Set(x, y, 1, 1, 1, r <= 0 ? 1 : Cov(RoundLeft(x + 0.5, y + 0.5, 0, 0, 64, r*64)));
+		return img;
+	}
+	// The frame line's end cap for rounded corners (Bar.lua LayoutBorder): the square reaching e outside the bar on
+	// every side, S = 1 + 2e bar heights across, where the dark line is td = .1 bar heights thick with e = 2/3 of it
+	// outside the bar, and the lit line inside it is td/2 thick ending at the bar's edge. Painted white; Bar.lua tints
+	// the dark one black and the lit one in the look's colour. Mirrored for the right end.
+	public static Img CapRing(double r, bool lit)
+	{
+		const double td = 0.1, e = td*2/3, tl = td/2, S = 1 + 2*e;
+		double s = 64/S, Ro = (r + e)*s;   // texture px per bar height; the dark line's outer corner radius
+		var img = new Img(64, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
 		{
-			double u = x/256.0, v = y/64.0, d = 0.5 - Math.Abs(v - 0.5);    // 0 at the edge, 0.5 in the middle
-			double n = Fbm(u, v, 16, 1, 4, 141) * 0.09;
-			img.Set(x, y, 1, 1, 1, Smooth(0.02, 0.20, d + n));
+			double px = x + 0.5, py = y + 0.5, a;
+			if (!lit)
+			{
+				double i = td*s;
+				a = Cov(RoundLeft(px, py, 0, 0, 64, Ro)) - Cov(RoundLeft(px, py, i, i, 64 - i, Math.Max(0, Ro - i)));
+			}
+			else
+			{
+				double o = (e - tl)*s, i = e*s;
+				a = Cov(RoundLeft(px, py, o, o, 64 - o, Math.Max(0, Ro - o))) - Cov(RoundLeft(px, py, i, i, 64 - i, Math.Max(0, Ro - i)));
+			}
+			img.Set(x, y, 1, 1, 1, Clamp(a));
 		}
 		return img;
 	}
+	public static Img BevelV()   // 8x64, white: alpha 1 along the top fading to 0 at the bottom (the bevel's light, shade and inner shadow)
+	{
+		var img = new Img(8, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 8; x++) { double v = (y + 0.5)/64; img.Set(x, y, 1, 1, 1, 1 - v); }
+		return img;
+	}
+
 	public static Img EdgeH()
 	{
 		var img = new Img(64, 64);
@@ -1901,6 +3110,133 @@ public static class CastbarArt
 				shade = 0.75 + 0.25*(1 - Math.Abs(ly)/Math.Max(0.01, half)) - 0.3*Math.Exp(-ly*ly*900);
 			}
 			img.Set(x, y, shade, shade, shade, Clamp(t));
+		}
+		return img;
+	}
+
+	// ================================================================ ENCHANTING: the velvet, the flow of settled magic, the vortex, dust, essence
+	// The velvet the magic settles on (concept makeVelvet), neutral: the addon tints it to the cast's palette (its deep colour,
+	// the top a little toward the main one; ench_velvet_hi is added over it in the palette's main/accent for the mottling
+	// and the pale specks). Brightness: a vertical gradient, soft mottling, fine grain; at most .78 so the mottles can rise above it.
+	public static Img EnchVelvet()
+	{
+		var img = new Img(W, H);
+		var rnd = new Random(8101);
+		int n = 60; var bx = new double[n]; var by = new double[n]; var br = new double[n];
+		for (int i = 0; i < n; i++) { bx[i] = rnd.NextDouble()*W; by[i] = rnd.NextDouble()*H; br[i] = H*(0.3 + 0.6*rnd.NextDouble()); }
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double v = (y + 0.5)/H;
+			double lum = v < 0.55 ? Lerp(1.0, 0.85, v/0.55) : Lerp(0.85, 0.5, (v - 0.55)/0.45);
+			double m = 0;
+			for (int i = 0; i < n; i++) { double dx = WrapDx(x, bx[i], W), dy = y - by[i]; double d = Math.Sqrt(dx*dx + dy*dy)/br[i]; if (d < 1) m += (1 - d)*(1 - d)*0.16; }
+			double g = 0.78*lum*(1 + m) + Fbm(x/(double)W, v, 32, 4, 3, 8102)*0.03;
+			img.Set(x, y, Clamp(g), Clamp(g), Clamp(g), 1);
+		}
+		return img;
+	}
+	// ADD over the velvet: the coloured mottling (main and accent in the concept; one tint here) and a scatter of tiny pale specks.
+	public static Img EnchVelvetHi()
+	{
+		var img = new Img(W, H);
+		var rnd = new Random(8111);
+		int n = 70; var bx = new double[n]; var by = new double[n]; var br = new double[n];
+		for (int i = 0; i < n; i++) { bx[i] = rnd.NextDouble()*W; by[i] = rnd.NextDouble()*H; br[i] = H*(0.3 + 0.6*rnd.NextDouble()); }
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double m = 0;
+			for (int i = 0; i < n; i++) { double dx = WrapDx(x, bx[i], W), dy = y - by[i]; double d = Math.Sqrt(dx*dx + dy*dy)/br[i]; if (d < 1) m += (1 - d)*(1 - d); }
+			double g = Clamp(m*0.45);
+			img.Set(x, y, g, g, g, 1);
+		}
+		for (int i = 0; i < 240; i++)
+		{
+			int sx = rnd.Next(W), sy = rnd.Next(H); double a = 0.25 + 0.75*rnd.NextDouble();
+			double g = Clamp(img.R[sy*W + sx] + a);
+			img.Set(sx, sy, g, g, g, 1);
+		}
+		return img;
+	}
+	// The settled power's flow (concept drawFlow, one texture per band): the region under a sine wave, lit by a vertical
+	// gradient that peaks at mid-height, so a band of light waxes and wanes along the bar. White, ADD, tinted to the palette
+	// (band 0 main, band 1 accent). Band k runs 2 + k whole waves across the texture, so it tiles: in bar heights the
+	// texture is 11.4 (k = 0) or 12.6 (k = 1) wide at the concept's wavelengths (Effects.lua ENCH_FLOW).
+	public static Img EnchFlow(int k)
+	{
+		var img = new Img(W, H);
+		int periods = 2 + k; double ph = k == 0 ? 0.6 : 2.9;
+		for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+		{
+			double u = (x + 0.5)/W, v = (y + 0.5)/H;
+			double wave = 0.45 + k*0.1 + Math.Sin(u*2*Math.PI*periods + ph)*0.25;
+			double grad = v < 0.5 ? v/0.5 : (1 - v)/0.5;
+			double a = Smooth(wave - 0.025, wave + 0.025, v)*grad;
+			img.Set(x, y, 1, 1, 1, Clamp(a));
+		}
+		return img;
+	}
+	// The vortex (concept drawVortex): six tilted rings of light at the cast edge, each an open arc (two thirds of the ring)
+	// that spins at its own rate, tighter toward the throat. Nothing turns in game: this atlas holds every ring at
+	// VORTEX_COLS spin phases, and the addon shows the cell for the time; mirrored cells spin the other way (disenchant).
+	// 1024x512: a cell is 64 px = 1.4 bar heights square, the vortex's centre at its middle; columns are the phases, rows the rings.
+	public const int VORTEX_COLS = 16, VORTEX_ROWS = 6, VORTEX_PX = 64;
+	public static Img Vortex()
+	{
+		var img = new Img(VORTEX_COLS*VORTEX_PX, 512);
+		double hpx = VORTEX_PX/1.4;   // px per bar height
+		int N = 160;
+		var xs = new double[N + 1]; var ys = new double[N + 1];
+		for (int row = 0; row < VORTEX_ROWS; row++)
+		{
+			double k = row/5.0, rx = hpx*Lerp(0.36, 0.1, k), ry = hpx*Lerp(0.62, 0.2, k), cx0 = hpx*0.05*k, lw = Math.Max(1.2, hpx*0.035);
+			for (int col = 0; col < VORTEX_COLS; col++)
+			{
+				double sp = col*2*Math.PI/VORTEX_COLS;
+				for (int i = 0; i <= N; i++)
+				{
+					double th = sp + 4.2*i/N, px = rx*Math.Cos(th), py = ry*Math.Sin(th);
+					xs[i] = cx0 + px*Math.Cos(0.25) - py*Math.Sin(0.25);
+					ys[i] = px*Math.Sin(0.25) + py*Math.Cos(0.25);
+				}
+				int ox = col*VORTEX_PX, oy = row*VORTEX_PX;
+				for (int y = 0; y < VORTEX_PX; y++) for (int x = 0; x < VORTEX_PX; x++)
+				{
+					double qx = x + 0.5 - VORTEX_PX/2.0, qy = y + 0.5 - VORTEX_PX/2.0, d = 1e9;
+					for (int i = 0; i < N; i++) d = Math.Min(d, SegDist(qx, qy, xs[i], ys[i], xs[i + 1], ys[i + 1]));
+					// the arc fades in at its tail and is brightest at its head, as a spinning streak
+					double core = Clamp((lw/2 - d) + 0.5), halo = Math.Exp(-d*d/(2*lw*lw))*0.45;
+					double a = Clamp(core + halo);
+					img.Set(ox + x, oy + y, 1, 1, 1, a);
+				}
+			}
+		}
+		return img;
+	}
+	// A hard little disc with a soft edge (the dust grains' centres), white.
+	public static Img Dot()
+	{
+		var img = new Img(32, 32);
+		for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++)
+		{
+			double dx = (x - 15.5)/16.0, dy = (y - 15.5)/16.0, r = Math.Sqrt(dx*dx + dy*dy);
+			img.Set(x, y, 1, 1, 1, Smooth(0.75, 0.55, r));
+		}
+		return img;
+	}
+	// An essence mote (concept drawEssence): a bright core in a soft glow with a thin flat ring of light round it. White,
+	// tinted to the palette's accent; the addon adds a wider glow in the main colour under it. 64 px = 4 mote radii.
+	public static Img Essence()
+	{
+		var img = new Img(64, 64);
+		double r = 16;
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+		{
+			double dx = (x - 31.5)/r, dy = (y - 31.5)/r, d = Math.Sqrt(dx*dx + dy*dy);
+			double mid = 0.55*Math.Exp(-d*d/(1.4*1.4)*1.6), core = 0.9*Math.Exp(-d*d/(0.6*0.6)*1.4);
+			double e = Math.Sqrt(dx*dx/(1.9*1.9) + dy*dy/(0.55*0.55));
+			double ring = 0.45*Smooth(0.22, 0.08, Math.Abs(e - 1));
+			double a = 1 - (1 - mid)*(1 - core)*(1 - ring);
+			img.Set(x, y, 1, 1, 1, Clamp(a));
 		}
 		return img;
 	}
@@ -1997,10 +3333,39 @@ $jobs = [ordered]@{
 	'p_roll_spiral' = { [CastbarArt]::RollSpiral() }
 	'p_knife_wood' = { [CastbarArt]::Knife($false) }; 'p_knife_antler' = { [CastbarArt]::Knife($true) }
 	'smith_iron' = { [CastbarArt]::SmithIron() };   'smith_hot'   = { [CastbarArt]::SmithHot() }
+	'smith_edge' = { [CastbarArt]::SmithEdge() };   'smelt_seam'  = { [CastbarArt]::SmeltSeam() }
 	'smith_cold' = { [CastbarArt]::SmithCold() };   'smith_temper' = { [CastbarArt]::SmithTemper() }
 	'p_hammer_wood' = { [CastbarArt]::Hammer($false) }; 'p_hammer_antler' = { [CastbarArt]::Hammer($true) }
 	'smelt_crust' = { [CastbarArt]::SmeltCrust() }; 'smelt_hot'   = { [CastbarArt]::SmeltHot() }
 	'smelt_stream' = { [CastbarArt]::SmeltStream() }; 'p_ladle'   = { [CastbarArt]::Ladle() }
+	'smelt_front' = { [CastbarArt]::SmeltFront() }; 'smelt_dark'  = { [CastbarArt]::SmeltDark() }
+	'storm_sky'  = { [CastbarArt]::StormSky() };     'p_bolts'     = { [CastbarArt]::Bolts() }
+	'storm_bank1' = { [CastbarArt]::StormBank(0) }; 'storm_bank2' = { [CastbarArt]::StormBank(1) }
+	'storm_bank3' = { [CastbarArt]::StormBank(2) }; 'storm_bank4' = { [CastbarArt]::StormBank(3) }
+	'storm_tower1' = { [CastbarArt]::StormBank(0, 1) }; 'storm_tower2' = { [CastbarArt]::StormBank(1, 1) }
+	'storm_tower3' = { [CastbarArt]::StormBank(2, 1) }; 'storm_tower4' = { [CastbarArt]::StormBank(3, 1) }
+	'storm_ragged1' = { [CastbarArt]::StormBank(0, 2) }; 'storm_ragged2' = { [CastbarArt]::StormBank(1, 2) }
+	'storm_ragged3' = { [CastbarArt]::StormBank(2, 2) }; 'storm_ragged4' = { [CastbarArt]::StormBank(3, 2) }
+	'storm_over1' = { [CastbarArt]::StormBank(0, 3) }; 'storm_over2' = { [CastbarArt]::StormBank(1, 3) }
+	'storm_over3' = { [CastbarArt]::StormBank(2, 3) }; 'storm_over4' = { [CastbarArt]::StormBank(3, 3) }
+	'alch_glass' = { [CastbarArt]::AlchAtlas($false) }; 'alch_liquid' = { [CastbarArt]::AlchAtlas($true) }
+	'alch_trough' = { [CastbarArt]::AlchTrough() }; 'alch_column' = { [CastbarArt]::AlchColumn() }
+	'alch_band'  = { [CastbarArt]::AlchBand() }
+	'tail_cloth' = { [CastbarArt]::TailCloth() };   'tail_warp'   = { [CastbarArt]::TailWarp() }
+	'tail_warp_hi' = { [CastbarArt]::TailWarpHi() }; 'tail_shed'  = { [CastbarArt]::TailShed() }
+	'p_shuttle'  = { [CastbarArt]::Shuttle() };     'p_pirn'      = { [CastbarArt]::Pirn() }
+	'p_reed'     = { [CastbarArt]::Reed() };        'p_tail'      = { [CastbarArt]::WeftTail() }
+	'lw_leather' = { [CastbarArt]::Leather() };     'p_hole'      = { [CastbarArt]::Hole() }
+	'lw_tool1'   = { [CastbarArt]::Tooling(0) };    'lw_tool2'    = { [CastbarArt]::Tooling(1) }
+	'lw_tool3'   = { [CastbarArt]::Tooling(2) };    'lw_tool4'    = { [CastbarArt]::Tooling(3) }
+	'lw_tool5'   = { [CastbarArt]::Tooling(4) }
+	'lw_lace'    = { [CastbarArt]::Lace() };        'lw_stitch'   = { [CastbarArt]::Stitch() }
+	'p_needle'   = { [CastbarArt]::Needle() }
+	'ench_velvet' = { [CastbarArt]::EnchVelvet() }; 'ench_velvet_hi' = { [CastbarArt]::EnchVelvetHi() }
+	'ench_flow1' = { [CastbarArt]::EnchFlow(0) };   'ench_flow2'  = { [CastbarArt]::EnchFlow(1) }
+	'p_vortex'   = { [CastbarArt]::Vortex() };      'p_dot'       = { [CastbarArt]::Dot() }
+	'p_essence'  = { [CastbarArt]::Essence() }
+	'p_flame'    = { [CastbarArt]::AlchFlame() };   'p_valve'     = { [CastbarArt]::AlchValve() }
 	'p_chip'     = { [CastbarArt]::Chip() };        'p_flower'    = { [CastbarArt]::Flower() }
 	'fire_base'  = { [CastbarArt]::FireBase() };    'fire_flow'   = { [CastbarArt]::FireFlow() }
 	'shadow_base'= { [CastbarArt]::ShadowBase() };  'shadow_flow' = { [CastbarArt]::ShadowFlow() }
@@ -2019,8 +3384,11 @@ $jobs = [ordered]@{
 	'p_glyphs'   = { [CastbarArt]::Glyphs() }
 	'p_twinkle'  = { [CastbarArt]::Twinkle() }
 	'vine'       = { [CastbarArt]::Vine() }
-	'edge_v'     = { [CastbarArt]::EdgeV() }
 	'edge_h'     = { [CastbarArt]::EdgeH() }
+	'corner_square' = { [CastbarArt]::CornerMask(0) }; 'corner_soft' = { [CastbarArt]::CornerMask(0.18) }; 'corner_rounded' = { [CastbarArt]::CornerMask(0.36) }
+	'cap_dark_soft' = { [CastbarArt]::CapRing(0.18, $false) }; 'cap_lit_soft' = { [CastbarArt]::CapRing(0.18, $true) }
+	'cap_dark_rounded' = { [CastbarArt]::CapRing(0.36, $false) }; 'cap_lit_rounded' = { [CastbarArt]::CapRing(0.36, $true) }
+	'bevel_v'    = { [CastbarArt]::BevelV() }
 	'p_thorn'    = { [CastbarArt]::Thorn() }
 	'p_runecircles' = { [CastbarArt]::RuneCircles() }
 }

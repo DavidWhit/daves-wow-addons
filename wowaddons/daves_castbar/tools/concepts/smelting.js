@@ -700,9 +700,10 @@
 	});
 
 	// ------------------------------------------------------------------ B3: a hand ladle pours the viscous run
-	// The same ladle shape as drawLadle (so tip() still finds its spout), painted as forged iron rather
+	// The same bowl shape as drawLadle (so tip() still finds its spout), painted as forged iron rather
 	// than outlined: soft shading, soot, heat colours near the rim, molten glow over the lip, slag inside,
 	// and the run's orange light on its underside. The per-cast soot and slag come from s.ladle.
+	// It has no handle: the bowl alone rides the cast edge.
 	function makeLadleLook() {
 		const soot = [], slag = [];
 		for (let i = 0; i < 6; i++) soot.push({ x: rand(.2, 1.8), w: rand(.04, .1), l: rand(.3, .9), a: rand(.12, .3) });
@@ -712,29 +713,7 @@
 	function drawRealLadle(g, look, lx, ly, r, tilt, dir, full) {
 		g.save(); g.translate(lx, ly); g.scale(dir, 1); g.rotate(-tilt);
 		g.lineCap = 'round';
-		// handle: a forged iron rod, heat-tinted near the bowl, ending in a wooden grip with iron rings
-		const hx0 = 1.8 * r, hy0 = .2 * r, ha = -.5, L = 2.5 * r, hx1 = hx0 + Math.cos(ha) * L, hy1 = hy0 + Math.sin(ha) * L;
-		const at = v => [hx0 + Math.cos(ha) * L * v, hy0 + Math.sin(ha) * L * v];
-		const [gx, gy] = at(.6);
-		const line = (x0, y0, x1, y1, w, c) => { g.strokeStyle = c; g.lineWidth = w; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); };
-		line(hx0, hy0, gx, gy, r * .14, '#3a3c42');
-		line(hx0, hy0 + r * .03, gx, gy + r * .03, r * .06, 'rgba(10,10,12,.45)');
-		const tg = g.createLinearGradient(hx0, hy0, gx, gy);
-		tg.addColorStop(0, 'rgba(165,115,60,.55)'); tg.addColorStop(.2, 'rgba(80,90,150,.4)'); tg.addColorStop(.45, 'rgba(80,90,150,0)');
-		line(hx0, hy0, gx, gy, r * .14, tg);
-		line(hx0, hy0 - r * .04, gx, gy - r * .04, r * .035, 'rgba(185,190,200,.45)');
-		const wg = g.createLinearGradient(gx, gy - r * .1, gx, gy + r * .1);
-		wg.addColorStop(0, '#6a4a30'); wg.addColorStop(.5, '#46301d'); wg.addColorStop(1, '#24170d');
-		line(gx, gy, hx1, hy1, r * .2, wg);
-		for (let k = 1; k < 4; k++) {   // grain along the grip
-			const o = (k - 2) * r * .045;
-			line(gx + r * .05, gy + o, hx1 - r * .05, hy1 + o, Math.max(.5, r * .012), 'rgba(25,14,6,.35)');
-		}
-		for (const v of [.62, .97]) {   // iron rings at each end of the grip
-			const [rx, ry] = at(v), nx = -Math.sin(ha) * r * .12, ny = Math.cos(ha) * r * .12;
-			line(rx - nx, ry - ny, rx + nx, ry + ny, r * .07, '#2a2b30');
-			line(rx - nx * .8, ry - ny * .8, rx - nx * .1, ry - ny * .1, r * .02, 'rgba(180,185,195,.35)');
-		}
+		// no handle (removed 2026-10-09): just the bowl, tipping at the cast edge
 		// bowl
 		const bowl = () => {
 			g.beginPath(); g.moveTo(-.24 * r, -.06 * r); g.lineTo(-.04 * r, .2 * r);

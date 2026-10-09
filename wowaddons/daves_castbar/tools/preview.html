@@ -29,7 +29,9 @@
 <body class="bg-dark">
 <header>
 	<h1>daves_castbar</h1>
-	<label>Style <select id="style"><option value="borderless">Borderless (soft edges)</option><option value="framed">Framed</option></select></label>
+	<label>Style <select id="style"><option value="framed">Framed</option><option value="borderless">Borderless</option></select></label>
+	<label>Corners <select id="corners"><option value="square">Square</option><option value="soft" selected>Soft</option><option value="rounded">Rounded</option></select></label>
+	<label>Depth <select id="depth"><option value="flat">Flat</option><option value="bevel">Bevel</option></select></label>
 	<label>Width <input id="w" type="range" min="160" max="560" value="320"></label>
 	<label>Height <input id="h" type="range" min="14" max="56" value="28"></label>
 	<label>Speed <input id="speed" type="range" min="0.25" max="2" step="0.05" value="1"></label>
@@ -77,6 +79,18 @@ function tinted(key, c) {
 	g.globalCompositeOperation = 'multiply'; g.fillStyle = rgba(c, 1); g.fillRect(0, 0, cv.width, cv.height);
 	g.globalCompositeOperation = 'destination-in'; g.drawImage(img, 0, 0);
 	return tintCache[id] = cv;
+}
+
+// Heat colours, as Effects.lua IRON_HEAT / MELT_HEAT ([heat, r, g, b]); heatRGB returns 0..1.
+const IRON_HEAT = [[0, 42, 34, 32], [.22, 104, 20, 10], [.45, 190, 46, 12], [.66, 245, 118, 28], [.85, 255, 196, 84], [1.05, 255, 246, 214], [1.3, 255, 255, 250]];
+const MELT_HEAT = [[0, 52, 50, 56], [.16, 84, 38, 26], [.34, 165, 42, 14], [.52, 228, 92, 18], [.72, 255, 160, 44], [.88, 255, 208, 104], [1, 255, 228, 150]];
+function heatRGB(ramp, t) {
+	if (t <= ramp[0][0]) return ramp[0].slice(1).map(v => v / 255);
+	for (let i = 1; i < ramp.length; i++) if (t <= ramp[i][0]) {
+		const a = ramp[i - 1], b = ramp[i], k = (t - a[0]) / (b[0] - a[0]);
+		return [1, 2, 3].map(j => (a[j] + (b[j] - a[j]) * k) / 255);
+	}
+	return ramp[ramp.length - 1].slice(1).map(v => v / 255);
 }
 
 // Textures pre-scaled to the bar's size: canvas patterns resample at tile edges when given a scale,
@@ -156,7 +170,7 @@ const EL = {
 	fishing: {
 		// a pond the length of the bar: lily pads on top, fish below, the bobber riding the cast edge
 		spell: 'Fishing', border: [70, 170, 190], glow: [80, 190, 220], spark: [210, 245, 255], veil: [90, 190, 210],
-		channel: true,
+		channel: true, noSpark: true,   // professions get no marker at the cast edge (Elements.lua)
 		layers: [{ t: 'fish_water', su: .004 }, { t: 'fish_caustic', su: .012, a: [.3, .6], add: true }],
 		track: { t: 'fish_water', su: .004, a: .6 },
 		pond: true,
@@ -168,7 +182,7 @@ const EL = {
 		// the nature vines, with herbs and flowers blooming along them
 		spell: 'Herb Gathering', border: [110, 170, 60], glow: [130, 210, 80], spark: [230, 255, 180], veil: [140, 210, 90],
 		layers: [{ t: 'nature_base', su: .004 }, { t: 'nature_flow', su: .02, a: [.35, .8], add: true }],
-		vines: true, flowers: true,
+		vines: true, flowers: true, noSpark: true,
 		emit: [
 			P({ t: 'p_soft', rate: 8, color: [[255, 230, 120], [230, 255, 160]], size: [.06, .13], life: [1.2, 2.2], vx: [-5, 5], vy: [-10, -3] }),
 		],
@@ -178,7 +192,7 @@ const EL = {
 		spell: 'Mining', border: [190, 140, 80], glow: [255, 170, 80], spark: [255, 220, 150], veil: [200, 140, 70],
 		layers: [{ t: 'mine_rails', su: 0 }, { t: 'mine_flow', su: .01, a: [.4, .9], add: true, flicker: true }],
 		track: { t: 'mine_rails', a: .35 },
-		mine: true,
+		mine: true, noSpark: true,
 		emit: [
 			P({ t: 'p_soft', rate: 4, color: [[150, 130, 110]], size: [.25, .5], life: [1.2, 2], vx: [-4, 4], vy: [-6, -1], add: false, alpha: .35 }),
 		],
@@ -214,19 +228,136 @@ const PELTS = [
 let peltTurn = Math.floor(Math.random() * PELTS.length);
 EL.smelting = {
 	// a forged-iron ladle rides the cast edge, pouring molten steel that cools to dark crust behind it
-	spell: 'Smelt Iron', border: [200, 120, 50], glow: [255, 130, 40], spark: [255, 170, 70], veil: [110, 45, 15],
+	spell: 'Smelt Iron', border: [200, 120, 50], glow: [255, 130, 40], spark: [255, 170, 70], veil: [0, 0, 0],
 	layers: [{ t: 'smelt_crust', su: 0 }],
+	track: { t: 'smelt_dark', a: 1 },
 	smelt: true, noSpark: true, padTop: 1.6,
 	emit: [],
 };
 EL.blacksmithing = {
 	// red-hot iron, hottest at the cast edge where the forge hammer strikes; it quenches to tempered steel
-	spell: 'Copper Chain Belt', border: [200, 90, 40], glow: [255, 100, 30], spark: [200, 225, 255], veil: [120, 40, 15],
+	spell: 'Copper Chain Belt', border: [200, 90, 40], glow: [255, 100, 30], spark: [200, 225, 255], veil: [0, 0, 0],
 	layers: [{ t: 'smith_iron', su: 0 }],
 	track: { t: 'smith_cold', a: .9 },
-	smith: true, noSpark: true, padTop: 1.7,
+	smith: true, noSpark: true, padTop: 2.1,   // the hammer at full lift reaches 1.8 bar heights above the bar
 	emit: [],
 };
+EL.lightning = {
+	// a dark storm: cloud banks at four depths drifting at their own pace, forked bolts striking inside the
+	// filled part and lighting the clouds round them, a faint glow on the leading edge; the spark is the bolts' blue
+	spell: 'Lightning Bolt', border: [110, 140, 255], glow: [130, 170, 255], spark: [200, 225, 255], veil: [60, 70, 160],
+	layers: [{ t: 'storm_sky', su: 0 }],
+	storm: true,
+	emit: [],
+};
+EL.alchemy = {
+	// a bench of glassware on the bar; the potion works through it and pours into the bar, which fills like a
+	// liquid and brims at the end. The trough is the whole bar (wholeBar): the level is the progress, no marker.
+	spell: 'Flask of the Titans', border: [120, 200, 190], glow: [0, 0, 0], spark: [235, 250, 255], veil: [0, 0, 0],
+	layers: [{ t: 'alch_trough', su: 0 }],
+	alchemy: true, wholeBar: true, noSpark: true, padTop: 1.75,
+	emit: [],
+};
+EL.tailoring = {
+	// a small loom (as Effects.lua): taut warp ahead (the track, tinted to the cloth), woven cloth behind (the layer,
+	// tinted the same), a small boat shuttle crossing the shed at the fell and a slim reed beating each pick in
+	spell: 'Bolt of Woolen Cloth', border: [196, 176, 140], glow: [90, 76, 56], spark: [255, 245, 225], veil: [0, 0, 0],
+	layers: [{ t: 'tail_cloth', su: 0 }],
+	track: { t: 'tail_warp', a: 1, hi: 'tail_warp_hi', hiA: 1 },
+	tailor: true, noSpark: true, padTop: 1.0,
+	emit: [],
+};
+EL.leatherworking = {
+	// tooled leather panels laced together (as Effects.lua): the panels are the whole bar (wholeBar), apart by the gaps
+	// still open; as the cast reaches each joint a needle cross-laces it shut, stitches run along the edges behind
+	spell: 'Heavy Leather Ball', border: [150, 105, 60], glow: [90, 60, 30], spark: [255, 215, 160], veil: [0, 0, 0],
+	layers: [],
+	track: { t: 'lw_leather', a: 0 },
+	leather: true, wholeBar: true, noSpark: true, padTop: 1.0,
+	emit: [],
+};
+EL.enchanting = {
+	// dark velvet the magic settles on (as Effects.lua): a palette per cast tints the velvet and its mottling; flowing
+	// bands of light and glitter behind the edge; a vortex at the edge pulls dust out of the unfilled part and spins it in
+	spell: 'Enchant Chest - Major Health', border: [150, 110, 230], glow: [110, 70, 210], spark: [200, 170, 255], veil: [0, 0, 0],
+	layers: [{ t: 'ench_velvet', su: 0 }, { t: 'ench_velvet_hi', su: 0, add: true, a: [.2, .3] }],
+	ench: {}, noSpark: true, padTop: 1.0,
+	emit: [],
+};
+EL.disenchant = {
+	// the bar starts solid with magic (wholeBar); the vortex comes in at the right end and moves left, drawing the magic
+	// out of the solid part ahead and throwing it out behind as dust and essence motes that settle on the spent cloth
+	spell: 'Disenchant', border: [120, 100, 170], glow: [80, 60, 140], spark: [170, 150, 210], veil: [0, 0, 0],
+	layers: [{ t: 'ench_velvet', su: 0 }, { t: 'ench_velvet_hi', su: 0, add: true, a: [.2, .3] }],
+	ench: { disenchant: true }, wholeBar: true, noSpark: true, padTop: 1.0,
+	emit: [],
+};
+// as Effects.lua ENCH_PALETTES, ENCH_FLOW (the flow textures' widths in bar heights and speeds), the vortex atlas, the drain stretch
+const ENCH_PALETTES = [
+	{ main: [158, 96, 255], deep: [34, 12, 62], acc: [86, 228, 222], hi: [232, 208, 255] },
+	{ main: [96, 205, 235], deep: [10, 34, 56], acc: [190, 120, 255], hi: [214, 252, 255] },
+	{ main: [206, 112, 255], deep: [46, 14, 58], acc: [255, 196, 104], hi: [255, 226, 255] },
+	{ main: [124, 132, 255], deep: [18, 18, 64], acc: [120, 255, 200], hi: [222, 228, 255] },
+];
+const ENCH_FLOW = [{ w: 11.4, su: .223 }, { w: 12.6, su: .302 }], VORTEX = { cols: 16, rows: 6, cell: 1.4, px: 64 }, ENCH_DRAIN = 2.6, VELVET_NOM = .78;
+// as Effects.lua CLOTHS (base tints the cloth and the warp, weft the thread) and the leather's TONES, THREADS, THONGS
+const CLOTHS = [
+	{ base: [172, 156, 124], weft: [188, 172, 140], sheen: .08 }, { base: [120, 90, 64], weft: [136, 102, 74], sheen: .05 },
+	{ base: [160, 36, 48], weft: [180, 52, 62], sheen: .22 }, { base: [112, 60, 136], weft: [128, 74, 152], sheen: .14 },
+	{ base: [72, 56, 128], weft: [88, 70, 146], sheen: .12 }, { base: [146, 164, 196], weft: [166, 184, 214], sheen: .25 },
+];
+let clothTurn = Math.floor(Math.random() * CLOTHS.length);
+const TONES = [[198, 150, 98], [158, 104, 62], [118, 74, 42], [96, 60, 36], [132, 96, 60]];
+const THREADS = [[236, 224, 188], [48, 38, 30], [156, 46, 34], [214, 168, 92], [226, 226, 222]];
+const THONGS = [[60, 36, 20], [30, 24, 20], [176, 120, 70]];
+let toolingTurn = Math.floor(Math.random() * 5);
+const NEEDLE = { poses: 4, span: 1.0, ox: .25, oy: .3, ang: [.44, .56, .70, .82] };   // Make-CastbarMedia.ps1 Needle
+const LEATHER_NOM = .88, SHED_REACH = .2;   // the shuttle's travel reaches this far past the bar's lines; the tools are clipped to the bar (Effects_Tailor.lua)
+const smooth01 = t => { t = clamp01(t); return t * t * (3 - 2 * t); };
+const easeOut = t => 1 - (1 - t) * (1 - t);
+EL.plain = {
+	// casts the addon can't place: Blizzard's own cast bar art (SetAtlas in game). The browser can't load Blizzard's
+	// atlases, so this draws a stand-in in their colours: the gold standard filling, green when channelling,
+	// brighter when full, red when interrupted, with Blizzard's thin spark and frame.
+	label: 'plain (Blizzard art in game)', spell: 'Hearthstone', border: [0, 0, 0], glow: [0, 0, 0], spark: [255, 230, 160], veil: [0, 0, 0],
+	layers: [], plain: 'standard', channelLook: 'plain_channel',
+	emit: [],
+};
+EL.plain_channel = { ...EL.plain, hidden: true, plain: 'channel', spark: [200, 255, 200] };
+// as Effects.lua: the storm's banks (Make-CastbarMedia.ps1 STORM_BANKS) and bolt cells
+const STORM_BANKS = [{ y: .06, a: .75, v: .05 }, { y: .32, a: .95, v: .1 }, { y: .58, a: 1, v: .17 }, { y: .9, a: 1, v: .26 }];
+// the weathers, one per cast in turn (as Effects.lua WEATHERS and the concept's): which banks, from which painted set
+// (storm_<set>1..4), their tint, drift speed, the chance of stray rows and of a bank drifting backwards
+const WEATHERS = [
+	{ name: 'layered', banks: [1, 2, 3, 4], set: 'bank', tint: [255, 255, 255], v: 1, stray: .5, back: .2 },
+	{ name: 'towering', banks: [1, 2, 3, 4], set: 'tower', tint: [245, 245, 255], v: .8, stray: .3, back: .1 },
+	{ name: 'scattered', banks: [2, 3, 4], set: 'ragged', tint: [255, 255, 240], v: 1.3, stray: .8, back: .35 },
+	{ name: 'overcast', banks: [1, 2, 3, 4], set: 'over', tint: [219, 224, 245], v: .6, stray: .2, back: 0 },
+	{ name: 'ragged squall', banks: [1, 3, 4], set: 'ragged', tint: [235, 255, 255], v: 1.8, stray: 1, back: .5 },
+];
+let weatherTurn = Math.floor(Math.random() * WEATHERS.length);
+{ const q = new URLSearchParams(location.search); if (q.has('weather')) weatherTurn = +q.get('weather'); }   // ?weather=0..4 starts from one
+const BANK = { w: 16, h: 2, top: .9 }, BOLT = { w: 2.5, h: 1.25, top: .075 };
+// as Effects.lua ALCH_KINDS: atlas cell, liquid zones (station units up from the bar top; fall fills from the top), tube ends, burner
+const ALCH_KINDS = {
+	boil: { cell: 0, zones: [[.235, .748]], inn: [0, 1.109], out: [0, 1.109], burner: 0 },
+	retort: { cell: 1, zones: [[.235, .805]], inn: [-.14, .777], out: [.471, 1.07], burner: -.12 },
+	cyl: { cell: 2, zones: [[.07, 1.105]], inn: [0, 1.22], out: [0, 1.22] },
+	erlen: { cell: 3, zones: [[0, .52]], inn: [0, .88], out: [0, .88] },
+	funnel: { cell: 4, zones: [[.699, 1.288], [0, .319]], inn: [0, 1.5065], out: [.153, .399] },
+	jacket: { cell: 5, zones: [[.12, 1.39, 'fall']], inn: [0, 1.39], out: [0, .12] },
+	coil: { cell: 6, zones: [[.12, 1.27, 'fall']], inn: [0, 1.27], out: [.02, .12] },
+	rack: { cell: 7, zones: [[0, .565]], inn: [-.3, .589], out: [.3, .551] },
+};
+const ALCH_SHUFFLE = ['retort', 'jacket', 'cyl', 'rack', 'funnel', 'coil', 'erlen', 'boil'];
+const ALCH_PALETTES = [
+	[[90, 255, 130], [50, 225, 235], [175, 100, 255], [255, 205, 70]], [[255, 90, 110], [255, 150, 60], [255, 225, 90], [255, 250, 210]],
+	[[90, 150, 255], [110, 255, 225], [225, 120, 255], [255, 130, 200]], [[160, 255, 80], [255, 235, 70], [255, 130, 50], [255, 70, 120]],
+];
+const CELL = { w: 128 / 96, h: 256 / 96 }, LINK_SEGS = 12;
+const palAt = (pal, f) => { f = clamp01(f) * (pal.length - 1); const i = Math.min(pal.length - 2, Math.floor(f)), t = f - i; return pal[i].map((c, j) => c + (pal[i + 1][j] - c) * t); };
+const q8 = c => c.map(v => Math.round(Math.min(255, v) / 8) * 8);   // tint cache keys stay few
+const lighter = (c, k) => q8(c.map(v => v + (255 - v) * k));
 // as Effects.lua: the hammer and ladle atlases (Make-CastbarMedia.ps1 Hammer, Ladle), and the forge's particles (y down here)
 const HAM = { poses: 16, max: .95, span: 3.0, ox: .45, oy: 2.1, L: 1.45, face: .522, scale: .78 };
 const LADLE = { span: 2.6, ox: .3, oy: 1.8, scale: .38 / .56 };
@@ -244,26 +375,12 @@ const FISH_TINTS = [[255, 150, 60], [205, 218, 228], [110, 130, 140], [255, 205,
 const CHIP = P({ t: 'p_chip', color: [[120, 115, 110], [150, 140, 130], [205, 120, 60]], size: [.12, .24], life: [.5, .9], vx: [-40, -12], vy: [-40, -14], spin: [-8, 8], add: false, gravity: 140 });
 const SPARK = P({ t: 'p_star', color: [[255, 220, 140], [255, 250, 220]], size: [.15, .3], life: [.15, .35], vx: [-30, 10], vy: [-30, 5] });
 
-const settings = { W: 320, H: 28, speed: 1, style: 'borderless', mode: 'cast', freeze: false, hold: .7 };
-
-// ------------------------------------------------------------------ edge mask (borderless)
-let maskCache = null;
-function edgeMask(W, H) {
-	if (maskCache && maskCache.W === W && maskCache.H === H) return maskCache.cv;
-	const cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-	const g = cv.getContext('2d');
-	const pat = g.createPattern(imgs.edge_v, 'repeat');
-	pat.setTransform(new DOMMatrix().scale(H / 64));
-	g.fillStyle = pat; g.fillRect(0, 0, W, H);
-	// end caps: edge_h across the first and last H*1.4 pixels
-	const caps = document.createElement('canvas'); caps.width = W; caps.height = H;
-	const c = caps.getContext('2d'), capW = Math.round(H * 1.4);
-	c.fillStyle = '#fff'; c.fillRect(capW, 0, W - 2 * capW, H);
-	c.drawImage(imgs.edge_h, 0, 0, capW, H);
-	c.save(); c.translate(W, 0); c.scale(-1, 1); c.drawImage(imgs.edge_h, 0, 0, capW, H); c.restore();
-	g.globalCompositeOperation = 'destination-in'; g.drawImage(caps, 0, 0);
-	maskCache = { W, H, cv };
-	return cv;
+const settings = { W: 320, H: 28, speed: 1, mode: 'cast', freeze: false, hold: .7, style: 'framed', corners: 'soft', depth: 'flat' };   // framed or borderless; edges always clean
+const CORNER_R = { square: 0, soft: .18, rounded: .36 };   // corner radius in bar heights (Bar.lua CORNERS)
+function roundRectPath(g, x, y, w, h, r) {
+	r = Math.max(0, Math.min(r, h / 2, w / 2));
+	g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+	g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
 }
 
 // ------------------------------------------------------------------ bar
@@ -293,6 +410,11 @@ class Bar {
 		if (this.cfg.mine) { this.swingT = rand(0, .8); this.lastSwing = 0; }
 		if (this.cfg.skin) this.makeSkin();
 		if (this.cfg.smith || this.cfg.smelt) this.makeForge();
+		if (this.cfg.storm) this.makeStorm();
+		if (this.cfg.alchemy) this.makeAlchemy();
+		if (this.cfg.tailor) this.makeTailor();
+		if (this.cfg.leather) this.makeLeather();
+		if (this.cfg.ench) this.makeEnch();
 		this.glyphs = []; this.glyphT = 0; this.twinkles = []; this.twinkleAcc = 0; this.circles = []; this.circleNext = rand(.2, 1.2) * settings.H;
 		this.cv.style.opacity = 1; this.parts = [];
 	}
@@ -454,7 +576,7 @@ class Bar {
 
 	// ---- mining: the cart rolls along the rail to the cast edge; a pickaxe strikes the wall at the end
 	drawMine(g, ox, oy, fillW, H, dt) {
-		const W = settings.W, railY = H * .80;
+		const W = settings.W, railY = H * .92;   // the near rail's top, at the very bottom of the bar (as Effects.lua)
 		// the pickaxe swings from a pivot above the bar: raise slowly, strike fast
 		const P = H * 1.1, L = P * .76, cycle = .8;
 		this.swingT = (this.swingT + dt) % cycle;
@@ -474,8 +596,8 @@ class Bar {
 		}
 		this.lastSwing = t;
 		// the cart: its front at the fill edge, wheels on the rail, lantern glowing
-		const C = H * 1.25, wr = C * .14;
-		const cx = Math.max(-C * .2, fillW - C * .94), cy = railY - wr * 1.15 - C * .80;
+		const C = H * 1.0, wr = C * .13;   // sized so the ore heap stays inside the bar
+		const cx = Math.max(-C * .2, fillW - C * .94), cy = railY - wr * 1.1 - C * .80;
 		for (const u of [.27, .73]) {
 			const wx = cx + C * u, wy = railY - wr;
 			g.save(); g.translate(ox + wx, oy + wy); g.rotate(fillW / wr);
@@ -612,12 +734,18 @@ class Bar {
 		const q = s.quench ? 1 - (1 - Math.min(1, since / .35)) ** 2 : 0, cool = s.endAt !== null && !s.quench ? Math.max(0, 1 - since / .7) : 1;
 		const dpr = window.devicePixelRatio || 1, k = H * dpr / 64;
 		og.save(); og.setTransform(1, 0, 0, 1, 0, 0);
-		og.globalAlpha = Math.min(1, (base - .2) / .5) * (1 - q) * cool;
+		og.globalAlpha = Math.max(0, Math.min(1, (base - .2) / .4)) * (1 - q) * cool;
 		og.fillStyle = pattern(og, scaled('smith_hot', k), this.layerOff[0].u, 0); og.fillRect(0, 0, fillW * dpr, H * dpr);
 		og.restore();
-		const l = Math.max(0, fillW - H * 3.3);
-		og.save(); og.globalCompositeOperation = 'lighter'; og.globalAlpha = .55 * (1 - q) * cool;
-		if (fillW - l > .5) og.drawImage(tinted('edge_h', [255, 191, 89]), l, 0, fillW - l, H);
+		// the cast edge's extra heat: smith_edge tinted to the heat there, its falloff anchored to the edge
+		const span = H * 4.4, l = Math.max(0, fillW - span), e = imgs.smith_edge;
+		og.save(); og.globalAlpha = (1 - q) * cool;
+		if (fillW - l > .5) {
+			const c = heatRGB(IRON_HEAT, base + .4 * cool).map(v => Math.round(v * 255 / 8) * 8);   // quantised, so the tint cache stays small
+			const sx = e.width * (1 - (fillW - l) / span);
+			og.drawImage(tinted('smith_edge', c), sx, 0, e.width - sx, e.height, l, 0, fillW - l, H);
+		}
+		og.globalCompositeOperation = 'lighter';
 		// impact flares on struck spots, cooling over a couple of seconds
 		s.flares = s.flares.filter(f => this.clock - f.born < 2);
 		for (const f of s.flares) {
@@ -659,26 +787,49 @@ class Bar {
 		const pose = Math.max(0, Math.min(HAM.poses - 1, Math.round(lift / HAM.max * (HAM.poses - 1))));
 		const k = H * HAM.scale, px = hx - HAM.L * k, py = -HAM.face * k, size = HAM.span * k, cell = imgs[s.tex].width / 4;
 		g.globalAlpha = ha;
-		g.drawImage(imgs[s.tex], (pose % 4) * cell, Math.floor(pose / 4) * cell, cell, cell, ox + px - HAM.ox * k, oy + py - HAM.oy * k, size, size);
+		g.drawImage(imgs[s.tex], (pose % 4) * cell + .5, Math.floor(pose / 4) * cell + .5, cell - 1, cell - 1, ox + px - HAM.ox * k, oy + py - HAM.oy * k, size, size);
 		g.globalAlpha = 1;
 	}
 	drawSmeltFill(og, fillW, H) {
 		const s = this.smelt, W = settings.W, since = this.forgeSince(s), cool = s.endAt === null ? 1 : Math.exp(-since * 1.4);
 		if (fillW <= 1) return;
-		const land = Math.max(0, fillW - H * .32), span = 3.2 * (W * s.cool * .55 + H * .9), left = land - span, img = imgs.smelt_hot;   // as Effects.lua SmeltSpan
+		const land = Math.max(0, fillW - H * .32), fold = W * s.cool + H * 1.2, span = 3.2 * fold, left = land - span, img = imgs.smelt_hot;   // as Effects.lua SmeltFold/SmeltSpan
+		// the seams' glow, in gradient segments over the crust layer (as Effects.lua UpdateSmelt and SetGradient)
+		const dpr = window.devicePixelRatio || 1, k = H * dpr / 64, seam = scaled('smelt_seam', k);
+		const T = this.seamCnv || (this.seamCnv = document.createElement('canvas'));
+		if (T.width !== Math.ceil(W * dpr) || T.height !== Math.ceil(H * dpr)) { T.width = Math.ceil(W * dpr); T.height = Math.ceil(H * dpr); }
+		const t = T.getContext('2d');
+		t.setTransform(1, 0, 0, 1, 0, 0); t.globalCompositeOperation = 'source-over'; t.clearRect(0, 0, T.width, T.height);
+		const gr = t.createLinearGradient(0, 0, Math.max(1, land * dpr), 0), SEGS = 5;
+		let x0 = 0;
+		for (let i = 1; i <= SEGS; i++) {
+			const x1 = i === SEGS ? land : Math.max(0, land - (SEGS - i) * fold);
+			for (const x of [x0, x1]) if (land > 0) gr.addColorStop(clamp01(x / land), rgba(heatRGB(MELT_HEAT, Math.min(1, cool * Math.exp(-(land - x) / fold) + .03)).map(v => v * 255), 1));
+			x0 = Math.max(x0, x1);
+		}
+		t.fillStyle = gr; t.fillRect(0, 0, land * dpr, T.height);
+		t.globalCompositeOperation = 'destination-in'; t.fillStyle = pattern(t, seam, this.layerOff[0].u, 0); t.fillRect(0, 0, land * dpr, T.height);
+		if (land > .5) og.drawImage(T, 0, 0, land * dpr, T.height, 0, 0, land, H);
 		og.globalAlpha = cool;
 		og.drawImage(img, left, 0, span, H);
 		if (fillW > land) og.drawImage(img, img.width - 1, 0, 1, img.height, land, 0, fillW - land + 1, H);   // past the landing point it stays at its hottest
-		og.globalCompositeOperation = 'lighter'; og.globalAlpha = .4 * cool;
-		og.drawImage(tinted('p_soft', [255, 179, 77]), fillW - H * .15 - H * .8, H * .5 - H * .8, H * 1.6, H * 1.6);
-		og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
+		og.globalAlpha = 1;
+		// the pour's rounded front (as Effects_Forge.lua f.cap); its glow is drawn over the bar in drawSmeltFx. Drawn a pixel past the
+		// fill edge: the canvas samples a drawn image's edge half transparent, which the game's CLAMP sampling doesn't, and the
+		// fill's clip cuts the overshoot off
+		og.drawImage(imgs.smelt_front, fillW - H * .45, 0, H * .45 + 1.5, H);
 	}
 	drawSmeltFx(g, ox, oy, fillW, H, dt) {
 		const s = this.smelt, since = s.endAt === null ? 0 : this.clock - s.endAt, back = s.endAt === null ? 0 : 1 - (1 - Math.min(1, since / .5)) ** 2;
-		const land = Math.max(0, fillW - H * .32);
+		const land = Math.max(0, fillW - H * .32), cool = s.endAt === null ? 1 : Math.exp(-since * 1.4);
 		if (fillW > 1 && back < 1) {
 			g.save(); g.globalCompositeOperation = 'lighter'; g.globalAlpha = .35 * (1 - back);
 			g.drawImage(tinted('p_soft', [255, 130, 41]), ox + land - H * 1.1, oy + H * .12 - H * 1.1, H * 2.2, H * 2.2); g.restore();
+		}
+		if (fillW > 1) {   // the nose's glow, clipped to the bar but not the fill, so it spills over the dark track ahead (Effects_Forge.lua forge.nose)
+			g.save(); g.beginPath(); g.rect(ox, oy, settings.W, H); g.clip();
+			g.globalCompositeOperation = 'lighter'; g.globalAlpha = .4 * cool;
+			g.drawImage(tinted('p_soft', [255, 179, 77]), ox + fillW - H * .15 - H * .8, oy + H * .5 - H * .8, H * 1.6, H * 1.6); g.restore();
 		}
 		if (this.state === 'cast' && fillW > 1) {
 			s.sparkAcc += dt * 26;
@@ -707,6 +858,491 @@ class Bar {
 		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 	}
 
+	// ---- lightning (as Effects.lua): cloud banks drift over the sky; forked bolts strike and light them from within
+	makeStorm() {
+		// as Effects.lua MakeStorm: each cast takes the next weather, and its banks are stretched, mirrored, shifted,
+		// tinted and paced afresh (some drifting backwards, each breathing at its own pace); up to two stray, fainter
+		// rows (a shown bank again) drift between them on some casts
+		const Wt = WEATHERS[weatherTurn++ % WEATHERS.length], rows = [];
+		for (const i of Wt.banks) rows.push({ B: STORM_BANKS[i - 1], img: 'storm_' + Wt.set + i, sx: rand(.7, 1.45), flip: Math.random() < .5, dy: rand(-.09, .09),
+			v: rand(.7, 1.3) * Wt.v * (Math.random() < Wt.back ? -1 : 1), a: rand(.85, 1), breath: rand(.03, .08), on: true });
+		for (let i = 0; i < 2; i++) {
+			const src = pick(rows.filter(r => !r.loose));
+			rows.push({ B: src.B, img: src.img, sx: rand(.7, 1.45), flip: Math.random() < .5, dy: rand(-.35, .55),
+				v: src.v * rand(.6, 1.6) * (Math.random() < .4 ? -1 : 1), a: rand(.25, .45), breath: rand(.03, .08), on: Math.random() < Wt.stray, loose: true });
+		}
+		rows.forEach(r => { r.u = rand(0, 1); r.ph = rand(0, 6.283); });
+		// drawn back to front as the game does: the stray rows lie just over the farthest bank, behind the nearer ones
+		rows.forEach((r, i) => { r.ord = r.loose ? .5 : i; });
+		rows.sort((a, b) => a.ord - b.ord);
+		this.skyTint = Wt.set === 'bank' ? null : Wt.tint;   // the sky layer takes the weather's tint too
+		this.storm = { Wt, rows, nextBolt: .15, flash: 0, flashX: 0, sheet: 0, sheetX: 0, roll: wobble(2), bolts: [] };
+	}
+	drawStormFill(og, fillW, H, dt) {
+		const s = this.storm, W = settings.W, casting = this.state === 'cast';
+		if (casting && Math.random() < dt * .8) { s.sheet = rand(.35, .6); s.sheetX = rand(0, Math.max(1, fillW)); }
+		s.sheet = Math.max(0, s.sheet - dt * 3);
+		s.nextBolt -= dt;
+		if (casting && s.nextBolt <= 0 && fillW > H * 1.2 && s.bolts.length < 6) {
+			s.nextBolt = rand(.08, .3);
+			const cx = rand(H * .5, fillW - H * .5);
+			s.bolts.push({ cx, cell: Math.floor(rand(0, 8)), flip: Math.random() < .5, age: 0, life: rand(.18, .32), ph: rand(0, 6.283) });
+			s.flash = 1; s.flashX = cx;
+		}
+		let I = s.flash * .5, cx = s.flashX, reach = H * 2.6;
+		if (s.sheet * .35 > I) { I = s.sheet * .35; cx = s.sheetX; reach = H * 2; }
+		const drawRow = (g, img, x, y, w, h, flip) => {
+			if (!flip) { g.drawImage(img, x, y, w, h); return; }
+			g.save(); g.translate(x + w, y); g.scale(-1, 1); g.drawImage(img, 0, 0, w, h); g.restore();
+		};
+		for (const R of s.rows) {
+			if (!R.on) continue;
+			const B = R.B, bw = BANK.w * H * R.sx;
+			R.u = ((R.u + B.v * R.v * dt / (BANK.w * R.sx)) % 1 + 1) % 1;
+			const img = this.skyTint ? tinted(R.img, s.Wt.tint) : imgs[R.img], bh = BANK.h * H * (1 + R.breath * Math.sin(this.clock * .45 + R.ph * 1.7));
+			const y = (B.y + R.dy - BANK.top) * H + Math.sin(this.clock * .3 + R.ph) * H * .03 - (bh - BANK.h * H) * .6;
+			const tiles = [];
+			for (let x = -R.u * bw; x < fillW; x += bw) tiles.push(x);
+			og.globalAlpha = B.a * R.a;
+			for (const x of tiles) drawRow(og, img, x, y, bw, bh, R.flip);
+			if (I > .02 && !R.loose) {   // the same bank, added, through a soft round mask round the strike
+				const T = this.stormCnv || (this.stormCnv = document.createElement('canvas')), d = window.devicePixelRatio || 1;
+				const tw = reach * 2, th = reach * 2, ox = cx - reach, oy = H * .5 - reach;
+				if (T.width !== Math.ceil(tw * d) || T.height !== Math.ceil(th * d)) { T.width = Math.ceil(tw * d); T.height = Math.ceil(th * d); }
+				const t = T.getContext('2d');
+				t.setTransform(d, 0, 0, d, 0, 0); t.globalCompositeOperation = 'source-over'; t.clearRect(0, 0, tw, th);
+				for (const x of tiles) drawRow(t, img, x - ox, y - oy, bw, bh, R.flip);
+				t.globalCompositeOperation = 'destination-in'; t.drawImage(imgs.p_soft, 0, 0, tw, th);
+				og.globalCompositeOperation = 'lighter'; og.globalAlpha = Math.min(1, I * 1.8) * B.a * R.a;
+				og.drawImage(T, ox, oy, tw, th);
+				og.globalCompositeOperation = 'source-over';
+			}
+			og.globalAlpha = 1;
+		}
+		og.globalCompositeOperation = 'lighter';
+		s.bolts = s.bolts.filter(b => (b.age += dt) < b.life);
+		const cw = imgs.p_bolts.width / 4, chh = imgs.p_bolts.height / 2;
+		for (const b of s.bolts) {
+			og.globalAlpha = (1 - b.age / b.life) * (.7 + .3 * Math.sin(b.age * 90 + b.ph));
+			og.save(); og.translate(b.cx, -BOLT.top * H); if (b.flip) og.scale(-1, 1);
+			og.drawImage(imgs.p_bolts, (b.cell % 4) * cw, Math.floor(b.cell / 4) * chh, cw, chh, -BOLT.w * H / 2, 0, BOLT.w * H, BOLT.h * H);
+			og.restore();
+		}
+		if (s.flash > 0) { og.globalAlpha = .4 * s.flash; og.drawImage(tinted('p_soft', [110, 140, 255]), s.flashX - H * 2.5, H * .5 - H * 1.5, H * 5, H * 3); }
+		s.flash = Math.max(0, s.flash - dt * 5);
+		if (casting && fillW > 2) {
+			og.globalAlpha = .25 + .2 * (s.roll(this.clock * 6) + 1) / 2 + (Math.random() < .08 ? .3 : 0);
+			og.drawImage(tinted('edge_h', [150, 180, 255]), fillW - H * 1.2, 0, H * 1.2, H);
+		}
+		og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
+	}
+
+	// ---- alchemy (as Effects.lua): a bench of glassware on the bar, the potion travelling through it into the trough
+	makeAlchemy() {
+		const W = settings.W, H = settings.H, m = H * .7;
+		const n = Math.max(6, Math.min(10, Math.floor((W - 2 * m) / (H * 1.05)) + 1)), Z = (W - 2 * m) / (n - 1), S = Math.min(H, Z * .92);
+		const pal = pick(ALCH_PALETTES), shuffle = ALCH_SHUFFLE.slice().sort(() => Math.random() - .5);
+		const a = this.alch = { n, Z, S, tw: Math.max(1.8, S * .075), pal, st: [], links: [] };
+		for (let i = 0; i < n; i++) {
+			const kind = i === 0 ? 'boil' : shuffle[(i - 1) % shuffle.length], K = ALCH_KINDS[kind];
+			const x = m + Z * i + (i > 0 && i < n - 1 ? rand(-.06, .06) * Z : 0);
+			a.st.push({ kind, K, x, col: palAt(pal, i / (n - 1)), seed: rand(0, 99), lit: i === 0,
+				inX: x + K.inn[0] * S, inY: H + K.inn[1] * S, outX: x + K.out[0] * S, outY: H + K.out[1] * S });
+		}
+		for (let i = 0; i < n - 1; i++) {
+			const A = a.st[i], B = a.st[i + 1], top = Math.max(A.outY, B.inY) + H * rand(.14, .28);
+			let kind = A.kind === 'retort' ? 'retort' : A.outY < B.inY - S * .3 ? pick(['hose', 'elbow']) : pick(['glass', 'glass', 'elbow', 'hose']);
+			const bez = (x0, y0, x1, y1, x2, y2, x3, y3) => Array.from({ length: LINK_SEGS + 1 }, (_, k) => { const t = k / LINK_SEGS, u = 1 - t;
+				return [u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3, u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3]; });
+			let pts;
+			if (kind === 'retort') pts = bez(A.outX, A.outY, A.outX + Math.cos(.75) * S * .35, A.outY + Math.sin(.75) * S * .35, B.inX, top, B.inX, B.inY);
+			else if (kind === 'glass') pts = bez(A.outX, A.outY, A.outX + Z * .1, top, B.inX - Z * .1, top, B.inX, B.inY);
+			else if (kind === 'elbow') {
+				const r = S * .15, sg = B.inX > A.outX ? 1 : -1, px = [A.outX, A.outX, A.outX + sg * r, B.inX - sg * r, B.inX, B.inX], py = [A.outY, top - r, top, top, top - r, B.inY];
+				const cum = [0]; for (let j = 1; j < 6; j++) cum.push(cum[j - 1] + Math.hypot(px[j] - px[j - 1], py[j] - py[j - 1]));
+				pts = Array.from({ length: LINK_SEGS + 1 }, (_, k) => { const d = cum[5] * k / LINK_SEGS; let j = 1; while (j < 5 && cum[j] < d) j++;
+					const t = (d - cum[j - 1]) / Math.max(1e-6, cum[j] - cum[j - 1]); return [px[j - 1] + (px[j] - px[j - 1]) * t, py[j - 1] + (py[j] - py[j - 1]) * t]; });
+			} else {
+				const lift = A.outY - H < S * .5 ? S * .1 : -S * .45;
+				pts = bez(A.outX, A.outY, A.outX + Z * .25, A.outY + lift, B.inX - Z * .3, top + S * .1, B.inX, B.inY);
+			}
+			const cum = [0]; for (let k = 1; k <= LINK_SEGS; k++) cum.push(cum[k - 1] + Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]));
+			a.links.push({ kind, pts, cum, valve: kind !== 'hose' && Math.random() < .45 });
+		}
+		// the trough
+		const N = Math.max(40, Math.min(200, Math.ceil(W / 4)));   // a column every 4 pixels (Effects.lua MakeAlchemy)
+		Object.assign(a, { N, dx: W / N, h: new Float32Array(N), q: new Float32Array(N + 1), hs: new Float32Array(N), tmp: new Float32Array(N + 1), drops: [], rings: [], bubbles: [], dripT: rand(.1, .3), bubT: 0 });
+		// one tinted copy of the column texture per trough column, side by side (the addon tints each column)
+		const col = imgs.alch_column, body = document.createElement('canvas'); body.width = N; body.height = col.height;
+		const bg = body.getContext('2d');
+		// the column's exact colour along the palette (the game's vertex colour), not the tint cache's 8-step one: those
+		// steps showed as fine vertical lines between neighbouring columns
+		for (let i = 0; i < N; i++) bg.drawImage(col, 0, 0, 1, col.height, i, 0, 1, col.height);
+		bg.globalCompositeOperation = 'multiply';
+		for (let i = 0; i < N; i++) { bg.fillStyle = rgba(palAt(pal, (i + .5) / N), 1); bg.fillRect(i, 0, 1, col.height); }
+		bg.globalCompositeOperation = 'source-over';
+		a.body = body;
+	}
+	alchBell(x, amount, sig) {
+		const a = this.alch; let sum = 0;
+		for (let i = 0; i < a.N; i++) sum += Math.exp(-((((i + .5) * a.dx - x) / sig) ** 2));
+		if (sum > 0) for (let i = 0; i < a.N; i++) a.h[i] = Math.max(0, a.h[i] + amount * Math.exp(-((((i + .5) * a.dx - x) / sig) ** 2)) / sum / a.dx);
+	}
+	alchStep(dt, H) {
+		const a = this.alch, { N, dx, h, q, tmp } = a, W = settings.W, G = 120 * Math.max(H, 40), damp = 1.2, STEP = 1 / 480;
+		for (let t = Math.min(dt, .05); t > 1e-6; t -= STEP) {
+			const d = Math.min(t, STEP);
+			for (let i = 1; i < N; i++) q[i] = (q[i] + d * G * ((h[i - 1] + h[i]) / 2) * (h[i - 1] - h[i]) / dx) * (1 - damp * d);
+			q[0] = q[N] = 0;
+			for (let i = 1; i < N; i++) tmp[i] = q[i] + .25 * (q[i - 1] - 2 * q[i] + q[i + 1]);
+			for (let i = 1; i < N; i++) q[i] = tmp[i];
+			for (let i = 0; i < N; i++) { const out = (Math.max(0, q[i + 1]) + Math.max(0, -q[i])) * d / dx; if (out > h[i] && out > 0) { const k = h[i] / out; if (q[i + 1] > 0) q[i + 1] *= k; if (q[i] < 0) q[i] *= k; } }
+			for (let i = 0; i < N; i++) h[i] = Math.max(0, h[i] + d * (q[i] - q[i + 1]) / dx);
+		}
+		for (let i = 0; i < N; i++) tmp[i] = (h[Math.max(0, i - 1)] + 2 * h[i] + h[Math.min(N - 1, i + 1)]) / 4;
+		for (let i = 0; i < N; i++) {
+			a.hs[i] = (tmp[Math.max(0, i - 1)] + 2 * tmp[i] + tmp[Math.min(N - 1, i + 1)]) / 4;
+			if (a.hs[i] >= H * .04) { const x = (i + .5) * dx; a.hs[i] += H * .06 * (Math.exp(-x / (H * .08)) + Math.exp(-(W - x) / (H * .08))); }
+		}
+	}
+	alchSurf(x) { const a = this.alch; return a.hs[Math.max(0, Math.min(a.N - 1, Math.floor(x / a.dx)))]; }
+	// inside the bar (og, bar pixels, y down)
+	drawAlchFill(og, fillW, H, dt) {
+		const a = this.alch, W = settings.W, casting = this.state === 'cast', p = fillW / W;
+		const xs = Math.max(H * .15, Math.min(W - H * .15, fillW - H * .12));
+		let vol = 0; for (let i = 0; i < a.N; i++) vol += a.h[i] * a.dx;
+		const target = W * H * 1.04 * p * p;
+		if (target > vol) this.alchBell(xs, Math.min(target - vol, W * H * 2.5 * dt + 1), H * .45);
+		this.alchStep(dt, H);
+		a.dripT -= dt;
+		if (casting && fillW > H * .2 && a.dripT <= 0 && a.drops.length < 6) { a.dripT = rand(.25, .5); const x = xs + rand(-.08, .08) * H; a.drops.push({ x, y: H, vy: H * rand(.4, 1), c: palAt(a.pal, x / W) }); }
+		a.drops = a.drops.filter(d => {
+			d.vy += H * 14 * dt; d.y -= d.vy * dt;
+			const sy = this.alchSurf(d.x);
+			if (d.y > sy) return true;
+			const i = Math.max(0, Math.min(a.N - 1, Math.floor(d.x / a.dx))), k = Math.min(a.h[i] * .3, H * .03) * H * .3;
+			this.alchBell(d.x, -k, H * .1); this.alchBell(d.x, k, H * .3);
+			if (a.rings.length < 8) a.rings.push({ x: d.x, age: 0 });
+			for (let j = 0; j < 3; j++) this.spawn(P({ t: 'p_soft', color: [lighter(d.c, .5)], size: [.02, .035], life: [.25, .4], vx: [-17, 17], vy: [-28, -11], gravity: 280 }), d.x, H - sy);
+			return false;
+		});
+		a.bubT -= dt;
+		if (a.bubT <= 0) {
+			a.bubT = rand(.015, .045) * 300 / W;
+			const i = Math.floor(rand(0, a.N));
+			if (a.hs[i] > H * .25 && a.bubbles.length < 24) a.bubbles.push({ x: (i + .5) * a.dx, y: rand(0, .1) * H, r: H * rand(.015, .035), ph: rand(0, 6.283) });
+		}
+		a.bubbles = a.bubbles.filter(b => {
+			b.y += H * .7 * dt; b.x += Math.sin(this.clock * 6 + b.ph) * H * .08 * dt;
+			if (b.y < this.alchSurf(b.x) - b.r) return true;
+			this.spawn(P({ t: 'p_soft', color: [[255, 255, 255]], size: [.02, .04], life: [.25, .45], vx: [-3, 3], vy: [-18, -10], alpha: .7 }), b.x, H - this.alchSurf(b.x));
+			return false;
+		});
+		// the columns: the simulated level with small, slow travelling ripples; each column shows the rows of
+		// alch_column at its height in the bar, so neighbours match (no vertical lines), and they are opaque
+		const bh = a.body.height, ys = a.ys || (a.ys = new Float32Array(a.N));
+		for (let i = 0; i < a.N; i++) {
+			const d = a.hs[i], x = (i + .5) * a.dx, calm = clamp01(d / (H * .12)) * clamp01((H - d) / (H * .15));
+			const y = Math.min(H, d + calm * (Math.sin(x / (H * .5) - this.clock * 2.6) * H * .02 + Math.sin(x / (H * .21) + this.clock * 4.3) * H * .01 + Math.sin(x / (H * .9) + this.clock * 1.3) * H * .015));
+			ys[i] = y;
+			if (y < .5) continue;
+			og.globalAlpha = 1;
+			// on whole pixels, overlapping the next column by one (the game snaps the columns to the pixel grid), and sampled
+			// without smoothing so the neighbouring columns' colours don't bleed into this one's edges: no seams
+			const x0 = Math.round(i * a.dx), x1 = Math.round((i + 1) * a.dx) + 1;
+			og.imageSmoothingEnabled = false;
+			og.drawImage(a.body, i, bh * (1 - y / H), 1, Math.max(1, bh * y / H), x0, H - y, x1 - x0, y);
+			og.imageSmoothingEnabled = true;
+		}
+		// the surface: one continuous line over the tops (Effects.lua: Line segments every few columns), under it a
+		// soft band of light (the alch_band Line texture: brightest along its middle, fading to both edges; here
+		// stacked strokes) so a thin layer is as bright as a deep one, as the concept
+		// Drawn as one polyline per stroke with the palette as a gradient along it (the game's Lines abut end to end with
+		// no caps), so no stroke ends overlap at the joints: those showed as faint ticks along the band.
+		const step = Math.max(1, Math.round(H * .3 / a.dx), Math.ceil(a.N / 80)), bw = Math.max(2, H * .18), band = bw / 2 - H * .01;
+		const path = dy => {   // the surface's polyline through the segment ends, broken where the trough is dry
+			og.beginPath();
+			let pen = false;
+			for (let k = 0; k * step <= a.N - 1; k++) {
+				const i = Math.min(a.N - 1, k * step), x = i === 0 ? 0 : i >= a.N - 1 ? W : (i + .5) * a.dx;
+				if (ys[i] < 1) { pen = false; continue; }
+				if (pen) og.lineTo(x, H - ys[i] + dy); else og.moveTo(x, H - ys[i] + dy);
+				pen = true;
+			}
+		};
+		const grad = light => {
+			const gr = og.createLinearGradient(0, 0, W, 0);
+			for (let k = 0; k <= 8; k++) gr.addColorStop(k / 8, rgba(lighter(palAt(a.pal, k / 8), light), 1));
+			return gr;
+		};
+		og.lineCap = 'butt'; og.lineJoin = 'round';
+		og.strokeStyle = grad(.55);
+		for (let j = 0; j < 4; j++) {
+			og.globalAlpha = .55 * .32; og.lineWidth = bw * (1 - j * .22);
+			path(band); og.stroke();
+		}
+		og.globalAlpha = .85; og.strokeStyle = grad(.85); og.lineWidth = Math.max(1, H * .025);
+		path(.5); og.stroke();
+		og.lineCap = 'round';
+		og.globalAlpha = 1;
+		og.globalCompositeOperation = 'lighter';
+		for (const d of a.drops) og.drawImage(tinted('p_ember', lighter(d.c, .35)), d.x - H * .035, H - d.y - H * .05, H * .07, H * .1);
+		a.rings = a.rings.filter(r => (r.age += dt) < .6);
+		for (const r of a.rings) { const k = r.age / .6, rx = H * (.08 + .5 * k); og.globalAlpha = .45 * (1 - k); og.drawImage(imgs.p_ripple, r.x - rx, H - this.alchSurf(r.x) + 1 - rx * .22, rx * 2, rx * .44); }
+		og.globalAlpha = .5;
+		for (const b of a.bubbles) og.drawImage(imgs.p_ripple, b.x - b.r, H - b.y - b.r, b.r * 2, b.r * 2);
+		og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
+		og.fillStyle = 'rgba(255,255,255,.12)'; og.fillRect(0, H * .07, W, Math.max(1, H * .04));   // the glass front's gloss (Effects.lua trough.gloss)
+	}
+	// on the bar, over its frame line (the addon's tools frame): the glassware, tubes and burners
+	drawAlchTools(g, ox, oy, fillW, H, dt) {
+		const a = this.alch, S = a.S, X = fillW, d = a.Z * .38, p = fillW / settings.W, casting = this.state === 'cast', tw = a.tw;
+		const Y = y => oy + H - y;   // bar pixels (y up) to the canvas
+		// the links first, under the glass
+		g.lineCap = 'round';
+		a.links.forEach((L, i) => {
+			const A = a.st[i], B = a.st[i + 1], f = clamp01((X - A.x - d) / (B.x - A.x - d)), reach = f * L.cum[LINK_SEGS];
+			const hose = L.kind === 'hose';
+			const stroke = (col, al, w, to) => { g.strokeStyle = rgba(col, al); g.lineWidth = Math.max(.6, w); g.beginPath();
+				g.moveTo(ox + L.pts[0][0], Y(L.pts[0][1]));
+				for (let k = 1; k <= LINK_SEGS; k++) { if (L.cum[k] <= to) g.lineTo(ox + L.pts[k][0], Y(L.pts[k][1])); else { const t = (to - L.cum[k - 1]) / Math.max(1e-6, L.cum[k] - L.cum[k - 1]);
+					g.lineTo(ox + L.pts[k - 1][0] + (L.pts[k][0] - L.pts[k - 1][0]) * t, Y(L.pts[k - 1][1] + (L.pts[k][1] - L.pts[k - 1][1]) * t)); break; } }
+				g.stroke(); };
+			if (hose) { stroke([120, 52, 24], .95, tw * 1.3, 1e9); stroke([200, 110, 60], .35, tw * .9, 1e9); }
+			else { stroke([205, 235, 255], .6, tw, 1e9); stroke([8, 12, 20], .65, tw * .62, 1e9); }
+			if (reach > 0) {
+				const mid = A.col.map((c, j) => (c + B.col[j]) / 2);
+				stroke(mid, hose ? .6 : 1, tw * .56, reach);
+				if (f < 1 && casting) {
+					let k = 1; while (k < LINK_SEGS && L.cum[k] < reach) k++;
+					const t = (reach - L.cum[k - 1]) / Math.max(1e-6, L.cum[k] - L.cum[k - 1]), hx = L.pts[k - 1][0] + (L.pts[k][0] - L.pts[k - 1][0]) * t, hy = L.pts[k - 1][1] + (L.pts[k][1] - L.pts[k - 1][1]) * t;
+					g.globalCompositeOperation = 'lighter'; g.globalAlpha = .9;
+					g.drawImage(tinted('p_soft', lighter(mid, .3)), ox + hx - tw * 2.4, Y(hy) - tw * 2.4, tw * 4.8, tw * 4.8);
+					g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+				}
+			}
+			if (L.valve) { const m = L.pts[Math.floor(LINK_SEGS / 2)], s = tw * 2.8, open = f > .45 ? 1 : 0; g.drawImage(imgs.p_valve, open * 32, 0, 32, 32, ox + m[0] - s / 2, Y(m[1]) - s / 2, s, s); }
+		});
+		// the stations
+		const gl = imgs.alch_glass, cw = gl.width / 4, ch = gl.height / 2;
+		a.st.forEach((st, i) => {
+			const f = i === 0 ? 1 : clamp01((X - st.x) / d), heat = i === 0 ? 1 : clamp01((X - st.x) / (H * .35));
+			if (!st.lit && X > st.x) { st.lit = true; for (let j = 0; j < 7; j++) this.spawn(P({ t: 'p_soft', color: [lighter(st.col, .4)], size: [.04, .08], life: [.4, .8], vx: [-25, 25], vy: [-40, -8], gravity: 70 }), st.inX, H - st.inY); }
+			const k = st.kind; let lv = [];
+			if (k === 'boil') lv = [.8 - .4 * p]; else if (k === 'retort') lv = [.72 * f]; else if (k === 'cyl') lv = [.85 * f]; else if (k === 'erlen') lv = [.7 * f];
+			else if (k === 'funnel') { const ff = Math.min(1, f * 1.6); lv = [Math.max(0, .85 * ff - clamp01(f * 1.6 - .6) * .6), .82 * clamp01((f - .35) / .65)];
+				if (casting && f > .35 && f < 1 && Math.random() < dt * 6) this.spawn(P({ t: 'p_soft', color: [lighter(st.col, .2)], size: [.04, .05], life: [.2, .3], vx: [0, 0], vy: [10, 20], gravity: 300 }), st.x, -.55 * S); }
+			else if (k === 'rack') lv = [.8 * f]; else lv = [f];
+			const cx = (st.K.cell % 4) * cw, cy = Math.floor(st.K.cell / 4) * ch, left = ox + st.x - CELL.w * S / 2;
+			st.K.zones.forEach((z, j) => {
+				const l = lv[j]; if (!(l > .005)) return;
+				let lo = z[0], hi = z[0] + l * (z[1] - z[0]);
+				if (z[2] === 'fall') { lo = z[1] - l * (z[1] - z[0]); hi = z[1]; }
+				const sy = ch * (CELL.h - hi) / CELL.h, sh = ch * (hi - lo) / CELL.h;
+				g.globalAlpha = .92;
+				g.drawImage(tinted('alch_liquid', q8(st.col)), cx, cy + sy, cw, Math.max(1, sh), left, Y(H + hi * S), CELL.w * S, (hi - lo) * S);
+				g.globalAlpha = 1;
+			});
+			g.drawImage(gl, cx, cy, cw, ch, left, Y(H + CELL.h * S), CELL.w * S, CELL.h * S);
+			if (st.K.burner !== undefined && heat > .02) {
+				const bx = st.x + st.K.burner * S + (Math.sin(this.clock * 9 + st.seed) * .2 + Math.sin(this.clock * 23 + st.seed * 3) * .08) * S * .04;
+				const fh = .21 * S * heat * (.86 + .14 * Math.sin(this.clock * 31 + st.seed * 7));
+				g.globalCompositeOperation = 'lighter';
+				g.drawImage(imgs.p_flame, ox + bx - .1 * S, Y(H + .122 * S) - fh, .2 * S, fh);
+				g.globalCompositeOperation = 'source-over';
+				if (casting && heat > .5 && Math.random() < dt * 3) this.spawn(P({ t: 'p_soft', color: [lighter(st.col, .5)], size: [.04, .07], grow: [.02, .04], life: [.7, 1.2], vx: [-4, 4], vy: [-20, -10], alpha: .45 }), st.inX, H - st.inY - H * .05);
+				if (casting && Math.random() < dt * 8 * heat) this.spawn(P({ t: 'p_soft', color: [[255, 255, 255]], size: [.02, .04], life: [.25, .45], vx: [-3, 3], vy: [-18, -10], alpha: .7 }), st.x + st.K.burner * S + rand(-.12, .12) * S, -(st.K.zones[0][0] + .06) * S);
+			}
+		});
+	}
+
+	// ---- tailoring (as Effects.lua): the loom. One pick of the weave: the shuttle crosses the shed, the reed packs the
+	// weft in, the shed changes; the cloth changes every cast in turn
+	makeTailor() {
+		clothTurn = (clothTurn + 1) % CLOTHS.length;
+		const cl = CLOTHS[clothTurn], H = settings.H, W = settings.W, tails = [];
+		this.trackTint = { fur: cl.base, tips: lighter(cl.base, .18) };
+		this.layerTint = lighter(cl.base, .2);   // the strands' lit crowns run lighter than the cloth's colour (Effects.lua MakeTailor)
+		for (let x = H * .6; x < W && tails.length < 24; x += H * rand(1.2, 2.6)) tails.push({ x, top: Math.random() < .5, len: rand(.12, .24), curl: Math.random() < .5 });
+		this.tailor = { cl, period: rand(.38, .5), pickT: 0, fresh: 0, sheenPh: Math.random(), tails, endAt: null };
+	}
+	tailorPick(dt, fillW, H) {
+		const s = this.tailor, per = s.period;
+		if (this.state === 'cast') {
+			const before = (s.pickT % per) / per; s.pickT += dt; const after = (s.pickT % per) / per;
+			if (before < .725 && after >= .725 && fillW > H * .3) {   // the beat: fluff flies
+				s.fresh = 1;
+				for (let i = 0; i < 5; i++) this.spawn(P({ t: 'p_soft', color: [lighter(s.cl.weft, .55)], size: [.015, .035], life: [.5, 1.1], vx: [8, 26], vy: [-28, -6], gravity: 8, alpha: .6 }), fillW + rand(0, .1) * H, rand(.1, .9) * H);
+			}
+		}
+		s.fresh = Math.max(0, s.fresh - dt * 3);
+		const u = (s.pickT % per) / per, k = Math.floor(s.pickT / per), down = k % 2 === 0;
+		const yTop = -H * SHED_REACH, yBot = H * (1 + SHED_REACH), f = smooth01(u / .55);   // y down
+		const sy = s.pickT <= 0 ? yTop : down ? yTop + (yBot - yTop) * f : yBot + (yTop - yBot) * f;
+		const bump = u > .6 && u < .85 ? Math.sin(Math.PI * (u - .6) / .25) : 0, sign = down ? 1 : -1;
+		const shed = u < .85 ? sign : sign - 2 * sign * smooth01((u - .85) / .15);
+		return { sy, from: down ? 0 : H, sx: fillW + H * .18, bx: fillW + H * .4 - bump * H * .3, shed };
+	}
+	// inside the fill: the beaten fell, its fresh brightening, the sheen, light along the crown, shade behind the name
+	drawTailorFill(og, fillW, H, dt) {
+		const s = this.tailor, W = settings.W, L = this.L = this.tailorPick(dt, fillW, H);
+		og.fillStyle = 'rgba(0,0,0,.25)'; og.fillRect(fillW - H * .04, 0, H * .04, H);
+		og.save(); og.globalCompositeOperation = 'lighter';
+		og.globalAlpha = .22 * s.fresh; og.drawImage(tinted('edge_h', [255, 245, 224]), fillW - H * .5, 0, H * .5, H);
+		const cx = (this.clock * H * 1.1 + s.sheenPh * W) % (W + H * 6) - H * 3;
+		og.globalAlpha = s.cl.sheen; og.drawImage(imgs.sweep, cx - H * 1.6, 0, H * 3.2, H);
+		og.globalAlpha = s.cl.sheen * .5; og.drawImage(imgs.alch_band, 0, H * .255, W, H * .25);
+		og.restore();
+		og.save(); og.globalAlpha = .28; og.translate(Math.min(W, H * 4), 0); og.scale(-1, 1);
+		og.drawImage(tinted('edge_h', [0, 0, 0]), 0, 0, Math.min(W, H * 4), H); og.restore();
+	}
+	// on the track just past the fell: the threads parting one way, then (flipped) the other
+	drawShed(og, fillW, H) {
+		const L = this.L, s = this.tailor, sw = Math.min(H, settings.W - fillW);
+		if (!L || sw < .5 || fillW < .5) return;
+		const img = tinted('tail_shed', s.cl.base);
+		for (let i = 0; i < 2; i++) {
+			const a = i === 0 ? Math.max(0, L.shed) : Math.max(0, -L.shed);
+			if (a < .01) continue;
+			og.save(); og.globalAlpha = a;
+			if (i) { og.translate(0, H); og.scale(1, -1); }
+			og.drawImage(img, 0, 0, 64 * sw / H, 64, fillW, 0, sw, H);
+			og.restore();
+		}
+		og.globalAlpha = 1;
+	}
+	// over the frame line, clipped to the bar (as Effects_Tailor.lua's clip frame): the loose weft ends, the weft, the
+	// shuttle with its pirn, the reed
+	drawTailorTools(g, ox, oy, fillW, H) {
+		const s = this.tailor, L = this.L, cl = s.cl;
+		if (!L) return;
+		if (this.state !== 'cast') s.endAt = s.endAt ?? this.clock;
+		const ta = s.endAt === null ? 1 : Math.max(0, 1 - (this.clock - s.endAt) * 2.2);
+		g.save(); g.beginPath(); g.rect(ox, oy, settings.W, H); g.clip();
+		const tail = tinted('p_tail', lighter(cl.weft, .15));
+		for (const q of s.tails) {
+			if (q.x > fillW - H * .15) continue;
+			const k = q.len / .15, sz = H * .2 * k;
+			g.save(); g.translate(ox + q.x, oy + (q.top ? H * .04 * k : H - H * .04 * k)); g.scale(q.curl ? -1 : 1, q.top ? 1 : -1);
+			g.drawImage(tail, -sz / 2, -sz, sz, sz); g.restore();
+		}
+		if (fillW >= .5 && ta > 0) {
+			g.globalAlpha = ta;
+			const syc = clamp01(L.sy / H) * H, lw = Math.max(1, H * .034);   // the weft from where this pick entered the shed to the shuttle
+			g.lineCap = 'round'; g.lineJoin = 'round';
+			g.strokeStyle = rgba(cl.weft, 1); g.lineWidth = lw;
+			g.beginPath(); g.moveTo(ox + fillW, oy + L.from); g.lineTo(ox + fillW + H * .1, oy + syc); g.lineTo(ox + L.sx, oy + L.sy); g.stroke();
+			g.strokeStyle = rgba(lighter(cl.weft, .35), .7); g.lineWidth = lw * .35;
+			g.beginPath(); g.moveTo(ox + fillW - lw * .2, oy + L.from); g.lineTo(ox + fillW + H * .1 - lw * .2, oy + syc); g.lineTo(ox + L.sx - lw * .2, oy + L.sy); g.stroke();
+			// the shuttle (.4 x .8 bar heights, .6 long inside), its pirn (.2 x .8) and the reed (.2 x 1.6, the bar's top .3 down it)
+			g.drawImage(imgs.p_shuttle, ox + L.sx - H * .2, oy + L.sy - H * .4, H * .4, H * .8);
+			g.drawImage(tinted('p_pirn', lighter(cl.weft, .2)), ox + L.sx - H * .1, oy + L.sy - H * .4, H * .2, H * .8);
+			g.drawImage(imgs.p_reed, ox + L.bx - H * .1, oy - H * .3, H * .2, H * 1.6);
+			g.globalAlpha = 1;
+		}
+		g.restore();
+	}
+
+	// ---- leatherworking (as Effects.lua): tooled panels apart by the gaps still open, laced shut joint by joint
+	makeLeather() {
+		const H = settings.H, W = settings.W, joints = [], tints = [], ys = [];
+		toolingTurn = (toolingTurn + 1) % 5;
+		const rows = H >= 34 ? 5 : 4;
+		for (let x = H * rand(1.3, 2); x < W - H * .9 && joints.length < 20; x += H * rand(1.8, 3)) joints.push(x);
+		for (let i = 0; i <= joints.length; i++) tints.push(rand(-.14, .12));
+		for (let r = 0; r < rows; r++) ys.push(H * (.18 + .64 * r / (rows - 1)));   // the lacing rows, y down
+		this.leather = { tone: pick(TONES), thread: pick(THREADS), thong: pick(THONGS), rows, joints, tints, ys, tool: toolingTurn + 1 };
+		this.lwTool = null;
+	}
+	drawLeatherFill(og, fillW, H) {
+		const s = this.leather, W = settings.W, J = s.joints, rows = s.rows, ys = s.ys;
+		const lp = j => clamp01((fillW - J[j]) / (H * .9)), openG = j => H * .14 * (1 - easeOut(lp(j)));
+		og.fillStyle = 'rgba(12,7,4,.96)'; og.fillRect(0, 0, W, H);
+		const lea = tinted('lw_leather', q8(s.tone.map(v => Math.min(255, v / LEATHER_NOM)))), tool = imgs['lw_tool' + s.tool];
+		const hole = imgs.p_hole, edge = tinted('edge_h', [36, 18, 6]);
+		let off = 0; const offs = [];
+		for (let p = 0; p <= J.length; p++) {
+			const a = p ? J[p - 1] : 0, b = p < J.length ? J[p] : W, x0 = a + off, w = b - a;
+			offs.push(off);
+			og.save(); og.beginPath(); og.rect(x0, 0, w, H); og.clip();
+			for (let tx = off - (a % (8 * H)) - 8 * H; tx < x0 + w; tx += 8 * H) if (tx + 8 * H > x0) og.drawImage(lea, tx, 0, 8 * H, H);   // its stretch of the tiling hide
+			const v = s.tints[p];
+			og.fillStyle = v > 0 ? `rgba(255,238,214,${v})` : `rgba(30,14,4,${-v})`; og.fillRect(x0, 0, w, H);
+			const ix0 = x0 + (p ? H * .24 : H * .18), ix1 = x0 + w - (p < J.length ? H * .24 : H * .18);
+			if (ix1 - ix0 > H * .4) {   // the tooling, in the middle band, clear of the holes and the edge stitching
+				og.save(); og.beginPath(); og.rect(ix0, H * .15, ix1 - ix0, H * .7); og.clip();
+				for (let tx = ix0; tx < ix1; tx += 2 * H) og.drawImage(tool, 0, 128 * .15, 256, 128 * .7, tx, H * .15, 2 * H, H * .7);
+				og.restore();
+			}
+			og.globalAlpha = .7;
+			if (p) { og.save(); og.translate(x0 + H * .08, 0); og.scale(-1, 1); og.drawImage(edge, 0, 0, H * .08, H); og.restore(); }
+			if (p < J.length) og.drawImage(edge, x0 + w - H * .08, 0, H * .08, H);
+			og.globalAlpha = 1;
+			for (let r = 0; r < rows; r++) {
+				if (p) og.drawImage(hole, x0 + H * .05, ys[r] - H * .05, H * .1, H * .1);
+				if (p < J.length) og.drawImage(hole, x0 + w - H * .15, ys[r] - H * .05, H * .1, H * .1);
+			}
+			og.restore();
+			if (p < J.length) off += openG(p);
+		}
+		const sh = og.createLinearGradient(0, 0, 0, H);
+		sh.addColorStop(0, 'rgba(255,240,220,.1)'); sh.addColorStop(.3, 'rgba(255,240,220,0)'); sh.addColorStop(1, 'rgba(0,0,0,.18)');
+		og.fillStyle = sh; og.fillRect(0, 0, W, H);
+		// running stitches along both long edges, behind the work
+		let done = fillW - H * .2;
+		for (let j = 0; j < J.length; j++) if (lp(j) < 1) { done = Math.min(done, J[j] + offs[j]); break; }
+		if (done > 1) {
+			const st = tinted('lw_stitch', s.thread);
+			for (const y of [H * .07, H * .93]) {
+				og.save(); og.beginPath(); og.rect(0, y - H * .05, done, H * .1); og.clip();
+				for (let x = 0; x < done; x += H * .2) og.drawImage(st, x, y - H * .05, H * .2, H * .1);
+				og.restore();
+			}
+		}
+		// the joints: the needle cross-laces each shut as the cast reaches it
+		this.lwTool = null;
+		const segs = (rows - 1) * 2, lw = Math.max(1.4, H * .06);
+		og.lineCap = 'round';
+		for (let j = 0; j < J.length; j++) {
+			const f0 = lp(j);
+			if (f0 <= 0) continue;
+			const L = J[j] + offs[j], R = L + openG(j), xl = L - H * .1, xr = R + H * .1, n = f0 * segs;
+			for (let q = 0; q < Math.min(segs, Math.ceil(n)); q++) {
+				const r = Math.floor(q / 2), f = Math.min(1, n - q);
+				const [x1, y1, x2, y2] = q % 2 === 0 ? [xl, ys[r], xr, ys[r + 1]] : [xr, ys[r], xl, ys[r + 1]];
+				const ex = x1 + (x2 - x1) * f, ey = y1 + (y2 - y1) * f;
+				og.strokeStyle = rgba(s.thong, 1); og.lineWidth = lw;
+				og.beginPath(); og.moveTo(x1, y1); og.lineTo(ex, ey); og.stroke();
+				og.strokeStyle = rgba(lighter(s.thong, .5), .45); og.lineWidth = lw * .3;
+				og.beginPath(); og.moveTo(x1, y1 - lw * .25); og.lineTo(ex, ey - lw * .25); og.stroke();
+				if (f < 1) this.lwTool = { x: ex, y: ey, dx: x2 - x1, dy: y2 - y1 };
+			}
+		}
+	}
+	// over the frame line: the needle at the lace's end, in the nearest painted pose, flipped for down-left
+	drawLeatherTools(g, ox, oy, fillW, H) {
+		const T = this.lwTool;
+		if (!T || this.state !== 'cast') return;
+		const d = Math.hypot(T.dx, T.dy) || 1, ux = T.dx / d, uy = T.dy / d, ex = T.x - ux * H * .08, ey = T.y - uy * H * .08;
+		const ang = Math.atan(Math.abs(uy) / Math.max(.01, Math.abs(ux)));
+		const pose = Math.max(0, Math.min(NEEDLE.poses - 1, Math.round((ang - NEEDLE.ang[0]) / (NEEDLE.ang[NEEDLE.poses - 1] - NEEDLE.ang[0]) * (NEEDLE.poses - 1))));
+		const cell = imgs.p_needle.width / 2, sx = (pose % 2) * cell + .5, sy = Math.floor(pose / 2) * cell + .5;
+		g.save(); g.translate(ox + ex, oy + ey); if (ux < 0) g.scale(-1, 1);
+		g.drawImage(imgs.p_needle, sx, sy, cell - 1, cell - 1, -NEEDLE.ox * H, -NEEDLE.oy * H, NEEDLE.span * H, NEEDLE.span * H);
+		g.restore();
+	}
+
+	// ---- plain (as Effects.lua): Blizzard's cast bar; a stand-in here, since the browser can't load Blizzard's atlases
+	drawPlainFill(og, fillW, H) {
+		const ch = this.cur.plain === 'channel', done = this.state === 'done', broken = this.state === 'interrupted';
+		const gr = og.createLinearGradient(0, 0, 0, H);
+		const c = broken ? [[220, 60, 50], [150, 20, 15]] : ch ? [[110, 230, 90], [30, 140, 30]] : [[255, 215, 70], [205, 120, 10]];
+		const k = done ? .25 : 0;
+		gr.addColorStop(0, rgba(c[0].map(v => v + (255 - v) * k), 1)); gr.addColorStop(.5, rgba(c[1].map(v => v + (255 - v) * k), 1)); gr.addColorStop(1, rgba(c[1].map(v => v * .8), 1));
+		og.fillStyle = gr; og.fillRect(0, 0, fillW, H);
+		og.fillStyle = 'rgba(255,255,255,.25)'; og.fillRect(0, H * .1, fillW, Math.max(1, H * .12));
+	}
+
 	// ---- herbalism: flowers bloom on the vines (drawn with the leaves)
 	addFlower(v, x, y) {
 		v.leaves.push({ x, y, flower: true, size: settings.H * rand(.35, .55), born: this.clock, d: Math.cos(v.ph), tint: pick(FLOWER_TINTS), rot: rand(0, 6.283) });
@@ -730,6 +1366,147 @@ class Bar {
 	}
 
 	// ---- particles
+	// ---- enchanting / disenchant (as Effects.lua): the velvet tinted to a palette, the flow, glitter, the vortex and its dust
+	makeEnch() {
+		const H = settings.H, W = settings.W, pal = pick(ENCH_PALETTES), dis = !!this.cfg.ench.disenchant;
+		const top = q8(pal.deep.map((v, i) => Math.min(255, (v + (pal.main[i] - v) * .18) / VELVET_NOM)));
+		this.layerTints = [top, q8(pal.main.map((v, i) => (v + pal.acc[i]) / 2))];
+		const s = this.ench = { pal, dis, top, flowU: [Math.random(), Math.random()], glitter: [], dust: [], pull: [], thrown: [], ash: [], pullAcc: 0 };
+		for (let i = 0; i < Math.min(40, Math.floor(W / H * 10)); i++) s.glitter.push({ x: rand(0, W), y: H * rand(.1, .9), f: rand(2, 6), ph: rand(0, 6.283), r: rand(.02, .045) });
+		if (dis) for (let i = 0; i < Math.min(24, Math.floor(W / H * 8)); i++) s.ash.push({ x: rand(0, W), y: H * rand(.1, .9), f: rand(1, 3), ph: rand(0, 6.283), r: rand(.015, .03) });
+		else for (let i = 0; i < Math.min(48, Math.floor(W / H * 8)); i++) s.dust.push(this.newDust(rand(0, W)));
+	}
+	newDust(x) { const H = settings.H; return { x, y: H * rand(.1, .9), ang: rand(0, 6.283), r: rand(.025, .05), f: rand(2, 6), ph: rand(0, 6.283) }; }
+	enchVx(fillW) { return this.ench.dis ? settings.W - fillW : fillW; }
+	// inside the bar: the flow's two bands and the glitter; disenchant: the spent cloth behind the vortex, the ash
+	drawEnchFill(og, fillW, H, dt) {
+		const s = this.ench, W = settings.W, pal = s.pal, vx = this.enchVx(fillW), drain = ENCH_DRAIN * H;
+		const fresh = x => s.dis ? clamp01((vx - x) / drain) ** 1.4 : 1;
+		const strip = s.dis ? Math.max(2, H * .2) : W;
+		og.save(); og.globalCompositeOperation = 'lighter';
+		for (let k = 0; k < 2; k++) {   // the flow: band k's texture is ENCH_FLOW[k].w bar heights wide, sliding right
+			const F = ENCH_FLOW[k];
+			s.flowU[k] = (((s.flowU[k] - F.su * dt) % 1) + 1) % 1;
+			const img = tinted('ench_flow' + (k + 1), k ? pal.acc : pal.main), tw = F.w * H;
+			for (let sx = 0; sx < (s.dis ? vx : W); sx += strip) {
+				const a = .2 * fresh(sx + strip / 2);
+				if (a <= .005) continue;
+				og.save(); og.beginPath(); og.rect(sx, 0, Math.min(strip, W - sx) + .5, H); og.clip(); og.globalAlpha = a;
+				for (let x = -s.flowU[k] * tw; x < W; x += tw) og.drawImage(img, x, 0, tw, H);
+				og.restore();
+			}
+		}
+		const upTo = s.dis ? vx - drain * .3 : fillW, gl = tinted('p_soft', pal.hi);   // glitter behind the edge / well ahead of the vortex
+		for (const q of s.glitter) {
+			if (q.x > upTo) continue;
+			const sz = H * q.r * 6.6;
+			og.globalAlpha = Math.max(0, Math.sin(this.clock * q.f + q.ph)) ** 3 * .8; og.drawImage(gl, q.x - sz / 2, q.y - sz / 2, sz, sz);
+		}
+		og.restore();
+		if (!s.dis) return;
+		// the spent cloth behind the vortex: the velvet drained of colour and darkened, fading in over the drain stretch
+		const lum = Math.round((s.top[0] * .3 + s.top[1] * .59 + s.top[2] * .11) * .55), spent = tinted('ench_velvet', q8([lum, lum, lum]));
+		const dpr = window.devicePixelRatio || 1, k = H * dpr / 64;
+		og.save(); og.setTransform(1, 0, 0, 1, 0, 0);
+		og.fillStyle = pattern(og, scaled('ench_velvet|spent' + lum, k, spent), this.layerOff[0].u, 0);
+		for (let sx = Math.max(0, vx - drain); sx < W; sx += strip) {
+			const w = Math.min(strip, W - sx);
+			og.globalAlpha = 1 - fresh(sx + w / 2); og.fillRect(sx * dpr, 0, (w + .5) * dpr, H * dpr);
+		}
+		og.restore();
+		og.save(); og.globalCompositeOperation = 'lighter';
+		const ash = tinted('p_soft', [190, 190, 200]);   // a last few dull glints in the spent part
+		for (const q of s.ash) {
+			if (q.x < vx + drain * .5) continue;
+			const sz = H * q.r * 6.6;
+			og.globalAlpha = Math.max(0, Math.sin(this.clock * q.f + q.ph)) ** 4 * .25; og.drawImage(ash, q.x - sz / 2, q.y - sz / 2, sz, sz);
+		}
+		og.restore(); og.globalAlpha = 1;
+	}
+	// over the bar, clipped to it: enchanting's dust pulled into the vortex; disenchant's motes drawn out and the dust thrown behind
+	drawEnchDust(g, ox, oy, fillW, H, dt) {
+		const s = this.ench, W = settings.W, pal = s.pal, vx = this.enchVx(fillW), vy = H * .5, casting = this.state === 'cast', t = this.clock;
+		g.save(); g.beginPath(); g.rect(ox, oy, W, H); g.clip(); g.globalCompositeOperation = 'lighter';
+		const glow = tinted('p_soft', pal.main), glowAcc = tinted('p_soft', pal.acc), dot = tinted('p_dot', pal.hi);
+		const mote = (x, y, r, near, a) => {
+			const gs = H * r * 5.6, ds = H * r * 1.2;
+			g.globalAlpha = a * .6; g.drawImage(near > .3 ? glowAcc : glow, ox + x - gs / 2, oy + y - gs / 2, gs, gs);
+			g.globalAlpha = a; g.drawImage(dot, ox + x - ds / 2, oy + y - ds / 2, ds, ds);
+		};
+		if (!s.dis) {
+			for (const d of s.dust) {
+				const dx = d.x - vx, dist = Math.max(H * .2, Math.abs(dx)), pull = casting ? H * 2.8 / (dist / H + .4) : 0;
+				if (dx > 0) d.x -= pull * dt;
+				d.ang += dt * (2 + 9 / (dist / H + .3));
+				const near = clamp01(1 - dist / (H * 1.6)), y = d.y + (vy + Math.sin(d.ang) * H * .38 * (1 - near * .4) - d.y) * near;
+				mote(d.x, y, d.r, near, .25 + .55 * near * (.5 + .5 * Math.sin(t * d.f + d.ph)));
+				if (d.x < vx - H * .05) Object.assign(d, this.newDust(rand(Math.max(vx + H * .5, 0), W + H * .3)));
+			}
+		} else {
+			const drain = ENCH_DRAIN * H;
+			if (casting && vx > H * .3) {
+				s.pullAcc += dt * 34;
+				while (s.pullAcc >= 1) {
+					s.pullAcc--;
+					if (s.pull.length < 36) s.pull.push({ x: rand(Math.max(0, vx - drain), vx - H * .15), y: H * rand(.12, .88), ang: rand(0, 6.283), r: rand(.025, .05), f: rand(2, 6), ph: rand(0, 6.283) });
+				}
+			} else s.pullAcc = 0;
+			for (let i = s.pull.length - 1; i >= 0; i--) {   // motes drawn out of the drain stretch, spiralling into the vortex
+				const d = s.pull[i], dist = Math.max(H * .15, Math.abs(vx - d.x));
+				d.x += H * 2.6 / (dist / H + .35) * dt; d.ang -= dt * (2 + 9 / (dist / H + .3));
+				const near = clamp01(1 - dist / (H * 1.6)), y = d.y + (vy + Math.sin(d.ang) * H * .38 * (1 - near * .4) - d.y) * near;
+				mote(d.x, y, d.r, near, .35 + .55 * near);
+				if (d.x >= vx - H * .05 || !casting) {
+					s.pull.splice(i, 1);
+					if (casting) {   // out of the throat and flung behind: dust, a third of it shimmers (no essence orbs)
+						if (s.thrown.length >= 110) s.thrown.shift();
+						const shine = Math.random() < .35;
+						s.thrown.push({ x: vx + H * .1, y: vy + rand(-.15, .15) * H, vx: H * rand(1.4, 3.6), vy: H * rand(-1.2, 1.2), rest: H * rand(.15, .85), r: rand(.02, .045), f: shine ? rand(1.2, 3) : rand(2, 6), ph: rand(0, 6.283), shine, c: Math.random() < .5 });
+					}
+				}
+			}
+			const star = tinted('p_star', lighter(pal.hi, .3)), dotAcc = tinted('p_dot', pal.acc);
+			for (const q of s.thrown) {   // the thrown dust drifts behind, slows and settles on the spent cloth, where it glitters
+				if (!q.settled) {
+					const drag = Math.exp(-dt * 2.4);
+					q.vx *= drag; q.vy = q.vy * drag + (q.rest - q.y) * dt * 3;
+					q.x += q.vx * dt; q.y += q.vy * dt;
+					if (casting) q.x = Math.max(q.x, vx + H * (.3 + .2 * Math.sin(q.ph)));
+					if (Math.abs(q.vx) < H * .01 && Math.abs(q.vy) < H * .01 && Math.abs(q.rest - q.y) < H * .01) q.settled = true;
+				}
+				const tw = .45 + .55 * Math.max(0, Math.sin(t * q.f + q.ph));
+				if (q.shine) {   // a shimmer: mostly faint, flaring into a small star now and then
+					const gs = H * q.r * 5.2, ds = H * .14, flare = Math.max(0, Math.sin(t * q.f + q.ph)) ** 8;
+					g.globalAlpha = .12 + .3 * flare; g.drawImage(glow, ox + q.x - gs / 2, oy + q.y - gs / 2, gs, gs);
+					g.globalAlpha = .15 + .85 * flare; g.drawImage(star, ox + q.x - ds / 2, oy + q.y - ds / 2, ds, ds);
+				} else {
+					const gs = H * q.r * 5.2, ds = H * q.r * 1.1;
+					g.globalAlpha = .35 * tw; g.drawImage(glow, ox + q.x - gs / 2, oy + q.y - gs / 2, gs, gs);
+					g.globalAlpha = .85 * tw; g.drawImage(q.c ? dot : dotAcc, ox + q.x - ds / 2, oy + q.y - ds / 2, ds, ds);
+				}
+			}
+		}
+		g.restore(); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+	// over the frame line: the vortex, only while casting (the glow, the rings' atlas cells for this moment's spin, the white throat)
+	drawEnchTools(g, ox, oy, fillW, H) {
+		const s = this.ench, pal = s.pal;
+		if (this.state !== 'cast' || fillW < 2) return;
+		const vx = ox + this.enchVx(fillW), vy = oy + H * .5, cell = VORTEX.cell * H;
+		g.save(); g.globalCompositeOperation = 'lighter';
+		g.globalAlpha = .35; g.drawImage(tinted('p_soft', pal.main), vx - H, vy - H, H * 2, H * 2);
+		const ring = [tinted('p_vortex', pal.hi), tinted('p_vortex', pal.acc)];
+		for (let i = 0; i < VORTEX.rows; i++) {
+			const col = Math.floor(((this.clock * (3 + i * 1.6) / 6.283) % 1) * VORTEX.cols);
+			g.globalAlpha = .2 + .5 * i / 5;
+			g.save(); g.translate(vx, vy); if (s.dis) g.scale(-1, 1);   // mirrored: leaning and spinning the other way
+			g.drawImage(ring[i % 2], col * VORTEX.px, i * VORTEX.px, VORTEX.px, VORTEX.px, -cell / 2, -cell / 2, cell, cell);
+			g.restore();
+		}
+		g.globalAlpha = .85; g.drawImage(imgs.p_soft, vx - H * .2, vy - H * .2, H * .4, H * .4);
+		g.restore(); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+	}
+
 	spawn(e, x, y) {
 		const H = settings.H, k = H / 28;
 		this.parts.push({
@@ -831,7 +1608,7 @@ class Bar {
 	}
 
 	frame(dt) {
-		const { W, H, style } = settings;
+		const { W, H } = settings;
 		// a channel drains, so some looks swap to a reversed version (frost freezes the other way)
 		const cfg = (settings.mode === 'channel' && this.cfg.channelLook) ? EL[this.cfg.channelLook] : this.cfg;
 		this.cur = cfg;
@@ -864,20 +1641,22 @@ class Bar {
 
 		// outer glow behind the filled part
 		const ga = .30 + .12 * this.glowWob(this.clock);
-		g.save(); g.shadowColor = rgba(cfg.glow, ga * 1.4); g.shadowBlur = H * .9; g.fillStyle = rgba(cfg.glow, ga * .35);
-		if (fillW > 1) g.fillRect(PAD + 2, PT + 3, fillW - 4, H - 6);
-		g.restore();
+		if (cfg.glow.some(v => v > 0)) {   // (alchemy and plain have none)
+			g.save(); g.shadowColor = rgba(cfg.glow, ga * 1.4); g.shadowBlur = H * .9; g.fillStyle = rgba(cfg.glow, ga * .35);
+			if (fillW > 1) g.fillRect(PAD + 2, PT + 3, fillW - 4, H - 6);
+			g.restore();
+		}
 
 		// empty track (layers are drawn in device pixels so the patterns are never rescaled)
-		og.fillStyle = style === 'framed' ? 'rgba(6,6,10,.85)' : 'rgba(6,6,10,.45)'; og.fillRect(0, 0, W, H);
+		og.fillStyle = 'rgba(6,6,10,.85)'; og.fillRect(0, 0, W, H);
 		og.setTransform(1, 0, 0, 1, 0, 0);
 		const k = H * dpr / 64, DW = W * dpr, DH = H * dpr, DF = fillW * dpr;
 		if (cfg.track) {
 			// this element's own track: what lies ahead of the cast (flowing water, a pond, dim rails)
 			const T = cfg.track;
 			this.trackU += (T.su || 0) * dt * settings.speed; this.trackU2 += (T.su2 || 0) * dt * settings.speed;
-			// a look can tint its track per cast (skinning: the next pelt), like ns.TintTrack
-			const tt = cfg.skin && this.trackTint;
+			// a look can tint its track per cast (skinning: the next pelt; tailoring: the cloth), like ns.TintTrack
+			const tt = (cfg.skin || cfg.tailor) && this.trackTint;
 			const trackTex = tt ? scaled(T.t + '|' + tt.fur, k, tinted(T.t, tt.fur)) : scaled(T.t, k);
 			og.globalAlpha = T.a; og.fillStyle = pattern(og, trackTex, this.trackU, 0); og.fillRect(0, 0, DW, DH);
 			if (T.hi) {
@@ -885,13 +1664,16 @@ class Bar {
 				og.globalCompositeOperation = 'lighter'; og.globalAlpha = T.hiA || .8; og.fillStyle = pattern(og, hiTex, this.trackU2, 0); og.fillRect(0, 0, DW, DH); og.globalCompositeOperation = 'source-over';
 			}
 			og.globalAlpha = 1;
+		} else if (cfg.plain) {
+			og.fillStyle = 'rgba(24,18,10,.85)'; og.fillRect(0, 0, DW, DH);   // stands in for Blizzard's ui-castingbar-background
 		} else {
 			og.globalAlpha = .16; og.fillStyle = pattern(og, scaled(cfg.layers[0].t, k), this.layerOff[0].u, 0); og.fillRect(0, 0, DW, DH); og.globalAlpha = 1;
 		}
 
-		// filled part
-		og.save(); og.beginPath(); og.rect(0, 0, DF, DH); og.clip();
-		og.fillStyle = 'rgba(0,0,0,1)'; og.fillRect(0, 0, DF, DH);
+		// filled part (alchemy's trough is the whole bar: its liquid's level is the progress)
+		const DC = cfg.wholeBar ? DW : DF;
+		og.save(); og.beginPath(); og.rect(0, 0, DC, DH); og.clip();
+		og.fillStyle = 'rgba(0,0,0,1)'; og.fillRect(0, 0, DC, DH);
 		cfg.layers.forEach((L, i) => {
 			const sm = 1 + .45 * this.speedWob[i](this.clock);       // speed drifts, so the scroll never settles into a loop
 			const o = this.layerOff[i];
@@ -899,12 +1681,13 @@ class Bar {
 			let a = 1;
 			if (L.a) a = L.a[0] + (L.a[1] - L.a[0]) * (.5 + .5 * this.wob[i](this.clock * (L.flicker ? 6 : 1)));
 			og.globalAlpha = a; og.globalCompositeOperation = L.add ? 'lighter' : 'source-over';
-			og.fillStyle = pattern(og, scaled(L.t, k), o.u, o.v); og.fillRect(0, 0, DF, DH);
+			const lt = cfg.tailor ? (i === 0 && this.layerTint) : cfg.ench ? this.layerTints[i] : cfg.storm ? this.skyTint : null;   // tailoring tints its cloth per cast, enchanting its velvet, lightning its sky to the weather (Effects.lua MakeTailor, MakeEnch, MakeStorm)
+			og.fillStyle = pattern(og, lt ? scaled(L.t + '|' + lt, k, tinted(L.t, lt)) : scaled(L.t, k), o.u, o.v); og.fillRect(0, 0, DC, DH);
 		});
 		// veil: soft tinted shimmer
 		og.globalCompositeOperation = 'lighter'; og.globalAlpha = .35 + .2 * this.glowWob(this.clock + 3);
 		og.fillStyle = pattern(og, scaled('veil:' + this.key, k * 2, tinted('veil', cfg.veil)), this.clock * .015 * settings.speed, 0);
-		og.fillRect(0, 0, DF, DH);
+		og.fillRect(0, 0, DC, DH);
 		og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
 		og.setTransform(dpr, 0, 0, dpr, 0, 0);
 		if (cfg.glyphs) { this.drawCircles(og, fillW, H, dt); this.drawGlyphs(og, fillW, H, dt); }
@@ -913,9 +1696,16 @@ class Bar {
 		if (cfg.skin) this.drawSkinMeat(og, fillW, H);
 		if (cfg.smith) this.drawSmithFill(og, fillW, H);
 		if (cfg.smelt) this.drawSmeltFill(og, fillW, H);
+		if (cfg.storm) this.drawStormFill(og, fillW, H, dt * settings.speed);
+		if (cfg.alchemy) this.drawAlchFill(og, fillW, H, dt * settings.speed);
+		if (cfg.tailor) this.drawTailorFill(og, fillW, H, dt * settings.speed);
+		if (cfg.leather) this.drawLeatherFill(og, fillW, H);
+		if (cfg.ench) this.drawEnchFill(og, fillW, H, dt * settings.speed);
+		if (cfg.plain) this.drawPlainFill(og, fillW, H);
 		og.restore();
 		og.setTransform(dpr, 0, 0, dpr, 0, 0);
 		if (cfg.freezeReverse) this.drawFreezeReverse(og, fillW, H);   // outside the fill's clip, over the ice
+		if (cfg.tailor) this.drawShed(og, fillW, H);                   // on the track past the fell
 
 		// interrupted: drain the colour out
 		if (this.state === 'interrupted') {
@@ -930,14 +1720,35 @@ class Bar {
 			og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
 		}
 
-		if (style === 'borderless') {
-			og.globalCompositeOperation = 'destination-in';
-			og.setTransform(1, 0, 0, 1, 0, 0); og.drawImage(edgeMask(W * dpr, H * dpr), 0, 0);
-			og.globalCompositeOperation = 'source-over';
-		}
+		// the bar's shape: its corners (the addon's corner masks on every texture that reaches the edges), and the
+		// bevel laid over the fill (Bar.lua LayoutShape)
+		const rr = CORNER_R[settings.corners] * H;
+		g.save(); roundRectPath(g, PAD, PT, W, H, rr); g.clip();
 		g.drawImage(this.off, PAD, PT, W, H);
+		if (settings.depth === 'bevel') {
+			let gr = g.createLinearGradient(0, PT, 0, PT + H * .35); gr.addColorStop(0, 'rgba(255,255,255,.28)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+			g.fillStyle = gr; g.fillRect(PAD, PT, W, H * .35);
+			gr = g.createLinearGradient(0, PT + H * .6, 0, PT + H); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,.5)');
+			g.fillStyle = gr; g.fillRect(PAD, PT + H * .6, W, H * .4);
+			const s = H * .12;
+			for (const [x0, y0, x1, y1, rx, ry, rw, rh] of [[0, PT, 0, PT + s, PAD, PT, W, s], [0, PT + H, 0, PT + H - s, PAD, PT + H - s, W, s],
+				[PAD, 0, PAD + s, 0, PAD, PT, s, H], [PAD + W, 0, PAD + W - s, 0, PAD + W - s, PT, s, H]]) {
+				gr = g.createLinearGradient(x0, y0, x1, y1); gr.addColorStop(0, 'rgba(0,0,0,.35)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+				g.fillStyle = gr; g.fillRect(rx, ry, rw, rh);
+			}
+		}
+		g.restore();
 
-		// live elements drawn over the bar (free to spill past its edges)
+		if (settings.style !== 'borderless') {   // the frame line; borderless leaves it out (edges stay clean either way)
+			// as the addon: the dark line .1 of the bar's height with 2/3 of it outside, the lit line half that, inside it; both follow the corners
+			const td = H * .1, tl = td / 2, e = td * 2 / 3;
+			roundRectPath(g, PAD - e + td / 2, PT - e + td / 2, W + 2 * e - td, H + 2 * e - td, rr + e - td / 2);
+			g.strokeStyle = 'rgba(0,0,0,.8)'; g.lineWidth = td; g.stroke();
+			roundRectPath(g, PAD - tl / 2, PT - tl / 2, W + tl, H + tl, rr + tl / 2);
+			g.strokeStyle = rgba(cfg.plain ? [190, 160, 100] : cfg.border, 1); g.lineWidth = tl; g.stroke();   // plain: Blizzard's gold frame
+		}
+		// live elements drawn over the bar and its frame line (the addon's fx frame, above the border): free to spill past the edges
+		if (cfg.ench) this.drawEnchDust(g, PAD, PT, fillW, H, dt * settings.speed);   // (clipped to the bar, as the addon's frame)
 		if (cfg.pond) this.drawPond(g, PAD, PT, fillW, H, dt * settings.speed);
 		if (cfg.mine) this.drawMine(g, PAD, PT, fillW, H, dt * settings.speed);
 		if (cfg.skin) this.drawSkinAhead(g, PAD, PT, fillW, H);
@@ -948,7 +1759,11 @@ class Bar {
 
 		if (DEBUG) { g.fillStyle = 'red'; g.fillRect(PAD + fillW - 1, 0, 2, 8); g.fillStyle = 'lime'; for (const q of this.parts) g.fillRect(PAD + q.x - 1, PT + q.y - 1, 2, 2); }
 		// leading-edge spark
-		if (this.state === 'cast' && p > 0 && p < 1 && !cfg.noSpark) {
+		if (this.state === 'cast' && p > 0 && p < 1 && cfg.plain) {   // Blizzard's thin spark (ui-castingbar-pip)
+			const sw = Math.max(3, H * .3);
+			g.fillStyle = 'rgba(255,245,215,.95)'; g.fillRect(PAD + fillW - sw / 2, PT, sw, H);
+			g.fillStyle = 'rgba(255,255,255,.9)'; g.fillRect(PAD + fillW - sw / 6, PT + H * .1, sw / 3, H * .8);
+		} else if (this.state === 'cast' && p > 0 && p < 1 && !cfg.noSpark) {
 			const sa = .75 + .25 * this.sparkWob(this.clock);
 			g.globalCompositeOperation = 'lighter'; g.globalAlpha = sa;
 			const sw = H * .9, sh = H * 1.7;
@@ -959,14 +1774,14 @@ class Bar {
 		if (this.state === 'cast') this.emit(dt * settings.speed, fillW, H);
 		this.drawParts(g, PAD, PT, dt * settings.speed);
 
-		if (style === 'framed') {
-			g.strokeStyle = 'rgba(0,0,0,.8)'; g.lineWidth = 3; g.strokeRect(PAD - 1, PT - 1, W + 2, H + 2);
-			g.strokeStyle = rgba(cfg.border, 1); g.lineWidth = 1.5; g.strokeRect(PAD - .75, PT - .75, W + 1.5, H + 1.5);
-		}
+		if (cfg.alchemy) this.drawAlchTools(g, PAD, PT, fillW, H, dt * settings.speed);
 		// tools held in front of the bar, over its frame line (the addon's tools frame)
 		if (cfg.skin) this.drawSkinTools(g, PAD, PT, fillW, H);
 		if (cfg.smith) this.drawSmithTools(g, PAD, PT, fillW, H);
 		if (cfg.smelt) this.drawSmeltTools(g, PAD, PT, fillW, H, dt * settings.speed);
+		if (cfg.tailor) this.drawTailorTools(g, PAD, PT, fillW, H);
+		if (cfg.leather) this.drawLeatherTools(g, PAD, PT, fillW, H);
+		if (cfg.ench) this.drawEnchTools(g, PAD, PT, fillW, H);
 
 		// text
 		const fs = Math.max(10, Math.round(H * .46));
@@ -987,19 +1802,20 @@ class Bar {
 const bars = [];
 function bind() {
 	const upd = () => {
-		settings.W = +$('w').value; settings.H = +$('h').value; settings.speed = +$('speed').value;
-		settings.style = $('style').value; settings.mode = $('mode').value; settings.freeze = $('freeze').checked; settings.hold = $('hold').value / 100;
+		settings.W = +$('w').value; settings.H = +$('h').value; settings.speed = +$('speed').value; settings.style = $('style').value;
+		settings.corners = $('corners').value; settings.depth = $('depth').value;
+		settings.mode = $('mode').value; settings.freeze = $('freeze').checked; settings.hold = $('hold').value / 100;
 		document.body.className = 'bg-' + $('bg').value;
 	};
-	['w', 'h', 'speed', 'style', 'mode', 'freeze', 'hold', 'bg'].forEach(id => $(id).addEventListener('input', upd));
+	['style', 'corners', 'depth', 'w', 'h', 'speed', 'mode', 'freeze', 'hold', 'bg'].forEach(id => $(id).addEventListener('input', upd));
 	$('interrupt').addEventListener('click', () => bars.forEach(b => b.interrupt()));
 	upd();
 }
 
 loadAll().then(() => {
-	// URL options set the controls, e.g. ?style=framed&h=40&hold=70&sim=2 (sim: seconds to pre-run, for screenshots)
+	// URL options set the controls, e.g. ?h=40&hold=70&sim=2 (sim: seconds to pre-run, for screenshots)
 	const q = new URLSearchParams(location.search);
-	for (const id of ['style', 'w', 'h', 'speed', 'mode', 'hold', 'bg']) if (q.has(id)) $(id).value = q.get(id);
+	for (const id of ['style', 'corners', 'depth', 'w', 'h', 'speed', 'mode', 'hold', 'bg']) if (q.has(id)) $(id).value = q.get(id);
 	if (q.has('hold')) $('freeze').checked = true;
 	bind();
 	const main = $('bars');

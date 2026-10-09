@@ -63,3 +63,23 @@ Settled (2026-10-09): **Skinning C2** (knife pointing back over the cut, handle 
 | Skinning C2 | Knife upright beside the roll, parallel to its edge with the blade's edge against it, sawing up and down |
 | Smelting A3 | Ladle scaled down to about two-thirds (radius .38 bar heights, was .56), stream thinner to match |
 | Lightning A3 | Curvier, slightly narrower clouds: 2–6.5 bar heights long, scalloped rounded billows, gently bulging undersides, rounded ends |
+
+Rule (2026-10-09): profession and gathering looks (fishing, herbalism, mining, skinning, smelting, blacksmithing, alchemy) get no leading-edge spark; the look's own motion shows progress. Spell looks (damage, healing, utility) keep the spark, coloured to match the look.
+
+New concepts (2026-10-09), three variants each, waiting for picks: **Tailoring** (A shuttle and reed, B cloth beam, C embroidery hoop), **Enchanting** (A disenchant siphon, B enchanting rod, C vortex siphon), **Leatherworking** (A saddle-stitched seam, B laced panels, C tooled strap). Open `index.html?only=tail,ench,lw`.
+
+Picked (2026-10-09): **Tailoring C** (smaller hoop, five patterns cycling), **Enchanting C** with its flipped **C2 for Disenchant**, **Leatherworking B** (no awl dropping in; holes already punched). Edges: the add-on's ragged "borderless" style was removed; every bar is framed with clean edges.
+
+Later (2026-10-09): **Leatherworking B** panels are tooled, a pattern per cast in turn (basket-weave, scrolling vine, diamond lattice, bordered shells, knotwork band; `&tooling=0..4` starts from one). **Tailoring A** got three smaller, plainer variants, waiting for a pick: A2 (small worn boat shuttle and a slim reed), A3 (flat stick shuttle and a hardwood batten), A4 (no shuttle; the weft laid down the shed, the reed packs it). `index.html?only=lw-b,tail-a,tail-a2,tail-a3,tail-a4`.
+
+Smelting A3 (2026-10-09): the ladle lost its handle; only the forged bowl rides the cast edge, pouring.
+
+Enchanting (2026-10-09): **C** is the Enchant look; **C3** is the Disenchant look (C2 retired to `?all`): the bar starts solid with magic, the vortex comes in from the right end and moves left, drawing the magic out of the solid part ahead of it and throwing it out behind as C2's dust and essence motes, which settle on C2's spent cloth.
+
+Lightning A3 (2026-10-09): the weather changes every cast, in turn (`&weather=0..4` starts from one): layered, towering (stacked billows, thicker), scattered (fewer banks, more sky between short clouds), overcast (long flat banks, little sky), ragged squall (torn edges, wisps, fast drift). Each weather sets which banks there are, cloud lengths and gaps, thickness, a slight tint, drift speed and direction (some banks drift backwards), how the billows stack into towers, and faint stray rows between the banks.
+
+`shape.html` (2026-10-09): a preview of corner and depth options for the bar, on a sample of each look: corners square / soft (now) / rounded / pill, depth flat (now) / bevel / slab / tilted, framed or borderless, with a depth-amount slider. Picked (2026-10-09): corners square / soft / rounded and depth flat / bevel go into the add-on as options; pill, slab and tilted were dropped (the page now shows only the picks).
+
+`clouds.html` (2026-10-09): a contact sheet of the lightning cloud variants, to pick from by key. Keys → textures: **Layered 1–4** = `storm_bank1..4` (the approved layered set, far to near), **Tower 1–4** = `storm_tower1..4`, **Ragged 1–4** = `storm_ragged1..4`, **Overcast 1–4** = `storm_over1..4` (each over the sky at its own height, bar heights 36 and 56; PNG copies in `clouds/`). **Weather 0–4** = the game's weathers as composed (preview page iframes, hold 70): 0 layered (Layered 1–4), 1 towering (Tower 1–4), 2 scattered (Ragged 2–4), 3 overcast (Overcast 1–4), 4 ragged squall (Ragged 1, 3, 4); the concept's five weathers are shown under them for reference. `?preview=<path>` points it at another built preview page.
+
+Confirmed for the add-on (2026-10-09): **Tailoring A2** (replaces C as the tailoring pick; C stays in `?all`), **Leatherworking B** with its tooling, **Enchanting C** for enchanting casts, **Enchanting C3** for Disenchant, and **Lightning A3** Thunderhead, layered, with the per-cast weathers ("PERFECT").
