@@ -9,7 +9,7 @@ and four gathering professions), and every cast is different:
 | Fire | Scrolling flames rising up the bar; embers rise from the bottom and carry on off the top |
 | Shadow | Black smoke with purple seams, dark wisps drifting up |
 | Nature | Vines that grow with the cast, twisting around each other, with leaves and thorns |
-| Arcane | Rune circles at random heights and sizes, each turning its own way; glyphs flare up |
+| Arcane | Rune circles at random heights and sizes, held still (turning made them shimmer); glyphs flare up |
 | Holy | Soft gold with four-point stars twinkling in and out |
 | Fishing | A pond: lily pads drift on top, fish swim below, the bobber rides the cast edge with ripples |
 | Herbalism | The nature vines, with flowers blooming along them |
@@ -22,7 +22,7 @@ Targets: forever (`## Interface: 16001`).
 
 - Cast something. The bar replaces Blizzard's player cast bar (you can turn that off).
 - **Edit Mode**: drag the bar to move it (it snaps to the grid when Snap is on; hold Shift to place
-  freely), drag its corner to resize, click it for settings and a preview of each element,
+  freely), drag its corner to resize (at least 200 x 20, so the art and text have room), click it for settings and a preview of each element,
   right-click to reset.
 - `/castbar` opens the options (also Esc > Options > AddOns, and the minimap addon menu).
 - `/castbar test [element]` plays a pretend cast.
@@ -41,6 +41,7 @@ specialization, then the "Other casts" setting.
 | Link into the game | `Deploy-WowAddon.ps1 -Path . -Flavor forever` |
 | Rebuild the art | `& .\tools\Make-CastbarMedia.ps1` |
 | Animated preview in the browser | `& .\tools\Show-Preview.ps1` |
+| Profession concepts (not in game yet) | open `tools/concepts/index.html` (see its README) |
 | Reload after editing Lua | `/reload` in game (new files, textures or TOC changes need a full restart) |
 
 The approved look is kept in `tools/reference/` for future changes.

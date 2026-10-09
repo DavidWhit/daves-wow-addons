@@ -564,20 +564,19 @@ class Bar {
 		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 	}
 
-	// ---- arcane rune circles: placed at random heights and sizes as the bar fills, each turning
-	// its own way at its own speed, so they never line up into a repeating stamp
+	// ---- arcane rune circles: placed at random heights and sizes as the bar fills, held still and
+	// randomly mirrored (turning made them shimmer in game)
 	drawCircles(g, fillW, H, dt) {
 		while (fillW > this.circleNext) {
-			this.circles.push({ x: this.circleNext, y: H * rand(.1, .9), s: H * rand(1.0, 2.3), i: Math.floor(rand(0, 3)), rot: rand(0, 6.283),
-				spin: rand(.12, .45) * (Math.random() < .5 ? -1 : 1), born: this.clock, c: pick([[255, 175, 235], [175, 205, 255], [215, 175, 255]]), ph: rand(0, 6.283) });
+			this.circles.push({ x: this.circleNext, y: H * rand(.1, .9), s: H * rand(1.0, 2.3), i: Math.floor(rand(0, 3)), fx: Math.random() < .5 ? -1 : 1, fy: Math.random() < .5 ? -1 : 1,
+				born: this.clock, c: pick([[255, 175, 235], [175, 205, 255], [215, 175, 255]]), ph: rand(0, 6.283) });
 			this.circleNext += H * rand(1.3, 3.0);
 		}
 		g.globalCompositeOperation = 'lighter';
 		for (const q of this.circles) {
 			if (q.x - q.s / 2 > fillW) continue;
-			q.rot += q.spin * dt * settings.speed;
 			g.globalAlpha = Math.min(1, (this.clock - q.born) / .5) * (.75 + .2 * Math.sin(this.clock * 1.3 + q.ph));
-			g.save(); g.translate(q.x, q.y); g.rotate(q.rot);
+			g.save(); g.translate(q.x, q.y); g.scale(q.fx, q.fy);
 			g.drawImage(tinted('p_runecircles', q.c), q.i * 128, 0, 128, 128, -q.s / 2, -q.s / 2, q.s, q.s);
 			g.restore();
 		}
@@ -590,14 +589,14 @@ class Bar {
 		if (this.glyphT <= 0 && fillW > H) {
 			this.glyphT = rand(.25, .6);
 			this.glyphs.push({ x: rand(H * .3, fillW - H * .2), y: H / 2 + rand(-.12, .12) * H, s: H * rand(.6, .95), age: 0, life: rand(.9, 1.7),
-				i: Math.floor(rand(0, 16)), c: pick([[255, 150, 230], [140, 200, 255], [255, 215, 140]]), rot: rand(-.25, .25) });
+				i: Math.floor(rand(0, 16)), c: pick([[255, 150, 230], [140, 200, 255], [255, 215, 140]]), fx: Math.random() < .5 ? -1 : 1, fy: Math.random() < .5 ? -1 : 1 });
 		}
 		this.glyphs = this.glyphs.filter(q => (q.age += dt) < q.life && q.x < fillW);
 		g.globalCompositeOperation = 'lighter';
 		for (const q of this.glyphs) {
 			const t = q.age / q.life, a = Math.sin(Math.PI * t) ** 1.5, s = q.s * (.75 + .25 * easeOutBack(clamp01(t * 2.5)));
 			g.globalAlpha = a;
-			g.save(); g.translate(q.x, q.y); g.rotate(q.rot);
+			g.save(); g.translate(q.x, q.y); g.scale(q.fx, q.fy);
 			g.drawImage(tinted('p_glyphs', q.c), (q.i % 8) * 64, Math.floor(q.i / 8) * 64, 64, 64, -s / 2, -s / 2, s, s);
 			g.restore();
 		}

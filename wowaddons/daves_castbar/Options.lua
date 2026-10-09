@@ -32,10 +32,10 @@ function ns:InitOptions()
 	Check("showTime", "Show time left", true)
 	Check("showIcon", "Show spell icon", false, "The spell's icon, just left of the bar.")
 	Check("locked", "Lock bar", true, "Untick to drag and resize the bar any time (right-click it to reset). It can always be moved in Edit Mode.")
-	Slider("width", "Width", 300, 80, 800, 1, "%d")
-	Slider("height", "Height", 26, 10, 80, 1, "%d")
+	Slider("width", "Width", 300, ns.MIN_W, ns.MAX_W, 1, "%d")
+	Slider("height", "Height", 26, ns.MIN_H, ns.MAX_H, 1, "%d")
 	Slider("scale", "Scale", 1.0, .5, 2, .05, "%.2f")
-	Slider("textScale", "Text size", 1.0, .6, 2, .05, "%.2f")
+	Slider("textScale", "Text size", 1.0, .6, 2, .05, "%.2f")   -- relative to the default bar size; it scales with the bar
 	Check("textOutline", "Outline text", true, "A dark outline around the spell name and time, so they stand out against every element.")
 
 	local function Placement(key, name, default, tooltip)
@@ -50,7 +50,7 @@ function ns:InitOptions()
 		settings[#settings + 1] = s
 	end
 	Placement("namePos", "Spell name position", "left", "Where the spell name sits on the bar.")
-	Placement("timePos", "Time left position", "right", "Where the time left sits on the bar. With both in the center they share one line.")
+	Placement("timePos", "Time left position", "right", "Where the time left sits on the bar. The time and the spell name each keep their own part of the bar; with both set to center, the time moves to the right.")
 
 	local fallback = Settings.RegisterAddOnSetting(category, ADDON .. "_fallback", "fallback", ns.db, Settings.VarType.String, "Other casts", "arcane")
 	Settings.CreateDropdown(category, fallback, function()

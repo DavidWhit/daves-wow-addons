@@ -6,7 +6,7 @@
 --   fishing    lily pads and fish in the pond, the bobber and its ripples at the cast edge
 --   mining     the gem cart rolling to the cast edge, a pickaxe striking the wall at the end
 --   skinning   cows and pigs that a cleaver at the cast edge turns into bone piles on blood stains
---   arcane     rune circles at random heights and sizes, each turning its own way; glyphs flare up
+--   arcane     rune circles at random heights and sizes, held still; glyphs flare up
 --   holy       four-point stars twinkling in and out
 -- Positions are in bar pixels from the bottom-left corner, y up. Effects drawn on the fx frame
 -- can spill past the bar; those on an element's content frame are clipped by the fill and
@@ -462,16 +462,25 @@ local function ArcaneTexture(name, sub)
 	tex:SetTexture(MEDIA .. name)
 	tex:SetBlendMode("ADD")
 	tex:SetDrawLayer("ARTWORK", sub)
+	tex:SetRotation(0)
 	return tex
+end
+
+-- Circles and glyphs never turn: even unsnapped, a turning sprite shimmers along its fine lines.
+-- A random mirror of the cell gives each one a different face instead.
+local function MirroredCell(tex, l, r, t, b)
+	if math.random() < .5 then l, r = r, l end
+	if math.random() < .5 then t, b = b, t end
+	tex:SetTexCoord(l, r, t, b)
 end
 
 local function UpdateArcane(dt, fillW, casting)
 	-- circles appear as the bar fills, at random heights and sizes
 	while casting and fillW > content.circleNext do
-		local c = { x = content.circleNext, y = H * rand(.1, .9), s = H * rand(1.0, 2.3), rot = rand(0, 6.283),
-			spin = rand(.12, .45) * (math.random() < .5 and -1 or 1), born = clock, ph = rand(0, 6.283), tex = ArcaneTexture("p_runecircles", 4) }
+		local c = { x = content.circleNext, y = H * rand(.1, .9), s = H * rand(1.0, 2.3), born = clock, ph = rand(0, 6.283),
+			tex = ArcaneTexture("p_runecircles", 4) }
 		local i = math.random(3) - 1
-		c.tex:SetTexCoord(i * .25, (i + 1) * .25, 0, 1)
+		MirroredCell(c.tex, i * .25, (i + 1) * .25, 0, 1)
 		local tint = pick(CIRCLE_TINTS)
 		c.tex:SetVertexColor(tint[1], tint[2], tint[3])
 		c.tex:SetSize(c.s, c.s)
@@ -480,8 +489,6 @@ local function UpdateArcane(dt, fillW, casting)
 		content.circleNext = content.circleNext + H * rand(1.3, 3.0)
 	end
 	for _, c in ipairs(content.circles) do
-		c.rot = c.rot + c.spin * dt
-		c.tex:SetRotation(c.rot)
 		c.tex:SetAlpha(math.min(1, (clock - c.born) / .5) * (.75 + .2 * math.sin(clock * 1.3 + c.ph)))
 	end
 	-- single glyphs flare up and fade
@@ -493,8 +500,7 @@ local function UpdateArcane(dt, fillW, casting)
 		q.tex:ClearAllPoints(); q.tex:SetPoint("CENTER", content, "BOTTOMLEFT", q.x, q.y)   -- it never moves; only its size changes
 		local i = math.random(16) - 1
 		local col, row = i % 8, math.floor(i / 8)
-		q.tex:SetTexCoord(col / 8, (col + 1) / 8, row / 2, (row + 1) / 2)
-		q.tex:SetRotation(rand(-.25, .25))
+		MirroredCell(q.tex, col / 8, (col + 1) / 8, row / 2, (row + 1) / 2)
 		local tint = pick(GLYPH_TINTS)
 		q.tex:SetVertexColor(tint[1], tint[2], tint[3])
 		content.glyphs[#content.glyphs + 1] = q

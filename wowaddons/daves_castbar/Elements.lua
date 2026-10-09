@@ -73,7 +73,7 @@ ns.ELEMENTS = {
 	arcane = {
 		label = "Arcane", border = C(90, 110, 255), glow = C(120, 110, 255), spark = C(230, 190, 255), veil = C(120, 90, 255),
 		layers = { { tex = "arcane_base", su = .012 }, { tex = "arcane_flow", su = .028, a = { .55, 1 }, add = true } },
-		glyphs = true,    -- rotating rune circles and glyphs that flare up
+		glyphs = true,    -- still rune circles and glyphs that flare up
 		emit = {
 			{ tex = "p_star", rate = 10, colors = { C(255, 160, 235), C(150, 210, 255) }, size = { .15, .3 }, life = { .4, .9 }, vx = { -22, -5 }, vy = { -8, 8 }, from = "edge", twinkle = true, add = true },
 		},

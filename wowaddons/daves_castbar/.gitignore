@@ -1,2 +1,5 @@
 .release/
 *.zip
+tools/concepts/*.png
+tools/concepts/.chrome-*
+tools/concepts/.dom-*

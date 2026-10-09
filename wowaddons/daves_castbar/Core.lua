@@ -13,6 +13,10 @@ ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
 
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 
+-- The bar's size limits. The minimum keeps each look's art visible and the text (which scales
+-- with the bar, Bar.lua LayoutText) readable; ns:Layout holds saved sizes to it too.
+ns.MIN_W, ns.MAX_W, ns.MIN_H, ns.MAX_H = 200, 800, 20, 80
+
 local DEFAULTS = {
 	enabled = true,
 	width = 300,

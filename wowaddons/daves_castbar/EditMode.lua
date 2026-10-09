@@ -38,7 +38,7 @@ local function DragUpdate()
 end
 
 -- Resizing keeps the top-left corner where it is.
-local MIN_W, MAX_W, MIN_H, MAX_H = 80, 800, 10, 80
+local MIN_W, MAX_W, MIN_H, MAX_H = ns.MIN_W, ns.MAX_W, ns.MIN_H, ns.MAX_H
 local function ResizeUpdate()
 	local scale, ui = bar:GetEffectiveScale(), UIParent:GetEffectiveScale()
 	local cx, cy = GetCursorPosition()

@@ -226,7 +226,7 @@ function ns:InitBar()
 	name:SetJustifyH("LEFT"); name:SetWordWrap(false)
 	name:SetShadowOffset(1, -1); name:SetShadowColor(0, 0, 0, 1)
 	local time = textFrame:CreateFontString(nil, "OVERLAY")
-	time:SetJustifyH("RIGHT")
+	time:SetJustifyH("RIGHT"); time:SetWordWrap(false)
 	time:SetShadowOffset(1, -1); time:SetShadowColor(0, 0, 0, 1)
 	local icon = textFrame:CreateTexture(nil, "OVERLAY")
 	icon:SetTexCoord(.08, .92, .08, .92)
@@ -252,28 +252,49 @@ end
 local JUSTIFY = { left = "LEFT", center = "CENTER", right = "RIGHT" }
 
 -- Spell name and time left: size (textScale), contrast outline (textOutline) and placement
--- (namePos, timePos: "left", "center" or "right"). The time keeps a strip as wide as "88.8";
--- the name gets the rest of the bar and is truncated inside it, so the two never overlap.
--- With both centred they share one line: "Frostbolt  1.2" (OnBarUpdate).
-local function LayoutText()
+-- (namePos, timePos: "left", "center" or "right").
+-- Size: Text size is relative to a baseline bar (the default BASE_W x BASE_H, where 100% is
+-- BASE_TEXT). On any other bar the text scales by whichever of width and height shrank more, so
+-- it keeps its proportions to the bar and never grows past it (TEXT_MAX_H of its height at most).
+-- Sections: the time and the name each get their own section of the bar and never share one.
+-- The time's is as wide as its widest reading; the name's is the rest, and a name too long for
+-- it ends in "...". A centred name keeps a time-sized gap on both sides, so it stays centred on
+-- the bar; with the time centred as well, the time moves to the right end to make room.
+local BASE_W, BASE_H, BASE_TEXT, TEXT_MAX_H = 300, 26, 12, .78
+
+local function SetTextFont(size)
 	local db = ns.db
-	local name, time = textFrame.name, textFrame.time
-	local size = math.max(6, math.floor(H * .46 * db.textScale + .5))
 	local flags = db.textOutline and "OUTLINE" or ""
-	for _, fs in ipairs({ name, time }) do
+	for _, fs in ipairs({ textFrame.name, textFrame.time }) do
 		fs:SetFont("Fonts\\FRIZQT__.TTF", size, flags)
 		fs:SetShadowOffset(1, -1)
 		fs:SetShadowColor(0, 0, 0, db.textOutline and .9 or 1)
 	end
-	local timePos, namePos = JUSTIFY[db.timePos] and db.timePos or "right", JUSTIFY[db.namePos] and db.namePos or "left"
-	local showTime = db.showTime
-	textFrame.combined = showTime and db.showName and timePos == "center" and namePos == "center"
+end
 
+-- the widest the time reads (no cast lasts 100 seconds)
+local function TimeWidth(time)
 	local shown = time:GetText()
 	time:SetText("88.8")
-	local tw = math.ceil(time:GetStringWidth()) + 2
+	local w = time:GetStringWidth()
 	time:SetText(shown or "")
-	local pad = H * .4
+	return math.ceil(w) + 2
+end
+
+local function LayoutText()
+	local db = ns.db
+	local name, time = textFrame.name, textFrame.time
+	local pad = math.min(H * .4, W * .06)
+	local fit = math.min(H / BASE_H, W / BASE_W)
+	local maxSize = math.floor(H * TEXT_MAX_H) - (db.textOutline and 2 or 0)   -- room for the outline and shadow
+	local size = math.max(6, math.min(math.floor(BASE_TEXT * db.textScale * fit + .5), maxSize))
+	SetTextFont(size)
+	local namePos = JUSTIFY[db.namePos] and db.namePos or "left"
+	local timePos = JUSTIFY[db.timePos] and db.timePos or "right"
+	local showTime, showName = db.showTime, db.showName
+	if showTime and showName and timePos == "center" and namePos == "center" then timePos = "right" end
+
+	local tw = showTime and TimeWidth(time) or 0
 	time:ClearAllPoints()
 	time:SetWidth(tw)
 	time:SetJustifyH(JUSTIFY[timePos])
@@ -281,26 +302,29 @@ local function LayoutText()
 	elseif timePos == "center" then time:SetPoint("CENTER")
 	else time:SetPoint("RIGHT", -pad, 0) end
 
-	-- the name's span, in offsets from the bar's left edge
+	-- the name's section, in offsets from the bar's left edge
 	local l, r = pad, W - pad
-	if showTime and not textFrame.combined then
-		if timePos == "left" then l = pad + tw + 6
-		elseif timePos == "right" then r = W - pad - tw - 6
-		elseif namePos == "right" then l = (W + tw) / 2 + 6
-		else r = (W - tw) / 2 - 6 end
+	if showTime then
+		local gap = tw + math.max(3, size * .5)
+		if namePos == "center" and timePos ~= "center" then l, r = pad + gap, W - pad - gap
+		elseif timePos == "left" then l = pad + gap
+		elseif timePos == "right" then r = W - pad - gap
+		elseif namePos == "right" then l = W / 2 + gap - tw / 2
+		else r = W / 2 - gap + tw / 2 end
 	end
-	r = math.max(r, l + 1)
 	name:ClearAllPoints()
 	name:SetPoint("LEFT", bar, "LEFT", l, 0)
-	name:SetPoint("RIGHT", bar, "LEFT", r, 0)
+	name:SetPoint("RIGHT", bar, "LEFT", math.max(r, l + 1), 0)
 	name:SetJustifyH(JUSTIFY[namePos])
-	name:SetShown(db.showName)
-	time:SetShown(showTime and not textFrame.combined)
+	name:SetShown(showName and r - l >= size)   -- no room for even a letter and "...": leave the time alone
+	time:SetShown(showTime)
 end
 
 function ns:Layout()
 	local db = ns.db
-	W, H = math.floor(db.width + .5), math.floor(db.height + .5)
+	db.width = math.max(ns.MIN_W, math.min(ns.MAX_W, math.floor(db.width + .5)))      -- older saves may be smaller
+	db.height = math.max(ns.MIN_H, math.min(ns.MAX_H, math.floor(db.height + .5)))
+	W, H = db.width, db.height
 	bar:SetSize(W, H)
 	if bar:GetScale() ~= db.scale then
 		-- keep the bar's centre where it is on screen: offsets are in the bar's own scale
@@ -453,8 +477,7 @@ local function Finish(how)   -- "done" (flash and fade) or "interrupted"
 	cast.finishedAt = cast.channel and Progress() or 1   -- a channel ends where it stopped draining
 	if how == "interrupted" then cast.finishedAt = Progress() end
 	cast.state, cast.t = how, 0
-	if how == "interrupted" then ShowText(INTERRUPTED or "Interrupted")   -- the tint fades in (OnBarUpdate)
-	elseif textFrame.combined then textFrame.name:SetText(cast.label or "") end   -- drop the shared time
+	if how == "interrupted" then ShowText(INTERRUPTED or "Interrupted") end   -- the tint fades in (OnBarUpdate)
 end
 
 -- k = 0..1: from the element's own colours to grey-red.
@@ -621,11 +644,7 @@ function ns:OnBarUpdate(dt)
 
 	if cast.state == "cast" and ns.db.showTime then
 		local left = math.max(0, cast.finish - Now())
-		if textFrame.combined then
-			textFrame.name:SetFormattedText("%s  %.1f", cast.label or "", left)
-		else
-			textFrame.time:SetFormattedText("%.1f", left)
-		end
+		textFrame.time:SetFormattedText("%.1f", left)
 	elseif cast.state ~= "cast" then
 		textFrame.time:SetText("")
 	end
