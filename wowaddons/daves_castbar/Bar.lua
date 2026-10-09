@@ -516,18 +516,12 @@ local function ActivateElement(key)
 	track.tex:SetVertexColor(1, 1, 1); track.hi:SetVertexColor(1, 1, 1)   -- FX:Begin may tint it (ns.TintTrack)
 	track.tex:SetDesaturation(0); track.hi:SetDesaturation(0)             -- an interrupt greys it (TintInterrupted)
 	for _, t in ipairs({ glowFrame.l, glowFrame.m, glowFrame.r }) do SetColor(t, cfg.glow) end
-	-- the plain look uses Blizzard's own spark and frame; every other look its own
-	if cfg.plain then
-		fx.spark:SetAtlas("ui-castingbar-pip")
-		fx.spark:SetBlendMode("BLEND")
-		fx.spark:SetVertexColor(1, 1, 1)
-		fx.spark:SetSize(math.max(4, H * .4), H)
-	else
-		fx.spark:SetTexture(MEDIA .. "spark")
-		fx.spark:SetBlendMode("ADD")
-		fx.spark:SetSize(H * .9, H * 1.7)
-		SetColor(fx.spark, cfg.spark)
-	end
+	-- the leading-edge flare, in the look's colour; the plain look has it too (gold, green for channels) rather than
+	-- Blizzard's thin pip, which read as a bare vertical bar next to the other looks
+	fx.spark:SetTexture(MEDIA .. "spark")
+	fx.spark:SetBlendMode("ADD")
+	fx.spark:SetSize(H * .9, H * 1.7)
+	SetColor(fx.spark, cfg.spark)
 	for _, t in ipairs(border.lit) do SetColor(t, cfg.border) end
 	for _, t in ipairs(border.capLit) do SetColor(t, cfg.border) end
 	ns.activeCfg = cfg
@@ -738,7 +732,7 @@ function ns:OnBarUpdate(dt)
 
 	-- fades
 	if cast.state == "done" then
-		active.flash:SetAlpha(math.max(0, 1 - cast.t / .35) * .8)
+		active.flash:SetAlpha(math.max(0, 1 - cast.t / .35) * (active.cfg.flashAlpha or .8))   -- the finishing flash; some looks keep it calm
 		local a = cast.t < .4 and 1 or math.max(0, 1 - (cast.t - .4) / .5)
 		bar:SetAlpha(a)
 		if a <= 0 then return ns:EndCast() end

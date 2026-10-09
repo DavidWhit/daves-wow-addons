@@ -7,8 +7,8 @@
 local _, ns = ...
 local I = ns.FXi
 local MEDIA, rand, pick, Smooth, Pool = I.MEDIA, I.rand, I.pick, I.Smooth, I.Pool
-local RGB, ToolTexture, PlaceIn, Light, lerp, clamp, ContentTex = I.RGB, I.ToolTexture, I.PlaceIn, I.Light, I.lerp, I.clamp, I.ContentTex
-local fx, tools                           -- the frames the core makes (init)
+local RGB, PlaceIn, Light, lerp, clamp, ContentTex = I.RGB, I.PlaceIn, I.Light, I.lerp, I.clamp, I.ContentTex
+local fx, tools                           -- the core's fx frame, and this file's clip frame over the bar for the vortex (init)
 local content, cfg, W, H, clock = nil, nil, 300, 26, 0   -- the core's state, copied in by sync
 
 ---------------------------------------------------------------------------
@@ -48,11 +48,21 @@ local function EnchSprite(name, sub)
 	return tex
 end
 
+-- The vortex's textures live on `tools`, this file's clip frame over the bar (init): it runs a little ahead of
+-- the cast edge and off the bar's end by the time the cast completes, so the clip cuts it away cleanly and no
+-- ring or tail is left showing at the finish.
 local function MakeVortex()
+	local function Tex(name, sub)
+		local tex = Smooth(tools:CreateTexture(nil, "ARTWORK", nil, sub))
+		tex:SetTexture(MEDIA .. name)
+		tex:SetBlendMode("ADD")
+		tex:Hide()
+		return tex
+	end
 	vortex = { rings = {} }
-	vortex.glow = ToolTexture("p_soft", 1, "ADD")
-	for i = 1, VORTEX_ROWS do vortex.rings[i] = ToolTexture("p_vortex", 2, "ADD") end
-	vortex.core = ToolTexture("p_soft", 3, "ADD")
+	vortex.glow = Tex("p_soft", 1)
+	for i = 1, VORTEX_ROWS do vortex.rings[i] = Tex("p_vortex", 2) end
+	vortex.core = Tex("p_soft", 3)
 	vortex.core:SetVertexColor(1, 1, 1)
 end
 
@@ -273,7 +283,10 @@ end
 local function UpdateEnch(dt, fillW, casting)
 	local e, s = content.ench, ench
 	local lit = 1 - s.grey
-	local vx, vy = s.dis and (W - fillW) or fillW, H * .5
+	-- the vortex leads the cast edge a little, and over the last .6 bar heights of travel pulls a whole bar height
+	-- ahead, so by completion its widest glow has passed the bar's end and the clip frame has cut it all away
+	local lead = H * (.15 + .85 * clamp((fillW - (W - H * .6)) / (H * .6)))
+	local vx, vy = s.dis and (W - fillW - lead) or (fillW + lead), H * .5
 	-- the settled power's flow: two bands of light sliding along the velvet
 	for i, f in ipairs(e.flow) do
 		local F = ENCH_FLOW[i]
@@ -316,7 +329,12 @@ end
 I.Register({
 	key = "ench",
 	init = function()
-		fx, tools = I.fx, I.tools
+		fx = I.fx
+		-- the vortex's own frame: over the frame line like the shared tools frame, but clipped to the bar
+		tools = CreateFrame("Frame", nil, I.tools)
+		tools:SetAllPoints(I.tools)
+		tools:SetClipsChildren(true)
+		tools:SetFrameLevel(I.tools:GetFrameLevel())
 		-- clipped to the bar, at fx's level: enchanting's dust in the unfilled part, disenchant's motes and thrown dust
 		enchFrame = CreateFrame("Frame", nil, fx)
 		enchFrame:SetAllPoints(fx)

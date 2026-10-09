@@ -16,8 +16,9 @@ local _, ns = ...
 
 -- Leading-edge marker (the spark at the fill edge): spell looks have one, like Blizzard's bar for damage and
 -- healing casts. Casts that are not spells - professions and gathering (fishing, herbalism, mining, skinning,
--- smelting, blacksmithing, alchemy, tailoring, leatherworking) - get none: set noSpark = true on every profession look. Plain keeps
--- Blizzard's own spark, since it stands in for Blizzard's bar.
+-- smelting, blacksmithing, alchemy, tailoring, leatherworking) - get none: set noSpark = true on every profession look. Plain has
+-- the same flare as the spell looks (gold), not Blizzard's thin pip, so its marker matches the other bars.
+-- The finishing flash (Bar.lua) is .8 alpha in the spark colour; flashAlpha lowers it where a bright flash would glare.
 -- Colours are 0-1. Layers scroll in texture widths (su) and heights (sv) per second; "a" is an
 -- alpha range the layer breathes through. Particle sizes are fractions of the bar height,
 -- speeds are pixels per second on a 28-pixel bar (scaled with the height), y up.
@@ -205,6 +206,7 @@ ns.ELEMENTS = {
 		layers = { { tex = "ench_velvet" }, { tex = "ench_velvet_hi", add = true, a = { .2, .3 } } },   -- tinted per cast (Effects.lua)
 		ench = {},
 		noSpark = true,     -- the vortex works the cast edge
+		flashAlpha = .18,   -- a calm finish: the full .8 flash over the dark velvet glared
 		emit = {},
 	},
 	disenchant = {
@@ -216,6 +218,7 @@ ns.ELEMENTS = {
 		ench = { disenchant = true },
 		wholeBar = true,    -- the velvet is the whole bar; the vortex at W - fill shows the progress, not the fill
 		noSpark = true,
+		flashAlpha = .18,   -- a calm finish, as enchanting
 		emit = {},
 	},
 

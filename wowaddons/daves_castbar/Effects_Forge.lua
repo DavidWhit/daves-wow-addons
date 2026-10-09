@@ -284,7 +284,8 @@ local function UpdateSmelt(dt, fillW, casting)
 	f.cap:SetShown(fillW > 1)
 	f.cap:ClearAllPoints()
 	f.cap:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", fillW - H * .45, 0)
-	f.cap:SetSize(H * .45, H)
+	f.cap:SetSize(H * .45 + 2, H)   -- two pixels past the fill edge: the content's clip is pixel-aligned, the cap is not,
+	                                -- so without the overshoot a sub-pixel column of hot metal showed as a line at the edge
 	-- the nose's glow spills past the fill edge over the dark track (forge.nose is clipped to the bar, not the fill),
 	-- so the slope from the white-hot pool down to the track is continuous, with no line at the fill edge
 	PlaceIn(forge.nose, forge.clip, fillW - H * .15, H * .5, H * 1.6, H * 1.6)

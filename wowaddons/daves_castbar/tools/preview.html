@@ -281,7 +281,7 @@ EL.enchanting = {
 	// bands of light and glitter behind the edge; a vortex at the edge pulls dust out of the unfilled part and spins it in
 	spell: 'Enchant Chest - Major Health', border: [150, 110, 230], glow: [110, 70, 210], spark: [200, 170, 255], veil: [0, 0, 0],
 	layers: [{ t: 'ench_velvet', su: 0 }, { t: 'ench_velvet_hi', su: 0, add: true, a: [.2, .3] }],
-	ench: {}, noSpark: true, padTop: 1.0,
+	ench: {}, noSpark: true, padTop: 1.0, flashAlpha: .18,   // a calm finish (Elements.lua)
 	emit: [],
 };
 EL.disenchant = {
@@ -289,7 +289,7 @@ EL.disenchant = {
 	// out of the solid part ahead and throwing it out behind as dust and essence motes that settle on the spent cloth
 	spell: 'Disenchant', border: [120, 100, 170], glow: [80, 60, 140], spark: [170, 150, 210], veil: [0, 0, 0],
 	layers: [{ t: 'ench_velvet', su: 0 }, { t: 'ench_velvet_hi', su: 0, add: true, a: [.2, .3] }],
-	ench: { disenchant: true }, wholeBar: true, noSpark: true, padTop: 1.0,
+	ench: { disenchant: true }, wholeBar: true, noSpark: true, padTop: 1.0, flashAlpha: .18,
 	emit: [],
 };
 // as Effects.lua ENCH_PALETTES, ENCH_FLOW (the flow textures' widths in bar heights and speeds), the vortex atlas, the drain stretch
@@ -1377,7 +1377,12 @@ class Bar {
 		else for (let i = 0; i < Math.min(48, Math.floor(W / H * 8)); i++) s.dust.push(this.newDust(rand(0, W)));
 	}
 	newDust(x) { const H = settings.H; return { x, y: H * rand(.1, .9), ang: rand(0, 6.283), r: rand(.025, .05), f: rand(2, 6), ph: rand(0, 6.283) }; }
-	enchVx(fillW) { return this.ench.dis ? settings.W - fillW : fillW; }
+	// the vortex's centre: it leads the cast edge a little, and over the last .6 bar heights pulls a whole bar height ahead,
+	// so by completion it has passed the bar's end and the clip (drawEnchTools) has cut it all away (as Effects_Ench.lua)
+	enchVx(fillW) {
+		const W = settings.W, H = settings.H, lead = H * (.15 + .85 * clamp01((fillW - (W - H * .6)) / (H * .6)));
+		return this.ench.dis ? W - fillW - lead : fillW + lead;
+	}
 	// inside the bar: the flow's two bands and the glitter; disenchant: the spent cloth behind the vortex, the ash
 	drawEnchFill(og, fillW, H, dt) {
 		const s = this.ench, W = settings.W, pal = s.pal, vx = this.enchVx(fillW), drain = ENCH_DRAIN * H;
@@ -1493,7 +1498,8 @@ class Bar {
 		const s = this.ench, pal = s.pal;
 		if (this.state !== 'cast' || fillW < 2) return;
 		const vx = ox + this.enchVx(fillW), vy = oy + H * .5, cell = VORTEX.cell * H;
-		g.save(); g.globalCompositeOperation = 'lighter';
+		g.save(); g.beginPath(); g.rect(ox, oy, settings.W, H); g.clip();   // the addon's clip frame: nothing past the bar
+		g.globalCompositeOperation = 'lighter';
 		g.globalAlpha = .35; g.drawImage(tinted('p_soft', pal.main), vx - H, vy - H, H * 2, H * 2);
 		const ring = [tinted('p_vortex', pal.hi), tinted('p_vortex', pal.acc)];
 		for (let i = 0; i < VORTEX.rows; i++) {
@@ -1626,7 +1632,7 @@ class Bar {
 			if (settings.freeze) this.elapsed = Math.min(this.elapsed, settings.hold * this.dur);
 			if (this.elapsed >= this.dur) { this.state = 'done'; this.stateT = 0; }
 		} else {
-			this.stateT += dt;
+			if (!this.hold) this.stateT += dt;   // (?done= / ?interrupted= hold the ending still)
 			const total = this.state === 'done' ? .9 : 1.2;
 			this.cv.style.opacity = this.stateT < total - .5 ? 1 : clamp01((total - this.stateT) / .5);
 			if (this.stateT > total + .4) this.newCast();
@@ -1672,7 +1678,9 @@ class Bar {
 
 		// filled part (alchemy's trough is the whole bar: its liquid's level is the progress)
 		const DC = cfg.wholeBar ? DW : DF;
-		og.save(); og.beginPath(); og.rect(0, 0, DC, DH); og.clip();
+		// the clip edge on a whole pixel, as the addon's clip frame: a fractional edge is antialiased, and every layer drawn through
+		// it only half-covers that column, so a dark cap over hot metal left a faint light line at the fill edge (smelting)
+		og.save(); og.beginPath(); og.rect(0, 0, Math.round(DC), DH); og.clip();
 		og.fillStyle = 'rgba(0,0,0,1)'; og.fillRect(0, 0, DC, DH);
 		cfg.layers.forEach((L, i) => {
 			const sm = 1 + .45 * this.speedWob[i](this.clock);       // speed drifts, so the scroll never settles into a loop
@@ -1715,7 +1723,7 @@ class Bar {
 		}
 		// finished: a bright flash that fades
 		if (this.state === 'done') {
-			og.globalCompositeOperation = 'lighter'; og.globalAlpha = clamp01(1 - this.stateT / .35) * .8;
+			og.globalCompositeOperation = 'lighter'; og.globalAlpha = clamp01(1 - this.stateT / .35) * (cfg.flashAlpha ?? .8);   // (Bar.lua: flashAlpha keeps some looks calm)
 			og.fillStyle = rgba(cfg.spark, 1); og.fillRect(0, 0, W, H);
 			og.globalAlpha = 1; og.globalCompositeOperation = 'source-over';
 		}
@@ -1759,11 +1767,7 @@ class Bar {
 
 		if (DEBUG) { g.fillStyle = 'red'; g.fillRect(PAD + fillW - 1, 0, 2, 8); g.fillStyle = 'lime'; for (const q of this.parts) g.fillRect(PAD + q.x - 1, PT + q.y - 1, 2, 2); }
 		// leading-edge spark
-		if (this.state === 'cast' && p > 0 && p < 1 && cfg.plain) {   // Blizzard's thin spark (ui-castingbar-pip)
-			const sw = Math.max(3, H * .3);
-			g.fillStyle = 'rgba(255,245,215,.95)'; g.fillRect(PAD + fillW - sw / 2, PT, sw, H);
-			g.fillStyle = 'rgba(255,255,255,.9)'; g.fillRect(PAD + fillW - sw / 6, PT + H * .1, sw / 3, H * .8);
-		} else if (this.state === 'cast' && p > 0 && p < 1 && !cfg.noSpark) {
+		if (this.state === 'cast' && p > 0 && p < 1 && !cfg.noSpark) {   // every look's flare, plain's in gold (no thin Blizzard pip)
 			const sa = .75 + .25 * this.sparkWob(this.clock);
 			g.globalCompositeOperation = 'lighter'; g.globalAlpha = sa;
 			const sw = H * .9, sh = H * 1.7;
@@ -1821,6 +1825,11 @@ loadAll().then(() => {
 	const main = $('bars');
 	for (const k of Object.keys(EL)) if (!EL[k].hidden && (!q.has('only') || q.get('only').split(',').includes(k))) bars.push(new Bar(k, main));
 	for (let i = 0; i < (+q.get('sim') || 0) * 60; i++) for (const b of bars) b.frame(1 / 60);
+	// ?done=0.05 (or ?interrupted=0.3): every bar frozen that many seconds into its ending, for screenshots of the completion moment
+	for (const how of ['done', 'interrupted']) if (q.has(how)) {
+		for (const b of bars) { b.elapsed = how === 'done' ? b.dur : b.elapsed; b.state = how; b.stateT = Math.max(0, +q.get(how) - 1 / 60); b.frame(1 / 60); b.hold = true; }
+		settings.freeze = true;
+	}
 	if (q.has('debug')) document.querySelector('footer').textContent = JSON.stringify({ settings, bars: bars.map(b => [b.key, b.state, +b.elapsed.toFixed(2), +b.dur.toFixed(2)]), frost: bars[0].parts.slice(0, 8).map(p => [p.e.t, +p.x.toFixed(1), +p.vx.toFixed(1), +p.age.toFixed(2)]), fillW: settings.W * bars[0].elapsed / bars[0].dur });
 	let last = performance.now();
 	const tick = now => {
