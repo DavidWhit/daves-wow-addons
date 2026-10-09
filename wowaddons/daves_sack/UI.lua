@@ -14,10 +14,10 @@
 --    re-laid-out when an item moved, appeared or disappeared (stack counts,
 --    locks and cooldowns just repaint the affected button).
 
-local ADDON, ns = ...
+local _, ns = ...
 local M = ns.MEDIA
 local GetNumSlots, ReadSlot, Categorize = ns.GetNumSlots, ns.ReadSlot, ns.Categorize
-local floor, ceil, max, min, abs, sort, find, upper, format = math.floor, math.ceil, math.max, math.min, math.abs, table.sort, string.find, string.upper, string.format
+local floor, ceil, max, min, abs, sort, find, format = math.floor, math.ceil, math.max, math.min, math.abs, table.sort, string.find, string.format
 local ipairs, pairs, wipe = ipairs, pairs, wipe
 
 ---------------------------------------------------------------------------
@@ -26,7 +26,6 @@ local ipairs, pairs, wipe = ipairs, pairs, wipe
 local TRIM   = { 0.23, 0.23, 0.25, 1 }     -- edge of common/empty slots
 local LINE   = { 1, 1, 1, 0.14 }           -- dividers
 local SLOTBG = { 0.08, 0.08, 0.09, 1 }
-local HEAD   = { 1, 0.82, 0, 1 }           -- Blizzard's normal (gold) label colour
 local MUTED  = { 0.55, 0.55, 0.55, 1 }
 
 local SLOT, GAP, PAD = 37, 5, 18
@@ -117,7 +116,8 @@ end
 ---------------------------------------------------------------------------
 -- State
 ---------------------------------------------------------------------------
-local frame, content, search, slotsText, barFill, money
+local frame, content, search, slotsText, barBg, barFill, money
+local reagentText, reagentBarBg, reagentBarFill      -- footer: the reagent bag's own counter
 local scroll, track, thumb, nativeBar, maxScroll = nil, nil, nil, nil, 0
 local contentW, contentH = 1, 1
 -- "Fit height to my items" fits when the bags open (or you change a setting /
@@ -125,6 +125,7 @@ local contentW, contentH = 1, 1
 -- items scroll instead of stretching the window.
 local lockedViewH, refitHeight = nil, true
 local tokens, numTokens, tokenButtons, footLine = {}, 0, {}, nil   -- backpack currencies
+local bagBorder                                                     -- Blizzard's dialog border (Background setting)
 local refitting, refitWidth = false, 0
 local bagList, inList = {}, {}
 local holders, buttons = {}, {}        -- holders[bag] = frame with ID = bag; buttons[bag][slot]
@@ -132,8 +133,9 @@ local sections, headers = {}, {}
 for i = 1, FREE_CAT do sections[i] = {} end
 local dirty, dirtyAll, layoutDirty = {}, true, true
 local freeButton, freeCount, totalSlots = nil, 0, 0
+local freeReagentButton, reagentFree, reagentTotal = nil, 0, 0   -- the reagent bag, counted apart
 local counter = 0
-local BAR_W = 120
+local BAR_W, BAR_GAP = 120, 16
 
 ---------------------------------------------------------------------------
 -- Item buttons
@@ -266,20 +268,22 @@ local function ScanBag(bag)
 	list.n = n
 end
 
--- Only plain bags count toward free space (not quivers, soul/herb bags,
--- the keyring or the retail reagent bag).
+-- Only plain bags count toward "free space" (not quivers, soul/herb bags or
+-- the keyring). The reagent bag (modern client) gets its own count.
 local GetFreeSlots = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
-local generalBag = {}
+local generalBag, reagentBag = {}, {}
 
 local function SyncBagList()
 	ns.BuildBagList(bagList)
-	wipe(inList); wipe(generalBag)
+	wipe(inList); wipe(generalBag); wipe(reagentBag)
 	local normal = NUM_BAG_SLOTS or 4
 	for _, bag in ipairs(bagList) do
 		inList[bag] = true; dirty[bag] = true
 		if bag >= 0 and bag <= normal then
 			local _, family = GetFreeSlots(bag)
 			generalBag[bag] = (family or 0) == 0
+		elseif ns.IsReagentBag(bag) then
+			reagentBag[bag] = (GetNumSlots(bag) or 0) > 0        -- equipped?
 		end
 	end
 	for bag, list in pairs(buttons) do
@@ -392,17 +396,77 @@ local function GetHeader(cat)
 	return h
 end
 
-local lastUsed, lastTotal
+local function FillBar(fill, used, total, width)
+	local f = total > 0 and used / total or 0
+	fill:SetWidth(max(px, width * f))
+	if f >= 1 then fill:SetColorTexture(0.9, 0.25, 0.2, 1)
+	elseif f >= 0.9 then fill:SetColorTexture(1, 0.55, 0.1, 1)
+	else fill:SetColorTexture(0.85, 0.85, 0.85, 1) end
+end
+
+-- Two counters side by side: your bags, then the reagent bag (only while one
+-- is equipped). Nothing shrinks or overlaps: the window's minimum width is
+-- measured from these strings and the gold (ns.MinColumns, below).
+local lastUsed, lastTotal, lastRUsed, lastRTotal
 local function UpdateFooter()
-	local used = totalSlots - freeCount
-	if used == lastUsed and totalSlots == lastTotal then return end
-	lastUsed, lastTotal = used, totalSlots
-	local f = totalSlots > 0 and used / totalSlots or 0
+	local used, rUsed = totalSlots - freeCount, reagentTotal - reagentFree
+	if used == lastUsed and totalSlots == lastTotal and rUsed == lastRUsed and reagentTotal == lastRTotal then return end
+	lastUsed, lastTotal, lastRUsed, lastRTotal = used, totalSlots, rUsed, reagentTotal
 	slotsText:SetText(format("%d |cff8c8c8c/|r %d", used, totalSlots))
-	barFill:SetWidth(max(px, BAR_W * f))
-	if f >= 1 then barFill:SetColorTexture(0.9, 0.25, 0.2, 1)
-	elseif f >= 0.9 then barFill:SetColorTexture(1, 0.55, 0.1, 1)
-	else barFill:SetColorTexture(0.85, 0.85, 0.85, 1) end
+	FillBar(barFill, used, totalSlots, BAR_W)
+	if reagentTotal > 0 then
+		reagentText:SetText(format("%d |cff8c8c8c/|r %d |cff8c8c8creagents|r", rUsed, reagentTotal))
+		FillBar(reagentBarFill, rUsed, reagentTotal, BAR_W)
+		reagentText:Show(); reagentBarBg:Show(); reagentBarFill:Show()
+	else
+		reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
+	end
+end
+
+---------------------------------------------------------------------------
+-- Hard size limits. A width or height that can't show the window properly
+-- is never allowed, however it's set (slider, corner grip, a saved value,
+-- a reagent bag or another digit of gold arriving):
+--  * at least enough columns for the footer: both counters and the gold
+--    side by side, never overlapping, and never fewer than MIN_COLS;
+--  * at most the columns that fit on the screen;
+--  * the item area at least ~3 rows, and at most what the screen leaves
+--    under the toolbar and footer.
+---------------------------------------------------------------------------
+local function ScreenSize()
+	local sc = UIParent:GetEffectiveScale() / frame:GetEffectiveScale()
+	local w, h = UIParent:GetWidth() * sc, UIParent:GetHeight() * sc
+	if w < 200 or h < 200 then return nil end        -- not sized yet (very early load)
+	return w, h
+end
+
+function ns.MaxColumns()
+	local screenW = ScreenSize()
+	if not screenW then return MAX_COLS end
+	local gutter = nativeBar and 12 or 0
+	return max(MIN_COLS, min(MAX_COLS, floor((screenW - PAD * 2 - gutter + GAP) / (SLOT + GAP))))
+end
+
+function ns.MinColumns()
+	local w = 4 + max(BAR_W, slotsText:GetStringWidth() or 0)
+	if reagentTotal > 0 then w = w + BAR_GAP + max(BAR_W, reagentText:GetStringWidth() or 0) end
+	w = w + 12 + (money:GetStringWidth() or 0) + 4
+	return max(MIN_COLS, min(ns.MaxColumns(), ceil((w + GAP) / (SLOT + GAP))))
+end
+
+function ns.ClampColumns(c)
+	return max(ns.MinColumns(), min(ns.MaxColumns(), floor((c or MIN_COLS) + 0.5)))
+end
+
+function ns.MaxViewHeight()
+	local _, screenH = ScreenSize()
+	if not screenH then return 1400 end
+	return max(MIN_VIEW, Snap(screenH - TOP_H - FOOT_H - 40))
+end
+
+function ns.ClampViewHeight(h)
+	if not h then return nil end
+	return max(MIN_VIEW, min(ns.MaxViewHeight(), floor(h + 0.5)))
 end
 
 -- Retail item buttons replace SetAlpha with one that only dims the icon; use
@@ -415,12 +479,25 @@ do
 	BaseSetAlpha = f or function(b, a) b:SetAlpha(a) end
 end
 
-local function ShowFreeCount()
-	local b = freeButton
+local REAGENT_TRIM = { 0.3, 0.45, 0.3, 1 }    -- the reagent tile's edge: a hint of Blizzard's green bag art
+
+local function ShowCount(b, n, trim)
 	if not b then return end
 	local c = b.fbCount
-	c:SetText(freeCount); c:SetTextColor(MUTED[1], MUTED[2], MUTED[3]); c:Show()
+	c:SetText(n); c:SetTextColor(MUTED[1], MUTED[2], MUTED[3]); c:Show()
+	b.fbEdge:SetVertexColor(trim[1], trim[2], trim[3], 1)
 	b.pCount = -1          -- our text replaced the stack count; repaint if it ever gets an item
+end
+
+local function ShowFreeCount()
+	ShowCount(freeButton, freeCount, TRIM)
+	ShowCount(freeReagentButton, reagentFree, REAGENT_TRIM)
+end
+
+-- "12" alone, or "12 bag, 8 reagent" while a reagent bag is equipped.
+local function FreeHeaderText()
+	if reagentTotal > 0 then return format("%d bag, %d reagent", freeCount, reagentFree) end
+	return freeCount
 end
 
 local function ApplySearch()
@@ -441,30 +518,42 @@ Layout = function()
 	layoutDirty = false
 	for i = 1, FREE_CAT do wipe(sections[i]) end
 	freeButton, freeCount, totalSlots = nil, 0, 0
+	freeReagentButton, reagentFree, reagentTotal = nil, 0, 0
 
 	for _, bag in ipairs(bagList) do
 		local list = buttons[bag]
 		local n = list and list.n or 0
-		local general = generalBag[bag]
-		if general then totalSlots = totalSlots + n end
+		local general, reagent = generalBag[bag], reagentBag[bag]
+		if general then totalSlots = totalSlots + n elseif reagent then reagentTotal = reagentTotal + n end
 		for slot = 1, n do
 			local b = list[slot]
 			if b.fbCat then
 				local s = sections[b.fbCat]; s[#s + 1] = b
+			elseif general then
+				freeCount = freeCount + 1
+				if not freeButton then freeButton = b else b:Hide() end
+			elseif reagent then
+				reagentFree = reagentFree + 1
+				if not freeReagentButton then freeReagentButton = b else b:Hide() end
 			else
-				if general then freeCount = freeCount + 1 end
-				if general and not freeButton then freeButton = b else b:Hide() end
+				b:Hide()
 			end
 		end
 	end
-	if freeButton then
-		-- Every item has a category (Miscellaneous catches the rest), so the
-		-- Free Space tile holds no items: it's the empty slot you drop onto
-		-- (e.g. the other half of a split stack). On by default; can be hidden.
-		if ns.db.showFreeSpace then sections[FREE_CAT][1] = freeButton else freeButton:Hide() end
-	end
+	-- Every item has a category (Miscellaneous catches the rest), so the Free
+	-- Space tiles hold no items: they're the empty slots you drop onto (e.g.
+	-- the other half of a split stack): one for your bags and, when a reagent
+	-- bag is equipped, one for it. On by default; can be hidden.
+	local freeS, show = sections[FREE_CAT], ns.db.showFreeSpace
+	if freeButton then if show then freeS[#freeS + 1] = freeButton else freeButton:Hide() end end
+	if freeReagentButton then if show then freeS[#freeS + 1] = freeReagentButton else freeReagentButton:Hide() end end
 
-	local cols = ns.db.columns
+	UpdateFooter()                                 -- strings first: the minimum width is measured from them
+	local cols = ns.ClampColumns(ns.db.columns)
+	if cols ~= ns.db.columns then
+		ns.db.columns = cols
+		if ns.RefreshOptions then ns.RefreshOptions() end
+	end
 	local width = cols * SLOT + (cols - 1) * GAP
 	local collapsed = ns.db.collapsed
 	local y = 0
@@ -474,13 +563,16 @@ Layout = function()
 		if #s > 0 then
 			local h = GetHeader(cat)
 			h:ClearAllPoints(); h:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y); h:SetWidth(width)
-			h.count:SetText(cat == FREE_CAT and freeCount or #s)
+			h.count:SetText(cat == FREE_CAT and FreeHeaderText() or #s)
 			h:Show()
 			y = y + HEADER_H + 5
 			if collapsed[cat] then
 				h.toggle:SetTexture(PLUS)
 				for _, b in ipairs(s) do b:Hide() end
 				y = y + SECTION_GAP - 5
+			elseif cat == FREE_CAT then
+				h.toggle:SetTexture(MINUS)
+				y = PlaceGrid(s, 1, #s, y, cols) + SECTION_GAP   -- bags tile first, reagent tile beside it: never sorted
 			elseif SPLIT_SETTING[cat] and ns.db[SPLIT_SETTING[cat]] ~= false then
 				h.toggle:SetTexture(MINUS)
 				if #s > 1 then sort(s, SortReagent) end
@@ -522,7 +614,6 @@ Layout = function()
 	contentW, contentH = width, max(y, 1)
 	ns.ApplyView()
 	if ns.RefitCurrencies then ns.RefitCurrencies() end
-	UpdateFooter()
 end
 
 ---------------------------------------------------------------------------
@@ -543,6 +634,7 @@ end
 
 local function UpdateMoney()
 	money:SetText(MoneyString(GetMoney()))
+	if frame:IsShown() and ns.MinColumns() > ns.db.columns then Layout() end   -- more digits: widen
 end
 
 -- Windows you click items away into (sell, mail, trade, bank, auction).
@@ -584,10 +676,11 @@ local function Update(force)
 		-- Re-sort right away unless gaps are being held (see HoldGaps), and
 		-- always just after Sort or when the Free Space tile itself got filled.
 		if force or GetTime() < (ns.sortingUntil or 0) or not HoldGaps()
-			or (freeButton and freeButton.fbRec.id) then Layout()
+			or (freeButton and freeButton.fbRec.id) or (freeReagentButton and freeReagentButton.fbRec.id) then Layout()
 		else
-			freeCount = 0
+			freeCount, reagentFree = 0, 0
 			for bag in pairs(generalBag) do if generalBag[bag] then freeCount = freeCount + (GetFreeSlots(bag) or 0) end end
+			for bag in pairs(reagentBag) do if reagentBag[bag] then reagentFree = reagentFree + (GetFreeSlots(bag) or 0) end end
 			ShowFreeCount(); UpdateFooter()
 			if not reflowWaiting then reflowWaiting = true; C_Timer.After(0.3, ReflowLater) end
 		end
@@ -642,7 +735,7 @@ local function UpdatePixels()
 	local s = frame:GetEffectiveScale()
 	px = (h and h > 0 and s and s > 0) and (768 / h / s) or 1
 	for i = 1, #hairlines do PlaceHairline(hairlines[i]) end
-	if barFill then barFill:SetHeight(Snap(4)) end
+	if barFill then barFill:SetHeight(Snap(4)); reagentBarFill:SetHeight(Snap(4)) end
 end
 ns.UpdatePixels = UpdatePixels
 
@@ -651,7 +744,25 @@ function ns.ApplyScale()
 	frame:SetScale(ns.db.scale)
 	UpdatePixels()
 	ns.ResetPosition()
-	ns.ApplyView()
+	-- A bigger scale can push the columns past the screen: the limits win.
+	if frame:IsShown() and ns.ClampColumns(ns.db.columns) ~= ns.db.columns then Layout() else ns.ApplyView() end
+end
+
+-- Background darkness behind the items. 80% is Blizzard's translucent Edit
+-- Mode dialog (the default look); 100% is as solid as its opaque dialogs
+-- (checked in Blizzard_SharedXML/Shared/Dialog/DialogTemplates.xml: the
+-- translucent border is a black "Bg" texture at 0.8, the opaque one at 1).
+-- The Settings window follows the same setting.
+local function SetBackground(border, a)
+	if not border then return end
+	if border.Bg then border.Bg:SetColorTexture(0, 0, 0, a)
+	elseif border.SetBackdropColor then border:SetBackdropColor(0, 0, 0, a) end
+end
+
+function ns.ApplyBackground()
+	local a = max(0.2, min(1, ns.db.background or 0.8))
+	SetBackground(bagBorder, a)
+	SetBackground(ns.optionsBorder, a)
 end
 
 function ns.Relayout()
@@ -662,14 +773,11 @@ end
 -- Height of the item area. If you've sized the window (corner grips or the
 -- Options slider) it stays that tall and scrolls; on "fit to items" it grows
 -- with your bags up to 80% of the screen, then scrolls.
-local function ScreenHeight()
-	return UIParent:GetHeight() * UIParent:GetEffectiveScale() / frame:GetEffectiveScale()
-end
-
 function ns.ViewHeight()
-	local screenH = ScreenHeight()
 	local fixed = ns.db.viewHeight
-	if fixed then return Snap(max(MIN_VIEW, min(fixed, screenH - TOP_H - FOOT_H - 40))) end
+	if fixed then return Snap(ns.ClampViewHeight(fixed)) end
+	local _, screenH = ScreenSize()
+	if not screenH then return Snap(max(MIN_VIEW, contentH)) end
 	return Snap(max(MIN_VIEW, min(contentH, floor(screenH * 0.8) - TOP_H - FOOT_H)))
 end
 
@@ -715,25 +823,39 @@ function ns.ScrollTo(v)
 end
 
 ---------------------------------------------------------------------------
--- Drop an item anywhere on the window: it goes into the first free slot of
--- a normal bag (checked live, so a slot changed this instant is never hit).
+-- Drop an item anywhere on the window: a reagent goes into the reagent bag
+-- first (setting "Prefer the reagent bag", unless it's full), anything else
+-- into the first free slot of a normal bag. Checked live, so a slot changed
+-- this instant is never hit.
 ---------------------------------------------------------------------------
 local PickupContainerItem = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
 local GetContainerItemID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
 
+local function DropIntoBag(bag, needFit)
+	local free, family = GetFreeSlots(bag)                -- live: catches bag swaps too
+	if (free or 0) == 0 then return false end
+	if needFit then
+		local kind, itemID = GetCursorInfo()
+		if (family or 0) == 0 or kind ~= "item" or not ns.FitsBagFamily(itemID, family) then return false end
+	elseif (family or 0) ~= 0 then
+		return false
+	end
+	for slot = 1, (GetNumSlots(bag) or 0) do
+		if not GetContainerItemID(bag, slot) then
+			PickupContainerItem(bag, slot)
+			return true
+		end
+	end
+	return false
+end
+
 function ns.StoreCursorItem()
 	if not (CursorHasItem and CursorHasItem() and PickupContainerItem) then return end
-	local normal = NUM_BAG_SLOTS or 4
-	for bag = 0, normal do
-		local free, family = GetFreeSlots(bag)                -- live: catches bag swaps too
-		if (family or 0) == 0 and (free or 0) > 0 then
-			for slot = 1, (GetNumSlots(bag) or 0) do
-				if not GetContainerItemID(bag, slot) then
-					PickupContainerItem(bag, slot)
-					return
-				end
-			end
-		end
+	if ns.REAGENT_BAG and ns.db.preferReagentBag ~= false and GetCursorInfo then
+		if DropIntoBag(ns.REAGENT_BAG, true) then return end
+	end
+	for bag = 0, (NUM_BAG_SLOTS or 4) do
+		if DropIntoBag(bag) then return end
 	end
 	if UIErrorsFrame and ERR_INV_FULL then UIErrorsFrame:AddMessage(ERR_INV_FULL, 1, 0.1, 0.1) end
 end
@@ -912,6 +1034,8 @@ local function Build()
 		})
 		border:SetBackdropColor(0, 0, 0, 0.8)
 	end
+	bagBorder = border
+	ns.ApplyBackground()
 
 	local title = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
 	title:SetPoint("TOP", 0, -15)
@@ -1053,10 +1177,18 @@ local function Build()
 
 	slotsText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
 	slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24)
-	local barBg = Tex(frame, "ARTWORK", 0, LINE)
+	barBg = Tex(frame, "ARTWORK", 0, LINE)
 	barBg:SetSize(BAR_W, 4); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14)
 	barFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
 	barFill:SetHeight(4); barFill:SetPoint("LEFT", barBg, "LEFT")
+	-- The reagent bag's counter sits to the right of the bag counter.
+	reagentText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+	reagentText:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 10)
+	reagentBarBg = Tex(frame, "ARTWORK", 0, LINE)
+	reagentBarBg:SetSize(BAR_W, 4); reagentBarBg:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 0)
+	reagentBarFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
+	reagentBarFill:SetHeight(4); reagentBarFill:SetPoint("LEFT", reagentBarBg, "LEFT")
+	reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
 
 	money = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
 	money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17)
@@ -1072,10 +1204,10 @@ local function Build()
 		local cx, cy = GetCursorPosition()
 		local dx, dy = cx / sc - rs.x, cy / sc - rs.y
 		local w = min(rs.right and (rs.w + dx) or (rs.w - dx), rs.maxW)
-		local cols = max(MIN_COLS, min(MAX_COLS, floor((w - PAD * 2 + GAP) / (SLOT + GAP) + 0.5)))
+		local cols = ns.ClampColumns(floor((w - PAD * 2 + GAP) / (SLOT + GAP) + 0.5))
 		local vh = ns.db.viewHeight
 		if vh or abs(dy) > 3 then                -- a sideways drag keeps "fit height" on
-			vh = max(MIN_VIEW, min(rs.maxH, floor(rs.h - dy + 0.5)))
+			vh = ns.ClampViewHeight(min(rs.maxH, rs.h - dy))
 		end
 		if cols ~= ns.db.columns then
 			ns.db.columns, ns.db.viewHeight = cols, vh
@@ -1299,6 +1431,7 @@ function ns.OnLoad()
 	Build()
 	ns.ResetPosition()
 	ns.ApplyScale()
+	ns.db.viewHeight = ns.ClampViewHeight(ns.db.viewHeight)   -- saved sizes obey the limits too
 	SyncBagList()
 	TakeOverBlizzardBags()
 

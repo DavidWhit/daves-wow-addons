@@ -222,9 +222,28 @@ local function IsCamping(rec)
 	return false
 end
 
+-- The reagent bag slot (bag 5 on the modern client: Enum.BagIndex.ReagentBag,
+-- checked in Blizzard's Forever source). nil on clients without one (Classic).
+local REAGENT_BAGS = NUM_REAGENTBAG_SLOTS or 0
+ns.REAGENT_BAG = REAGENT_BAGS > 0 and ((Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or (NUM_BAG_SLOTS or 4) + 1) or nil
+
 local function IsReagentBag(bag)
 	local first = (NUM_BAG_SLOTS or 4) + 1
-	return bag >= first and bag < first + (NUM_REAGENTBAG_SLOTS or 0)
+	return bag >= first and bag < first + REAGENT_BAGS
+end
+ns.IsReagentBag = IsReagentBag
+
+-- Can this item go into a bag of that family? Same test the game applies for
+-- quivers, herb bags and the reagent bag: the item's family bits must overlap
+-- the bag's (C_Item.GetItemFamily / C_Container.GetContainerNumFreeSlots, both
+-- documented on Forever). A plain bag (family 0) takes anything.
+local GetItemFamily = (C_Item and C_Item.GetItemFamily) or GetItemFamily
+local band = bit and bit.band
+function ns.FitsBagFamily(itemID, bagFamily)
+	if (bagFamily or 0) == 0 then return true end
+	if not (itemID and GetItemFamily and band) then return false end
+	local fam = GetItemFamily(itemID)
+	return fam ~= nil and band(fam, bagFamily) ~= 0
 end
 
 function ns.Categorize(bag, slot, rec)
@@ -273,6 +292,8 @@ local DEFAULTS = {
 	splitReagents = true, splitConsumables = true,
 	showCurrencies = true, showFreeSpace = true,     -- Free Space: drop target for split stacks
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot
+	preferReagentBag = true,                         -- reagents dropped on the window go into the reagent bag first
+	background = 0.8,                                -- window background darkness (0.8 = Blizzard's translucent dialog)
 }
 
 local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
