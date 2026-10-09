@@ -5,7 +5,7 @@
 --                      glyphs), holy (twinkling stars)
 --   Effects_Gathering  fishing (the pond, the bobber), mining (the cart, the pickaxe), skinning (the pelt roll)
 --   Effects_Forge      blacksmithing (the hammer, the heat, the quench) and smelting (the ladle, the pour)
---   Effects_Storm      lightning (the cloud banks and their weather, the bolts)
+--   Effects_Storm      lightning (the painted clouds, the bolts)
 --   Effects_Alchemy    the glassware bench and the trough that fills like a liquid
 --   Effects_Tailor     the loom: shuttle, reed, the woven cloth
 --   Effects_Leather    tooled leather panels laced shut by a needle

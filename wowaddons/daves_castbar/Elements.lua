@@ -80,8 +80,9 @@ ns.ELEMENTS = {
 		},
 	},
 	lightning = {
-		-- a dark storm: cloud banks at four depths drifting at their own pace, forked bolts striking inside the
-		-- filled part and lighting the clouds round them, a faint glow on the leading edge
+		-- a dark storm: painted clouds (the one cloud texture, placed afresh every cast) drifting at their own
+		-- pace, forked bolts striking inside the filled part and lighting the clouds near them, a faint glow on
+		-- the leading edge
 		label = "Lightning", border = C(110, 140, 255), glow = C(130, 170, 255), spark = C(200, 225, 255), veil = C(60, 70, 160),
 		layers = { { tex = "storm_sky" } },
 		storm = true,

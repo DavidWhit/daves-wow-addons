@@ -1,74 +1,58 @@
 -- daves_castbar / Effects_Storm.lua
--- Lightning: cloud banks at four depths drifting over a dark sky under a weather that changes every cast, forked
--- bolts striking and lighting them from within. One of the effect files (see Effects.lua): its own 200
--- top-level locals, the shared helpers from ns.FXi, and its hooks registered at the end.
+-- Lightning: painted clouds drifting over a dark sky, forked bolts striking and lighting them from within. One of
+-- the effect files (see Effects.lua): its own 200 top-level locals, the shared helpers from ns.FXi, and its hooks
+-- registered at the end.
 
 local _, ns = ...
 local I = ns.FXi
-local MEDIA, rand, Smooth, ContentTex = I.MEDIA, I.rand, I.Smooth, I.ContentTex
+local rand, ContentTex = I.rand, I.ContentTex
 local content, cfg, W, H, clock = nil, nil, 300, 26, 0   -- the core's state, copied in by sync
 
 ---------------------------------------------------------------------------
--- Lightning: a dark storm. Up to four cloud banks (far to near; the weather below picks which, from which painted
--- set) drift over the sky layer at their own pace, slowly swelling; forked bolts (p_bolts) strike inside the filled part every 0.08-0.3 s and light the
--- banks round them from within (each bank's texture again, additive, through a soft round mask that follows the
--- strike); now and then a dim sheet of lightning; a faint glow on the leading edge. Nothing turns: the bolts are
--- painted sprites, mirrored for variety.
+-- Lightning: a dark storm (the concept's C2 "Reference clouds, bank", 2026-10-09). The cloud is one painted texture,
+-- storm_cloud (the user's own cloud painting, cut out by Make-CastbarMedia.ps1 StormCloud). Every cast lays copies of it
+-- about the bar afresh: a far row of small faint ones high up and a near row of big ones with their bases low,
+-- overlapping into one bank, each mirrored or not, drifting at its own pace, bobbing a little and wrapping round when
+-- it leaves the bar. Forked bolts (p_bolts, painted sprites, mirrored for variety) strike inside the filled part every
+-- 0.08-0.3 s and light the clouds near them from within (the same cloud again, added, fading with distance); now and
+-- then a dim sheet of lightning; a faint glow on the leading edge. Nothing turns.
 ---------------------------------------------------------------------------
 local storm                  -- this cast's lightning state
-local STORM_BANKS = {        -- as Make-CastbarMedia.ps1 STORM_BANKS: top edge y (bar heights), alpha, drift (bar heights a second)
-	{ y = .06, a = .75, v = .05 }, { y = .32, a = .95, v = .1 }, { y = .58, a = 1, v = .17 }, { y = .9, a = 1, v = .26 },
-}
--- The weather, one per cast in turn (as the concept, lightning.js WEATHERS). Textures can't be repainted per cast, so
--- every bank is painted in four sets (Make-CastbarMedia.ps1 STORM_VARIANTS: storm_bank, storm_tower, storm_ragged,
--- storm_over) and a weather picks its set and which banks show, tints them and the sky, scales their drift, and sets
--- the chance of stray rows and of a bank drifting backwards.
-local WEATHERS = {
-	{ name = "layered", banks = { 1, 2, 3, 4 }, set = "bank", tint = { 1, 1, 1 }, v = 1, stray = .5, back = .2 },
-	{ name = "towering", banks = { 1, 2, 3, 4 }, set = "tower", tint = { .96, .96, 1 }, v = .8, stray = .3, back = .1 },
-	{ name = "scattered", banks = { 2, 3, 4 }, set = "ragged", tint = { 1, 1, .94 }, v = 1.3, stray = .8, back = .35 },
-	{ name = "overcast", banks = { 1, 2, 3, 4 }, set = "over", tint = { .86, .88, .96 }, v = .6, stray = .2, back = 0 },
-	{ name = "ragged squall", banks = { 1, 3, 4 }, set = "ragged", tint = { .92, 1, 1 }, v = 1.8, stray = 1, back = .5 },
-}
-local weatherTurn = math.random(#WEATHERS) - 1
-local BANK_W, BANK_H, BANK_TOP = 16, 2, .9       -- a bank texture in bar heights; its billows hang from BANK_TOP
+-- The cloud texture is 2 by 1 (512x256); the painted cloud fills its width and 0.968 of its height, so a cloud h tall
+-- is drawn CLOUD_H * h tall and CLOUD_W * h wide.
+local CLOUD_H = 1 / .968
+local CLOUD_W = 2 * CLOUD_H
+local FAR_MAX, NEAR_MAX = 24, 24   -- clouds in each row at most (an 800-wide bar wants about 20 and 24)
 local BOLT_W, BOLT_H, BOLT_TOP = 2.5, 1.25, .075 -- a bolt cell in bar heights; its top this far above the bar
 local BOLTS_MAX = 6
 
+-- lay a row of clouds: height, centre (bar heights from the top), alpha, drift (bar heights a second), spacing
+local function LayRow(row, n, h0, h1, y0, y1, alpha, v0, v1, sp0, sp1)
+	local x = -H
+	for i = 1, #row do
+		local q = row[i]
+		if x < W + H and n < #row then
+			n = n + 1
+			q.on = true
+			q.x, q.y, q.h = x, H * rand(y0, y1), H * rand(h0, h1)
+			q.flip, q.v, q.ph, q.a = math.random() < .5, rand(v0, v1) * H, rand(0, 6.283), alpha
+			q.tex:SetTexCoord(q.flip and 1 or 0, q.flip and 0 or 1, 0, 1)
+			q.lit:SetTexCoord(q.flip and 1 or 0, q.flip and 0 or 1, 0, 1)
+			q.tex:SetSize(q.h * CLOUD_W, q.h * CLOUD_H); q.lit:SetSize(q.h * CLOUD_W, q.h * CLOUD_H)
+			q.tex:SetDesaturation(0); q.tex:SetAlpha(alpha); q.tex:Show()
+			q.litOn = false; q.lit:Hide()
+			x = x + H * rand(sp0, sp1)
+		else
+			q.on = false; q.tex:Hide(); q.lit:Hide()
+		end
+	end
+end
+
 local function MakeStorm()
 	local c = content.storm
-	weatherTurn = weatherTurn % #WEATHERS + 1
-	local Wt = WEATHERS[weatherTurn]
-	storm = { weather = Wt, u = {}, ph = {}, sx = {}, flip = {}, dy = {}, v = {}, a = {}, breath = {}, src = {}, nextBolt = .15,
-		flash = 0, flashX = 0, sheet = 0, sheetX = 0, roll = ns.Wobble(2), grey = 0 }
-	-- every cast the banks are laid out afresh: stretched or squeezed, mirrored or not, a little higher or lower,
-	-- drifting at their own speed (some backwards), breathing at their own pace, so the sky never repeats
-	for i = 1, #STORM_BANKS + 2 do
-		storm.u[i], storm.ph[i] = rand(0, 1), rand(0, 6.283)
-		storm.sx[i], storm.flip[i] = rand(.7, 1.45), math.random() < .5
-		storm.dy[i], storm.v[i], storm.a[i] = rand(-.09, .09), rand(.7, 1.3) * Wt.v * (math.random() < Wt.back and -1 or 1), rand(.85, 1)
-		storm.breath[i] = rand(.03, .08)
-	end
-	local shown = {}
-	for i = 1, #STORM_BANKS do
-		local on = false
-		for _, b in ipairs(Wt.banks) do if b == i then on = true end end
-		if on then shown[#shown + 1] = i end
-		local file = MEDIA .. "storm_" .. Wt.set .. i
-		c.banks[i]:SetTexture(file, "REPEAT", "CLAMP"); c.lits[i]:SetTexture(file, "REPEAT", "CLAMP")
-		c.banks[i]:SetVertexColor(Wt.tint[1], Wt.tint[2], Wt.tint[3])
-		c.banks[i]:SetDesaturation(0); c.banks[i]:SetShown(on)
-		c.lits[i]:Hide()
-	end
-	for i, t in ipairs(c.loose) do   -- now and then a stray, fainter row of clouds (a shown bank again) at another height
-		local k, src = #STORM_BANKS + i, shown[math.random(#shown)]
-		storm.src[i] = src
-		storm.dy[k], storm.v[k], storm.a[k] = rand(-.35, .55), storm.v[src] * rand(.6, 1.6) * (math.random() < .4 and -1 or 1), rand(.25, .45)
-		t:SetTexture(MEDIA .. "storm_" .. Wt.set .. src, "REPEAT", "CLAMP")
-		t:SetVertexColor(Wt.tint[1], Wt.tint[2], Wt.tint[3])
-		t:SetDesaturation(0); t:SetShown(math.random() < Wt.stray)
-	end
-	ns.TintLayer(content, 1, Wt.tint[1], Wt.tint[2], Wt.tint[3])   -- the sky takes the weather's tint too
+	storm = { nextBolt = .15, flash = 0, flashX = 0, sheet = 0, sheetX = 0, roll = ns.Wobble(2), grey = 0, H = H }
+	LayRow(c.far, 0, .45, .7, .1, .35, .65, .03, .06, 1.4, 2.2)
+	LayRow(c.near, 0, 1.3, 1.7, .6, .8, 1, .07, .13, 1.3, 1.8)
 	for _, b in ipairs(c.bolts) do b.on = false; b.tex:Hide(); b.tex:SetDesaturation(0) end
 	c.flash:Hide(); c.edge:Hide()
 end
@@ -77,15 +61,37 @@ local function HideStorm()
 	if not (content and content.storm) then return end
 	local c = content.storm
 	for _, b in ipairs(c.bolts) do b.on = false; b.tex:Hide() end
-	for i = 1, #STORM_BANKS do c.lits[i]:Hide() end
-	for _, t in ipairs(c.loose) do t:Hide() end
+	for _, row in ipairs({ c.far, c.near }) do
+		for _, q in ipairs(row) do q.on = false; q.tex:Hide(); q.lit:Hide() end
+	end
 	c.flash:Hide(); c.edge:Hide()
+end
+
+-- the clouds of one row: drift, wrap, bob, and light up near a strike
+local function UpdateRow(row, s, dt, lum, cx, reach, lit)
+	for _, q in ipairs(row) do
+		if q.on then
+			q.x = q.x + q.v * dt
+			local span = W + q.h * 2.4
+			if q.x > W + q.h * 1.2 then q.x = q.x - span elseif q.x < -q.h * 1.2 then q.x = q.x + span end
+			local y = H - (q.y + math.sin(clock * .35 + q.ph) * H * .03)   -- up from the bar's bottom
+			q.tex:ClearAllPoints(); q.tex:SetPoint("CENTER", content, "BOTTOMLEFT", q.x, y)
+			local d = math.abs(cx - q.x) / reach
+			local k = lum * math.max(0, 1 - d * d)
+			local on = k > .02
+			if on ~= q.litOn then q.litOn = on; q.lit:SetShown(on) end
+			if on then
+				q.lit:ClearAllPoints(); q.lit:SetPoint("CENTER", content, "BOTTOMLEFT", q.x, y)
+				q.lit:SetAlpha(q.a * k * lit)
+			end
+		end
+	end
 end
 
 local function UpdateStorm(dt, fillW, casting)
 	local s, c = storm, content.storm
 	local lit = 1 - s.grey
-	-- now and then a dim sheet of lightning somewhere in the banks
+	-- now and then a dim sheet of lightning somewhere in the clouds
 	if casting and math.random() < dt * .8 then s.sheet, s.sheetX = rand(.35, .6), rand(0, math.max(1, fillW)) end
 	s.sheet = math.max(0, s.sheet - dt * 3)
 	-- strikes: a forked bolt flickers in and is gone in a fraction of a second
@@ -120,38 +126,11 @@ local function UpdateStorm(dt, fillW, casting)
 			end
 		end
 	end
-	-- the banks drift, rise and fall a little, and slowly swell (taller and shorter, pinned near their base)
-	local span = W / (BANK_W * H)
-	local lum, cx, reach = s.flash * .5, s.flashX, H * 2.6
+	-- the clouds drift and bob; a strike (or a sheet) lights the ones near it from within, fading with distance
+	local lum, cx, reach = s.flash * .6, s.flashX, H * 2.4
 	if s.sheet * .35 > lum then lum, cx, reach = s.sheet * .35, s.sheetX, H * 2 end
-	lum = lum * lit
-	for i = 1, #STORM_BANKS + #c.loose do
-		local B = STORM_BANKS[i] or STORM_BANKS[s.src[i - #STORM_BANKS]]
-		local bank = c.banks[i] or c.loose[i - #STORM_BANKS]
-		if bank:IsShown() then
-			local sp = span / s.sx[i]   -- stretched banks show less of the texture across the bar
-			s.u[i] = (s.u[i] + B.v * s.v[i] * dt / (BANK_W * s.sx[i])) % 1   -- (Lua's % keeps a backwards drift in 0..1)
-			local bh = BANK_H * H * (1 + s.breath[i] * math.sin(clock * .45 + s.ph[i] * 1.7))
-			local y = (B.y + s.dy[i] - BANK_TOP) * H + math.sin(clock * .3 + s.ph[i]) * H * .03 - (bh - BANK_H * H) * .6
-			local l, r = s.u[i], s.u[i] + sp
-			if s.flip[i] then l, r = r, l end
-			bank:ClearAllPoints(); bank:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
-			bank:SetSize(W, bh); bank:SetTexCoord(l, r, 0, 1)
-			bank:SetAlpha(B.a * s.a[i])
-			local glow = c.lits[i]
-			if glow then
-				glow:SetShown(lum > .02)
-				if lum > .02 then   -- lit from within round the strike: the same bank, added, through the round mask
-					glow:ClearAllPoints(); glow:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y)
-					glow:SetSize(W, bh); glow:SetTexCoord(l, r, 0, 1)
-					glow:SetAlpha(math.min(1, lum * 1.8) * B.a * s.a[i])
-				end
-			end
-		end
-	end
-	c.mask:ClearAllPoints()
-	c.mask:SetPoint("CENTER", content, "BOTTOMLEFT", cx, H * .5)
-	c.mask:SetSize(reach * 2, reach * 2)
+	UpdateRow(c.far, s, dt, lum, cx, reach, lit)
+	UpdateRow(c.near, s, dt, lum, cx, reach, lit)
 	-- a whole-cloud flash behind the strike
 	c.flash:SetShown(s.flash > 0)
 	if s.flash > 0 then
@@ -170,25 +149,39 @@ local function UpdateStorm(dt, fillW, casting)
 	end
 end
 
+-- the bar was resized mid-cast: scale every cloud's size and place with the height
+local function Resize(h0)
+	local c = content.storm
+	local k = H / h0
+	for _, row in ipairs({ c.far, c.near }) do
+		for _, q in ipairs(row) do
+			if q.on then
+				q.x, q.y, q.h, q.v = q.x * k, q.y * k, q.h * k, q.v * k
+				q.tex:SetSize(q.h * CLOUD_W, q.h * CLOUD_H); q.lit:SetSize(q.h * CLOUD_W, q.h * CLOUD_H)
+			end
+		end
+	end
+end
+
 ---------------------------------------------------------------------------
 -- Hooks (Effects.lua calls them)
 ---------------------------------------------------------------------------
 I.Register({
 	key = "storm",
-	sync = function(c, cf, w, h, t) content, cfg, W, H, clock = c, cf, w, h, t end,
+	sync = function(c, cf, w, h, t)
+		local h0 = H
+		content, cfg, W, H, clock = c, cf, w, h, t
+		if storm and content and content.storm and h ~= h0 then Resize(h0); storm.H = h end
+	end,
 	create = function(c)
 		local ccfg = c.cfg
-		if ccfg.storm then   -- the cloud banks over the sky layer, their lit copies, the bolts, the flash, the leading edge
-			local s = { banks = {}, lits = {}, bolts = {} }
-			s.mask = Smooth(c:CreateMaskTexture())   -- a soft round glow that follows the strike; never hidden (a hidden mask stops masking)
-			s.mask:SetTexture(MEDIA .. "p_soft", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-			for i = 1, #STORM_BANKS do
-				s.banks[i] = ContentTex(c, "storm_bank" .. i, i, "BLEND", "REPEAT")
-				s.lits[i] = ContentTex(c, "storm_bank" .. i, 5, "ADD", "REPEAT")
-				s.lits[i]:AddMaskTexture(s.mask)
+		if ccfg.storm then   -- the clouds over the sky layer (far row behind the near one), their lit copies, the bolts, the flash, the leading edge
+			local s = { far = {}, near = {}, bolts = {} }
+			for i = 1, FAR_MAX do s.far[i] = { tex = ContentTex(c, "storm_cloud", 1), lit = ContentTex(c, "storm_cloud", 5, "ADD") } end
+			for i = 1, NEAR_MAX do s.near[i] = { tex = ContentTex(c, "storm_cloud", 2), lit = ContentTex(c, "storm_cloud", 5, "ADD") } end
+			for _, row in ipairs({ s.far, s.near }) do
+				for _, q in ipairs(row) do q.lit:SetVertexColor(150 / 255, 170 / 255, 1) end   -- lit from within: a blue-white glow
 			end
-			s.loose = {}   -- stray clouds: a shown bank's row again, faint, at a random height (some casts; MakeStorm sets the texture)
-			for i = 1, 2 do s.loose[i] = ContentTex(c, "storm_bank" .. (i + 1), 1, "BLEND", "REPEAT") end
 			for i = 1, BOLTS_MAX do s.bolts[i] = { tex = ContentTex(c, "p_bolts", 5, "ADD") } end
 			s.flash = ContentTex(c, "p_soft", 5, "ADD")
 			s.flash:SetVertexColor(110 / 255, 140 / 255, 1)
@@ -205,8 +198,9 @@ I.Register({
 	interrupted = function(k)
 		if storm and content and content.storm then   -- the bolts and glows fade by (1 - grey) in UpdateStorm
 			storm.grey = k
-			for i = 1, #STORM_BANKS do content.storm.banks[i]:SetDesaturation(k) end
-			for _, t in ipairs(content.storm.loose) do t:SetDesaturation(k) end
+			for _, row in ipairs({ content.storm.far, content.storm.near }) do
+				for _, q in ipairs(row) do q.tex:SetDesaturation(k) end
+			end
 		end
 	end,
 	clear = function()

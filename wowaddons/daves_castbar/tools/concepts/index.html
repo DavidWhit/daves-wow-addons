@@ -42,7 +42,7 @@
 window.onerror = (m, src, line) => { document.getElementById('errors').textContent += `${m} (${(src || '').split('/').pop()}:${line})\n`; };
 const CONCEPTS = [];
 // The final drafts (2026-10-08). ?all shows every variant, ?only=skin,smith-a a selection.
-const PICKS = ['skin-c2', 'light-a3', 'smelt-a3', 'smith-a', 'alch-b2', 'tail-a2', 'ench-c', 'ench-c3', 'lw-b'];   // final drafts
+const PICKS = ['skin-c2', 'light-c2', 'smelt-a3', 'smith-a', 'alch-b2', 'tail-a2', 'ench-c', 'ench-c3', 'lw-b'];   // final drafts
 
 // ------------------------------------------------------------------ helpers for concept files
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -224,6 +224,8 @@ function start() {
 <script src="skinning.js"></script>
 <script src="lightning.js"></script>
 <script src="lightning_painted.js"></script>
+<script src="ref_cloud_data.js"></script>
+<script src="lightning_sprites.js"></script>
 <script src="smelting.js"></script>
 <script src="smelting_foundry.js"></script>
 <script src="blacksmithing.js"></script>

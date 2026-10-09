@@ -1803,9 +1803,9 @@ public static class CastbarArt
 	//                its alpha is the metal between the plates (.7), the plates (.4) and their edges (1), so the
 	//                plates stay darker than the metal and their edges brighter, as the concept paints them
 	//   smelt_hot    the fresh pour behind the landing point, opaque where the metal is molten (the plates are gone)
-	//   smelt_front  the pour's rounded front: a cap of the bar's dark over the fill's last SMELT_FRONT bar heights
+	//   smelt_nose   the pour's rounded front: a mask over the fill's last half bar height (a soft D-shaped nose)
 	//   smelt_dark   the track: the bar's dark interior ahead of the pour
-	const double SMELT_BASE = 0.09, SMELT_SKIN = 0.135, SMELT_FRONT = 0.45;
+	const double SMELT_BASE = 0.09, SMELT_SKIN = 0.135;
 	static readonly double[] SMELT_DARK = { 16/255.0, 15/255.0, 20/255.0 };
 	class Plate { public double X, Y; public List<double[]> Pts, Hi; public double Var; }
 	static List<Plate> plates;
@@ -1912,18 +1912,19 @@ public static class CastbarArt
 		}
 		return img;
 	}
-	// The pour's rounded front, as the concept's quarter-round nose: the bar's dark where there is no metal yet,
-	// over the fill's last SMELT_FRONT bar heights (64 px square, drawn SMELT_FRONT wide and a bar high).
-	public static Img SmeltFront()
+	// The pour's rounded front, as the concept's nose: a mask (white = kept) Effects_Forge.lua anchors to the fill's
+	// edge, half a bar height wide and a bar high, on everything in the smelting fill. Its left column is solid, so
+	// CLAMP keeps all of the fill left of it; its right side is a soft D: the fill's end rounds in most at the top,
+	// bulges out at just over half height and comes in a little at the bottom, the edge fading over .14 of its width.
+	// No painted dark cap and no straight clip line: the hot pool simply rounds off into the dark track.
+	public static Img SmeltNose()
 	{
 		var img = new Img(64, 64);
 		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
 		{
 			double u = (x + 0.5)/64, v = (y + 0.5)/64;
-			double top = SMELT_BASE + (1 - SMELT_BASE)*(1 - Math.Sqrt(Math.Max(0, 1 - u*u)));   // the metal's surface here
-			double a = 1 - Smooth(top - 0.05, top + 0.05, v);   // a soft edge, so the nose rounds off instead of cutting a block
-			a = Math.Max(a, Smooth(0.93, 0.99, u));             // the last columns fully dark: no hot sliver at the fill edge
-			img.Set(x, y, SMELT_DARK[0], SMELT_DARK[1], SMELT_DARK[2], a);
+			double q = (v - 0.58)/0.58, edge = 0.22 + 0.78*Math.Sqrt(Math.Max(0, 1 - q*q));
+			img.Set(x, y, 1, 1, 1, 1 - Smooth(edge - 0.07, edge + 0.07, u));
 		}
 		return img;
 	}
@@ -2398,10 +2399,9 @@ public static class CastbarArt
 	}
 
 	// ================================================================ live-drawn pieces (vines, flowers, twinkles)
-	// ================================================================ LIGHTNING: cloud banks at four depths, forked bolts striking inside
-	// storm_sky (the layer) is the dark sky behind the banks. storm_bank1..4 are four tiling cloud banks, far to
-	// near, each 16 bar heights wide and 2 tall (64 px per bar height); a bank's billows hang from BANK_TOP bar
-	// heights below its top edge. p_bolts holds 4x2 forked bolts, each cell 2.5 by 1.25 bar heights (BOLT_PX per bar
+	// ================================================================ LIGHTNING: painted clouds over a dark sky, forked bolts striking inside
+	// storm_sky (the layer) is the dark sky behind the clouds. storm_cloud is the one cloud (StormCloud below), placed
+	// as sprites by Effects_Storm.lua. p_bolts holds 4x2 forked bolts, each cell 2.5 by 1.25 bar heights (BOLT_PX per bar
 	// height), the bolt running from 0.05 above the bar to 0.05 below it, the cell's top 0.075 above the bar.
 	public static Img StormSky()
 	{
@@ -2417,126 +2417,70 @@ public static class CastbarArt
 		return img;
 	}
 
-	// top rgb, mid rgb, underside rgb, y, base, thickness, cloud length min/max, gap min/max (bar heights)
-	static readonly double[][] STORM_BANKS = {
-		new double[] { 84, 88, 160, 52, 56, 116, 30, 32, 78, .06, .36, .7, 2.0, 4.5, 1.6, 3.2 },
-		new double[] { 96, 106, 184, 50, 57, 122, 24, 26, 64, .32, .62, .8, 2.0, 4.0, 1.8, 3.6 },
-		new double[] { 110, 126, 206, 46, 53, 116, 14, 15, 40, .58, .9, .85, 2.0, 3.5, 2, 4 },
-		new double[] { 74, 84, 162, 30, 34, 82, 8, 8, 24, .9, 1.3, .9, 2.0, 3.5, 2.4, 4.6 },
-	};
-	public const double BANK_TOP = 0.9;
-	static double SoftEll(double dx, double dy, double rx, double ry, double blur)   // coverage of a blurred ellipse
+	// ---------------------------------------------------------------- the cloud: the user's reference painting, cut out
+	// storm_cloud (512x256): the painted cloud of tools/ref_cloud.jpg (the user's indigo cloud painting, 2026-10-09, a JPEG
+	// over a checkerboard, scaled to 1000 px wide), keyed as the concept
+	// does (tools/concepts/lightning_sprites.js): alpha from how much bluer than red a pixel is (the checker is neutral),
+	// the matte choked by a pixel, the edge pixels darkened toward the underside blue-grey so no light rim is left, the
+	// alpha softened by a small blur (the colours stay sharp), then scaled to fill the texture's width; the cloud is
+	// CLOUD_FILL of the texture's height. The game draws the whole texture at (2 / CLOUD_FILL) by (1 / CLOUD_FILL) of
+	// the cloud height it wants (Effects_Storm.lua CLOUD_W/CLOUD_H).
+	public const double CLOUD_FILL = 0.968;
+	public static Img StormCloud(string path)
 	{
-		double e = Math.Sqrt((dx/rx)*(dx/rx) + (dy/ry)*(dy/ry)), s = blur/Math.Min(rx, ry);
-		return Smooth(1 + s, 1 - s, e);
-	}
-	// A bank is a row of clouds with sky between them. Each cloud is a run of rounded billows of mixed sizes along
-	// its top (overlapping into a scalloped silhouette, tallest mid-cloud, rounded at both ends) over a belly of
-	// lower lobes, so the underside bulges gently. Every billow is lit on its upper side and shaded under its curve,
-	// and the bank darkens toward its underside.
-	// The weathers (as the concept's WEATHERS, lightning.js): the clouds are cut differently for each, so every bank is
-	// painted in four variants and the addon picks the weather's set per cast: cloud length and gap scale, thickness,
-	// how often billows stack into towers, and torn tufts and wisps (ragged).
-	//   storm_bank1..4   layered (the approved look)      storm_tower1..4   towering: longer, thicker, stacked billows
-	//   storm_ragged1..4 scattered / ragged squall: short clouds, wide gaps, torn edges      storm_over1..4  overcast: long flat banks, little sky
-	static readonly double[][] STORM_VARIANTS = {   // cloud, gap, thick, tower, ragged
-		new[] { 1.0, 1.0, 1.0, .45, 0 }, new[] { 1.3, .8, 1.25, .8, .1 }, new[] { 1.0, 1.1, 1.0, .45, .22 }, new[] { 2.0, .35, .75, .15, 0 },
-	};
-	// Every variant keeps the layered set's long scalloped banks with continuous undersides: towers only ride on a
-	// billow that is part of the bank (two high at most, wide enough to merge with it), and the ragged tufts sit inside
-	// the cloud's ends and under its belly where they join the silhouette, never alone in the sky as separate blobs.
-	public static Img StormBank(int k) { return StormBank(k, 0); }
-	public static Img StormBank(int k, int variant)
-	{
-		const int BW = 1024, BH = 128; const double P = 64;
-		var B = STORM_BANKS[k]; var V = STORM_VARIANTS[variant]; var rnd = new Random(620 + k*17 + variant*101);
-		double y0 = BANK_TOP*P, depth = (B[10] - B[9])*P, thick = B[11]*V[2], tower = V[3], ragged = V[4];
-		double cloud0 = B[12]*V[0], cloud1 = B[13]*V[0], gap0 = B[14]*V[1], gap1 = B[15]*V[1];
-		var lobes = new List<double[]>(); var bellies = new List<double[]>();   // x, y, rx, ry in pixels, y down
-		double start = Rnd(rnd, 0, 2*P), cx = start;
-		while (true)
+		int sw, sh; double[] r, g, b;
+		using (var bmp = new System.Drawing.Bitmap(path))
 		{
-			double room = start + BW - P*gap0 - cx;   // leave a gap before the first cloud, which follows across the seam
-			if (room < P*cloud0*0.7) break;
-			double len = Math.Min(P*Rnd(rnd, cloud0, cloud1), room);
-			for (double px = cx + P*.35; px < cx + len - P*.3; px += P*Rnd(rnd, .55, .95))
-			{
-				double dome = Math.Sin(Math.PI*Clamp((px - cx)/len));
-				double r = P*Rnd(rnd, .32, .6)*thick*(.55 + .45*dome);
-				double ly = y0 + depth*.25 - dome*P*Rnd(rnd, .12, .28) - r*.35;
-				lobes.Add(new[] { px, ly, r*Rnd(rnd, 1.4, 1.9), r });
-				// smaller billows riding on top for the cauliflower scallops; under a towering weather they stack into towers
-				double[] last = lobes[lobes.Count - 1]; int stack = 0;
-				while (rnd.NextDouble() < tower*dome && stack < (tower > .7 ? 2 : 1))
-				{
-					// wide and low enough to merge with the billow under it: one mass, not a ball on a ball
-					last = new[] { last[0] + Rnd(rnd, -.15, .15)*P, last[1] - last[3]*.42, last[2]*.88, last[3]*.6, 1 };   // 1: no shading arc under it
-					lobes.Add(last); stack++;
-				}
-			}
-			foreach (double ex in new[] { cx + P*.35, cx + len - P*.35 }) lobes.Add(new[] { ex, y0 + depth*.3, P*.38*thick, P*.32*thick });
-			for (double px = cx + P*.4; px < cx + len - P*.4; px += P*Rnd(rnd, .6, 1))
-			{
-				double dome = Math.Sin(Math.PI*Clamp((px - cx)/len));
-				bellies.Add(new[] { px, y0 + depth*(.45 + .15*dome), P*Rnd(rnd, .6, .95), depth*(.35 + .2*dome) });
-			}
-			// ragged: torn tufts in the cloud's ends and small wisps under its belly, all overlapping the cloud so they
-			// tear its silhouette rather than float beside it
-			for (int i = 0; i < ragged*len/P*2; i++)
-			{
-				bool nearEnd = rnd.NextDouble() < .5;
-				double px = nearEnd ? (rnd.NextDouble() < .5 ? cx + Rnd(rnd, .05, .5)*P : cx + len - Rnd(rnd, .05, .5)*P) : cx + Rnd(rnd, .2, .8)*len;
-				double r = P*Rnd(rnd, .12, .25)*thick;
-				// no lit rim or shading arc of their own (the 1): a tuft tears the edge without reading as another ball
-				if (nearEnd) lobes.Add(new[] { px, y0 + depth*Rnd(rnd, .15, .45), r*Rnd(rnd, 1.4, 2.2), r, 1 });
-				else bellies.Add(new[] { px, y0 + depth*Rnd(rnd, .55, .78), r*Rnd(rnd, 1.6, 2.6), r*.6 });
-			}
-			cx += len + P*Rnd(rnd, gap0, gap1);
+			sw = bmp.Width; sh = bmp.Height; r = new double[sw*sh]; g = new double[sw*sh]; b = new double[sw*sh];
+			for (int y = 0; y < sh; y++) for (int x = 0; x < sw; x++)
+			{ var c = bmp.GetPixel(x, y); int i = y*sw + x; r[i] = c.R; g[i] = c.G; b[i] = c.B; }
 		}
-		var streaks = new List<double[]>();
-		for (int i = 0; i < BW/P*1.2; i++)
-			streaks.Add(new[] { Rnd(rnd, 0, BW), y0 + Rnd(rnd, -.15, .45)*P, P*Rnd(rnd, 1, 2.4), P*Rnd(rnd, .03, .07), rnd.NextDouble() < .5 ? 1 : 0, Rnd(rnd, .12, .25) });
-		double[] top = { B[0]/255, B[1]/255, B[2]/255 }, mid = { B[3]/255, B[4]/255, B[5]/255 }, und = { B[6]/255, B[7]/255, B[8]/255 };
-		var img = new Img(BW, BH);
-		for (int y = 0; y < BH; y++) for (int x = 0; x < BW; x++)
+		int n = sw*sh;
+		var A = new double[n];
+		for (int i = 0; i < n; i++) A[i] = Clamp((b[i] - r[i] - 3)/9);
+		var E = new double[n];   // the matte choked by a pixel
+		for (int y = 0; y < sh; y++) for (int x = 0; x < sw; x++)
 		{
-			double px = x + .5, py = y + .5, body = 0, light = 0, arc = 0;
-			foreach (var l in lobes)
+			double m = 1;
+			for (int dy = -1; dy <= 1; dy++) for (int dx = -1; dx <= 1; dx++)
 			{
-				double dx = WrapDx(px, l[0], BW);
-				if (Math.Abs(dx) > l[2]*1.3 + 8) continue;
-				double dy = py - l[1];
-				body = Math.Max(body, SoftEll(dx, dy, l[2], l[3], .09*P));
-				double g = Clamp((l[1] + .3*l[3] - py)/(1.3*l[3]));
-				if (g > 0) light = Math.Max(light, SoftEll(dx + .08*l[2], dy + .3*l[3], .85*l[2], .75*l[3], .1*P)*g);
-				double ady = py - (l[1] + .05*l[3]);
-				if (l.Length < 5 && ady > 0 && Math.Abs(dx) < .9*l[2])
-				{
-					double e = Math.Sqrt((dx/(.92*l[2]))*(dx/(.92*l[2])) + (ady/(.9*l[3]))*(ady/(.9*l[3])));
-					double d = Math.Abs(e - 1)*Math.Min(l[2], l[3])*.9, w = Math.Max(1.5, l[3]*.3);
-					arc = Math.Max(arc, Smooth(w, 0, d)*.13);
-				}
+				int yy = Math.Min(sh-1, Math.Max(0, y+dy)), xx = Math.Min(sw-1, Math.Max(0, x+dx));
+				m = Math.Min(m, A[yy*sw + xx]);
 			}
-			foreach (var l in bellies)
+			E[y*sw + x] = m;
+		}
+		for (int i = 0; i < n; i++)   // edge pixels darken toward the underside's dark indigo instead of carrying the checker's light grey
+		{
+			double k = (1 - E[i])*.6;
+			r[i] = r[i]*(1-k) + 30*k; g[i] = g[i]*(1-k) + 26*k; b[i] = b[i]*(1-k) + 52*k;
+		}
+		// soften: a gaussian (sigma 1.2 px) over the choked alpha, squared against it, as the concept's blurred double pass
+		double[] kern = { .086, .243, .343, .243, .086 };
+		var T = new double[n]; var S = new double[n];
+		for (int y = 0; y < sh; y++) for (int x = 0; x < sw; x++)
+		{ double v = 0; for (int k = -2; k <= 2; k++) { int xx = Math.Min(sw-1, Math.Max(0, x+k)); v += E[y*sw + xx]*kern[k+2]; } T[y*sw + x] = v; }
+		for (int y = 0; y < sh; y++) for (int x = 0; x < sw; x++)
+		{ double v = 0; for (int k = -2; k <= 2; k++) { int yy = Math.Min(sh-1, Math.Max(0, y+k)); v += T[yy*sw + x]*kern[k+2]; } S[y*sw + x] = v; }
+		for (int i = 0; i < n; i++) A[i] = S[i]*S[i]*E[i];
+		// scale into the texture (bilinear, alpha-weighted so no dark fringe), the cloud filling the width, centred in the height
+		const int TW = 512, TH = 256;
+		double scale = TW/(double)sw, oy = (TH - sh*scale)/2;
+		var img = new Img(TW, TH);
+		for (int y = 0; y < TH; y++) for (int x = 0; x < TW; x++)
+		{
+			double sx = (x + .5)/scale - .5, sy = (y - oy + .5)/scale - .5;
+			int x0 = (int)Math.Floor(sx), y0 = (int)Math.Floor(sy);
+			double fx = sx - x0, fy = sy - y0;
+			double ar = 0, ag = 0, ab = 0, aa = 0;
+			for (int j = 0; j <= 1; j++) for (int i = 0; i <= 1; i++)
 			{
-				double dx = WrapDx(px, l[0], BW);
-				if (Math.Abs(dx) > l[2]*1.3 + 8) continue;
-				body = Math.Max(body, SoftEll(dx, py - l[1], l[2], l[3], .09*P));
+				int xx = x0 + i, yy = y0 + j;
+				if (xx < 0 || yy < 0 || xx >= sw || yy >= sh) continue;
+				double wgt = (i == 0 ? 1 - fx : fx)*(j == 0 ? 1 - fy : fy), al = A[yy*sw + xx]*wgt;
+				ar += r[yy*sw + xx]*al; ag += g[yy*sw + xx]*al; ab += b[yy*sw + xx]*al; aa += al;
 			}
-			if (body <= 0.001) { img.Set(x, y, mid[0], mid[1], mid[2], 0); continue; }
-			double r = Lerp(mid[0], top[0], light), gg = Lerp(mid[1], top[1], light), b = Lerp(mid[2], top[2], light);
-			r = Lerp(r, und[0], arc); gg = Lerp(gg, und[1], arc); b = Lerp(b, und[2], arc);
-			double t = .95*Clamp((py - (y0 - .1*P))/(depth + .1*P));
-			r = Lerp(r, und[0], t); gg = Lerp(gg, und[1], t); b = Lerp(b, und[2], t);
-			foreach (var s in streaks)
-			{
-				double dx = WrapDx(px, s[0], BW);
-				if (Math.Abs(dx) > s[2] + 6) continue;
-				double a = s[5]*SoftEll(dx, py - s[1], s[2], s[3], .05*P);
-				double[] c = s[4] == 1 ? top : und;
-				r = Lerp(r, c[0], a); gg = Lerp(gg, c[1], a); b = Lerp(b, c[2], a);
-			}
-			img.Set(x, y, r, gg, b, body);
+			if (aa <= 0.0005) { img.Set(x, y, 48/255.0, 54/255.0, 68/255.0, 0); continue; }
+			img.Set(x, y, Clamp(ar/aa/255), Clamp(ag/aa/255), Clamp(ab/aa/255), Clamp(aa));
 		}
 		return img;
 	}
@@ -3338,16 +3282,9 @@ $jobs = [ordered]@{
 	'p_hammer_wood' = { [CastbarArt]::Hammer($false) }; 'p_hammer_antler' = { [CastbarArt]::Hammer($true) }
 	'smelt_crust' = { [CastbarArt]::SmeltCrust() }; 'smelt_hot'   = { [CastbarArt]::SmeltHot() }
 	'smelt_stream' = { [CastbarArt]::SmeltStream() }; 'p_ladle'   = { [CastbarArt]::Ladle() }
-	'smelt_front' = { [CastbarArt]::SmeltFront() }; 'smelt_dark'  = { [CastbarArt]::SmeltDark() }
+	'smelt_nose' = { [CastbarArt]::SmeltNose() }; 'smelt_dark'  = { [CastbarArt]::SmeltDark() }
 	'storm_sky'  = { [CastbarArt]::StormSky() };     'p_bolts'     = { [CastbarArt]::Bolts() }
-	'storm_bank1' = { [CastbarArt]::StormBank(0) }; 'storm_bank2' = { [CastbarArt]::StormBank(1) }
-	'storm_bank3' = { [CastbarArt]::StormBank(2) }; 'storm_bank4' = { [CastbarArt]::StormBank(3) }
-	'storm_tower1' = { [CastbarArt]::StormBank(0, 1) }; 'storm_tower2' = { [CastbarArt]::StormBank(1, 1) }
-	'storm_tower3' = { [CastbarArt]::StormBank(2, 1) }; 'storm_tower4' = { [CastbarArt]::StormBank(3, 1) }
-	'storm_ragged1' = { [CastbarArt]::StormBank(0, 2) }; 'storm_ragged2' = { [CastbarArt]::StormBank(1, 2) }
-	'storm_ragged3' = { [CastbarArt]::StormBank(2, 2) }; 'storm_ragged4' = { [CastbarArt]::StormBank(3, 2) }
-	'storm_over1' = { [CastbarArt]::StormBank(0, 3) }; 'storm_over2' = { [CastbarArt]::StormBank(1, 3) }
-	'storm_over3' = { [CastbarArt]::StormBank(2, 3) }; 'storm_over4' = { [CastbarArt]::StormBank(3, 3) }
+	'storm_cloud' = { [CastbarArt]::StormCloud((Join-Path $PSScriptRoot 'ref_cloud.jpg')) }
 	'alch_glass' = { [CastbarArt]::AlchAtlas($false) }; 'alch_liquid' = { [CastbarArt]::AlchAtlas($true) }
 	'alch_trough' = { [CastbarArt]::AlchTrough() }; 'alch_column' = { [CastbarArt]::AlchColumn() }
 	'alch_band'  = { [CastbarArt]::AlchBand() }

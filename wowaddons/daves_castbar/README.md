@@ -9,7 +9,7 @@ four gathering and five crafting professions, and a plain bar), and every cast i
 | Fire | Scrolling flames rising up the bar; embers rise from the bottom and carry on off the top |
 | Shadow | Black smoke with purple seams, dark wisps drifting up |
 | Nature | Vines that grow with the cast, twisting around each other, with leaves and thorns |
-| Lightning | A dark storm: cloud banks at four depths drift at their own pace; forked bolts strike inside the bar and light the clouds round them from within; now and then a dim sheet of lightning. Lightning, Thunder and Storm spells (and Elemental shamans) |
+| Lightning | A dark storm: painted clouds, a far row of small ones and a near bank of big ones laid out afresh every cast, drift at their own pace; forked bolts strike inside the bar and light the clouds near them from within; now and then a dim sheet of lightning. Lightning, Thunder and Storm spells (and Elemental shamans) |
 | Arcane | Rune circles at random heights and sizes, held still (turning made them shimmer); glyphs flare up |
 | Holy | Soft gold with four-point stars twinkling in and out |
 | Fishing | A pond: lily pads drift on top, fish swim below, the bobber rides the cast edge with ripples |
@@ -71,7 +71,7 @@ Files:
 | `Effects_Spells.lua` | Frost, nature and herbalism vines, arcane, holy |
 | `Effects_Gathering.lua` | Fishing, mining, skinning |
 | `Effects_Forge.lua` | Blacksmithing and smelting |
-| `Effects_Storm.lua` | Lightning and its weathers |
+| `Effects_Storm.lua` | Lightning: the painted clouds and the bolts |
 | `Effects_Alchemy.lua` | The alchemy bench and trough |
 | `Effects_Tailor.lua` | The tailoring loom |
 | `Effects_Leather.lua` | The leatherworking panels and laces |

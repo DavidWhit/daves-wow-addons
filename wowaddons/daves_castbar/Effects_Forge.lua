@@ -230,7 +230,7 @@ local function MakeSmelt()
 	forge.ladle:SetDesaturation(0); forge.stream:SetDesaturation(0)   -- the last cast may have been interrupted
 	content.forge.hot:SetDesaturation(0)
 	for i = 1, SEAM_SEGS do content.forge["seam" .. i]:SetDesaturation(0) end
-	content.forge.hot:Show(); content.forge.cap:Show()
+	content.forge.hot:Show()
 end
 
 local function UpdateSmelt(dt, fillW, casting)
@@ -280,15 +280,12 @@ local function UpdateSmelt(dt, fillW, casting)
 	f.hot:SetTexCoord(0, (right - left) / span, 0, 1)            -- past the landing point it stays at its hottest
 	f.hot:SetAlpha(cool)
 	f.hot:SetShown(fillW > 1)
-	-- the pour's rounded front: the bar's dark caps the fill's last .45 bar heights in a quarter-round (smelt_front)
-	f.cap:SetShown(fillW > 1)
-	f.cap:ClearAllPoints()
-	f.cap:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", fillW - H * .45, 0)
-	f.cap:SetSize(H * .45 + 2, H)   -- two pixels past the fill edge: the content's clip is pixel-aligned, the cap is not,
-	                                -- so without the overshoot a sub-pixel column of hot metal showed as a line at the edge
+	-- the pour's rounded front: the nose mask (create) rounds off everything in the fill over its last half bar height,
+	-- so the metal ends in a soft D-shaped nose that fades into the dark track with no straight edge anywhere
+	if smelt.noseH ~= H then content.noseMask:SetSize(H * .5, H); smelt.noseH = H end
 	-- the nose's glow spills past the fill edge over the dark track (forge.nose is clipped to the bar, not the fill),
-	-- so the slope from the white-hot pool down to the track is continuous, with no line at the fill edge
-	PlaceIn(forge.nose, forge.clip, fillW - H * .15, H * .5, H * 1.6, H * 1.6)
+	-- so the slope from the white-hot pool down to the track is continuous
+	PlaceIn(forge.nose, forge.clip, fillW - H * .2, H * .5, H * 1.6, H * 1.6)
 	forge.nose:SetAlpha(.4 * cool * lit)
 	forge.nose:SetShown(fillW > 1)
 
@@ -372,7 +369,17 @@ I.Register({
 					c.seamCols[i] = { CreateColor(1, 1, 1, 1), CreateColor(1, 1, 1, 1) }
 				end
 				c.forge.hot = Tex("smelt_hot", 2)
-				c.forge.cap = Tex("smelt_front", 4)                     -- the pour's rounded front: the bar's dark over the fill's end (the nose's glow is forge.nose, on the bar)
+				-- the pour's rounded front: a mask on everything in this content (the black, the crust layer, the veil, the flash,
+				-- the seams and the pour), anchored to the fill's edge (the clip frame's right), white but for a soft D-shaped
+				-- nose in its last half bar height (smelt_nose; CLAMP keeps all of the fill left of it unmasked). A third mask
+				-- beside the two corner masks: the most a texture takes. Never hidden (a hidden mask stops masking).
+				c.noseMask = Smooth(c:CreateMaskTexture())
+				c.noseMask:SetTexture(MEDIA .. "smelt_nose", "CLAMP", "CLAMP")
+				c.noseMask:SetPoint("RIGHT", c:GetParent(), "RIGHT")
+				c.noseMask:SetSize(H * .5, H)
+				for _, r in ipairs({ c:GetRegions() }) do
+					if r:GetObjectType() == "Texture" then r:AddMaskTexture(c.noseMask) end
+				end
 			end
 		end
 	end,
