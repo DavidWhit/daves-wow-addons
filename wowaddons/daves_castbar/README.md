@@ -45,7 +45,7 @@ Targets: forever (`## Interface: 16001`).
 WoW gives addons no way to read a spell's school, so the element comes from your choice for that
 spell, then the gathering and smelting spells and Disenchant by name, then for crafting casts the recipe's
 profession (Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting; Mining recipes are smelts), then the spell's name ("Frostbolt", anything
-with "Flame", ...), then your class and specialization, then the "Other casts" setting (Plain, Blizzard's own bar, unless you pick another look).
+with "Flame", ...), then the "Other casts" setting: a look (Plain, Blizzard's own bar, unless you pick another) or "Your class", which picks your class's and specialization's element. Hearthstone, mounts and anything else without a match get that setting.
 
 ## Develop
 

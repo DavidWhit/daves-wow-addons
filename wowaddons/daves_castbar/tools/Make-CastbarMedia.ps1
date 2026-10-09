@@ -3010,6 +3010,16 @@ public static class CastbarArt
 		}
 		return img;
 	}
+	// The frame's middle piece (Bar.lua): an 8x64 strip holding the top and bottom lines, taken from the cap's own
+	// straight part (its last column), so the lines between the caps have exactly the caps' thickness and
+	// anti-aliasing at every height. Stretched between the two caps; uniform along x.
+	public static Img StripRing(double r, bool lit)
+	{
+		var cap = CapRing(r, lit);
+		var img = new Img(8, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 8; x++) img.Set(x, y, 1, 1, 1, cap.A[y*64 + 63]);
+		return img;
+	}
 	public static Img BevelV()   // 8x64, white: alpha 1 along the top fading to 0 at the bottom (the bevel's light, shade and inner shadow)
 	{
 		var img = new Img(8, 64);
@@ -3323,8 +3333,12 @@ $jobs = [ordered]@{
 	'vine'       = { [CastbarArt]::Vine() }
 	'edge_h'     = { [CastbarArt]::EdgeH() }
 	'corner_square' = { [CastbarArt]::CornerMask(0) }; 'corner_soft' = { [CastbarArt]::CornerMask(0.18) }; 'corner_rounded' = { [CastbarArt]::CornerMask(0.36) }
+	'cap_dark_square' = { [CastbarArt]::CapRing(0, $false) }; 'cap_lit_square' = { [CastbarArt]::CapRing(0, $true) }
 	'cap_dark_soft' = { [CastbarArt]::CapRing(0.18, $false) }; 'cap_lit_soft' = { [CastbarArt]::CapRing(0.18, $true) }
 	'cap_dark_rounded' = { [CastbarArt]::CapRing(0.36, $false) }; 'cap_lit_rounded' = { [CastbarArt]::CapRing(0.36, $true) }
+	'strip_dark_square' = { [CastbarArt]::StripRing(0, $false) }; 'strip_lit_square' = { [CastbarArt]::StripRing(0, $true) }
+	'strip_dark_soft' = { [CastbarArt]::StripRing(0.18, $false) }; 'strip_lit_soft' = { [CastbarArt]::StripRing(0.18, $true) }
+	'strip_dark_rounded' = { [CastbarArt]::StripRing(0.36, $false) }; 'strip_lit_rounded' = { [CastbarArt]::StripRing(0.36, $true) }
 	'bevel_v'    = { [CastbarArt]::BevelV() }
 	'p_thorn'    = { [CastbarArt]::Thorn() }
 	'p_runecircles' = { [CastbarArt]::RuneCircles() }

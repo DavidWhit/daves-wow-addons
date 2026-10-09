@@ -96,8 +96,11 @@ end
 ---------------------------------------------------------------------------
 -- Element content: the layers that make an element's look
 ---------------------------------------------------------------------------
+-- A fill layer scrolls by a fraction of a texel a frame (OnBarUpdate), so it must not snap its texels to the pixel
+-- grid: snapped, it jumps a whole texel at a time (three screen pixels on a wide bar), a back-and-forth jitter that
+-- the still sprites over it (arcane's rune circles) seemed to share. Smooth = Effects.lua's unsnapped texture.
 local function LayerTexture(content, name, blend, sublevel)
-	local tex = content:CreateTexture(nil, "ARTWORK", nil, sublevel)
+	local tex = ns.SmoothTexture(content:CreateTexture(nil, "ARTWORK", nil, sublevel))
 	tex:SetAllPoints(content)
 	tex:SetTexture(MEDIA .. name, "REPEAT", "REPEAT")
 	tex:SetBlendMode(blend)
@@ -147,12 +150,6 @@ end
 ---------------------------------------------------------------------------
 -- Building the bar
 ---------------------------------------------------------------------------
-local function EdgeTexture(parent, layer, sub)
-	local t = parent:CreateTexture(nil, layer, nil, sub)
-	t:SetColorTexture(1, 1, 1, 1)
-	return t
-end
-
 function ns:InitBar()
 	bar = CreateFrame("Frame", "DavesCastbarFrame", UIParent)
 	bar:SetFrameStrata("MEDIUM")
@@ -184,10 +181,10 @@ function ns:InitBar()
 	track.bg:SetAllPoints()
 	track.bg:SetColorTexture(.024, .024, .04, 1)
 	track.bg:SetAlpha(.85)
-	track.tex = track:CreateTexture(nil, "ARTWORK")
+	track.tex = ns.SmoothTexture(track:CreateTexture(nil, "ARTWORK"))   -- unsnapped: it scrolls (see LayerTexture)
 	track.tex:SetAllPoints()
 	track.tex:SetAlpha(.16)
-	track.hi = track:CreateTexture(nil, "ARTWORK", nil, 1)   -- an element's own track can add a bright layer
+	track.hi = ns.SmoothTexture(track:CreateTexture(nil, "ARTWORK", nil, 1))   -- an element's own track can add a bright layer
 	track.hi:SetAllPoints()
 	track.hi:SetBlendMode("ADD")
 	track.hi:Hide()
@@ -214,16 +211,22 @@ function ns:InitBar()
 	border = CreateFrame("Frame", nil, bar)
 	border:SetAllPoints()
 	border:SetFrameLevel(bar:GetFrameLevel() + 7)
-	border.dark, border.lit, border.capDark, border.capLit = {}, {}, {}, {}
-	for i = 1, 4 do border.dark[i] = EdgeTexture(border, "BORDER", 0); border.lit[i] = EdgeTexture(border, "BORDER", 1) end
-	for _, t in ipairs(border.dark) do t:SetVertexColor(0, 0, 0, .8) end
-	-- rounded corners: the lines run into painted end caps (cap_dark_*, cap_lit_*; LayoutShape places them)
+	-- Three painted pieces per line (Make-CastbarMedia.ps1 CapRing / StripRing): a left cap, a strip stretched between
+	-- the caps, the cap mirrored at the right; the strip is cut from the cap's straight part, so every pixel of the
+	-- line has the same thickness and anti-aliasing round the whole bar, at every height and corner style (drawn
+	-- straight lines met the painted caps with different pixels). All snap to the pixel grid: they don't move.
+	border.capDark, border.capLit = {}, {}
 	for i = 1, 2 do
 		border.capDark[i] = border:CreateTexture(nil, "BORDER", nil, 0)
 		border.capDark[i]:SetVertexColor(0, 0, 0, .8)
 		border.capLit[i] = border:CreateTexture(nil, "BORDER", nil, 1)
 		if i == 2 then border.capDark[i]:SetTexCoord(1, 0, 0, 1); border.capLit[i]:SetTexCoord(1, 0, 0, 1) end
 	end
+	border.stripDark = border:CreateTexture(nil, "BORDER", nil, 0)
+	border.stripDark:SetVertexColor(0, 0, 0, .8)
+	border.stripLit = border:CreateTexture(nil, "BORDER", nil, 1)
+	border.pieces = { border.capDark[1], border.capDark[2], border.stripDark, border.capLit[1], border.capLit[2], border.stripLit }
+	for _, t in ipairs(border.pieces) do t:SetSnapToPixelGrid(true) end
 	-- the plain look's frame: Blizzard's own (CastingBarFrameBaseTemplate's Border, Mainline/CastingBarFrame.xml)
 	border.blizz = border:CreateTexture(nil, "BORDER", nil, 2)
 	border.blizz:SetAtlas("ui-castingbar-frame")
@@ -362,11 +365,7 @@ local function ShowBorder(cfg)
 	local blizz = cfg and cfg.plain and true or false
 	local ours = framed and not blizz
 	border.blizz:SetShown(framed and blizz)
-	for i = 1, 4 do
-		local shown = ours and not (i > 2 and border.caps)
-		border.dark[i]:SetShown(shown); border.lit[i]:SetShown(shown)
-	end
-	for i = 1, 2 do border.capDark[i]:SetShown(ours and border.caps); border.capLit[i]:SetShown(ours and border.caps) end
+	for _, t in ipairs(border.pieces) do t:SetShown(ours) end
 end
 
 -- The bar's shape: the corner masks sized to the bar and switched to the corners setting; the frame lines, whose
@@ -381,29 +380,24 @@ local function LayoutShape()
 		mask:SetSize(H, H)
 		if mask.file ~= file then mask.file = file; mask:SetTexture(file, "CLAMP", "CLAMP") end
 	end
-	local td = H * .1
-	local tl, e = td / 2, td * 2 / 3
-	border.caps = style.r > 0
-	local capS = border.caps and H + 2 * e or 0
-	local function Frame4(t, inset, size)
-		for i = 1, 4 do t[i]:ClearAllPoints() end
-		t[1]:SetPoint("TOPLEFT", -inset + capS, inset); t[1]:SetPoint("TOPRIGHT", inset - capS, inset); t[1]:SetHeight(size)
-		t[2]:SetPoint("BOTTOMLEFT", -inset + capS, -inset); t[2]:SetPoint("BOTTOMRIGHT", inset - capS, -inset); t[2]:SetHeight(size)
-		t[3]:SetPoint("TOPLEFT", -inset, inset); t[3]:SetPoint("BOTTOMLEFT", -inset, -inset); t[3]:SetWidth(size)
-		t[4]:SetPoint("TOPRIGHT", inset, inset); t[4]:SetPoint("BOTTOMRIGHT", inset, -inset); t[4]:SetWidth(size)
+	-- the frame: the dark line .1 H thick with 2/3 of it outside the bar, so its pieces are squares of H + 2e at both
+	-- ends and a strip of that height between them (the painted pieces hold both lines' thickness and corners)
+	local e = H * .1 * 2 / 3
+	local capS = H + 2 * e
+	local key = style.r > .2 and "rounded" or style.r > 0 and "soft" or "square"
+	for i = 1, 2 do
+		local cd, cl = border.capDark[i], border.capLit[i]
+		cd:SetTexture(MEDIA .. "cap_dark_" .. key); cl:SetTexture(MEDIA .. "cap_lit_" .. key)
+		cd:ClearAllPoints(); cl:ClearAllPoints()
+		if i == 1 then cd:SetPoint("TOPLEFT", -e, e); cl:SetPoint("TOPLEFT", -e, e)
+		else cd:SetPoint("TOPRIGHT", e, e); cl:SetPoint("TOPRIGHT", e, e) end
+		cd:SetSize(capS, capS); cl:SetSize(capS, capS)
 	end
-	Frame4(border.dark, e, td)
-	Frame4(border.lit, tl, tl)
-	if border.caps then
-		local key = style.r > .2 and "rounded" or "soft"
-		for i = 1, 2 do
-			local cd, cl = border.capDark[i], border.capLit[i]
-			cd:SetTexture(MEDIA .. "cap_dark_" .. key); cl:SetTexture(MEDIA .. "cap_lit_" .. key)
-			cd:ClearAllPoints(); cl:ClearAllPoints()
-			if i == 1 then cd:SetPoint("TOPLEFT", -e, e); cl:SetPoint("TOPLEFT", -e, e)
-			else cd:SetPoint("TOPRIGHT", e, e); cl:SetPoint("TOPRIGHT", e, e) end
-			cd:SetSize(capS, capS); cl:SetSize(capS, capS)
-		end
+	for _, sd in ipairs({ { border.stripDark, "strip_dark_" }, { border.stripLit, "strip_lit_" } }) do
+		local t = sd[1]
+		t:SetTexture(MEDIA .. sd[2] .. key)
+		t:ClearAllPoints()
+		t:SetPoint("TOPLEFT", -e + capS, e); t:SetPoint("BOTTOMRIGHT", e - capS, -e)
 	end
 	local bevel = db.depth == "bevel"
 	depth:SetShown(bevel)
@@ -522,8 +516,8 @@ local function ActivateElement(key)
 	fx.spark:SetBlendMode("ADD")
 	fx.spark:SetSize(H * .9, H * 1.7)
 	SetColor(fx.spark, cfg.spark)
-	for _, t in ipairs(border.lit) do SetColor(t, cfg.border) end
 	for _, t in ipairs(border.capLit) do SetColor(t, cfg.border) end
+	SetColor(border.stripLit, cfg.border)
 	ns.activeCfg = cfg
 	ShowBorder(cfg)
 

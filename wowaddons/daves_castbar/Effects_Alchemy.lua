@@ -11,7 +11,8 @@ local tools                               -- above the bar's frame line: the ben
 local content, cfg, W, H, clock = nil, nil, 300, 26, 0   -- the core's state, copied in by sync
 
 ---------------------------------------------------------------------------
--- Alchemy: a bench of glassware stands on the bar (on `tools`), 6 to 10 stations shuffled each cast and joined
+-- Alchemy: a bench of glassware stands on the bar (on `tools`), 6 to 40 stations (as many as the bar's width takes,
+-- about one per bar height) shuffled each cast and joined
 -- by glass, bent glass and rubber hoses (Lines), some with a brass valve. The potion works its way through them
 -- as the cast goes on: each station fills, bubbles and lights its burner as it arrives, and it pours into the bar,
 -- which is a trough of liquid for the whole cast (wholeBar): a small shallow-water simulation spreads it with a
@@ -39,13 +40,13 @@ local ALCH_PALETTES = {
 	{ RGB(90, 150, 255), RGB(110, 255, 225), RGB(225, 120, 255), RGB(255, 130, 200) },
 	{ RGB(160, 255, 80), RGB(255, 235, 70), RGB(255, 130, 50), RGB(255, 70, 120) },
 }
-local STATIONS_MAX, LINK_SEGS = 10, 12
+local STATIONS_MAX, LINK_SEGS = 40, 12   -- stations: one per 1.05 bar heights, so an 800x20 bar gets 37; the bench's textures are made once for the most
 local ALCH_LIGHT = { tex = "p_soft", colors = { { 1, 1, 1 } }, size = { .04, .08 }, life = { .4, .8 }, vx = { -25, 25 }, vy = { 8, 40 }, gravity = 70, add = true }
 local ALCH_VAPOUR = { tex = "p_soft", colors = { { 1, 1, 1 } }, size = { .04, .07 }, grow = { .02, .04 }, life = { .7, 1.2 }, vx = { -4, 4 }, vy = { 10, 20 }, alpha = .45, add = true }
 local ALCH_BUBBLE = { tex = "p_soft", colors = { { 1, 1, 1 } }, size = { .02, .04 }, life = { .25, .45 }, vx = { -3, 3 }, vy = { 10, 18 }, alpha = .7, add = true }
 local ALCH_DRIP = { tex = "p_soft", colors = { { 1, 1, 1 } }, size = { .04, .05 }, life = { .2, .3 }, vx = { 0, 0 }, vy = { -10, -20 }, gravity = 300, add = true }
 local ALCH_SPLASH = { tex = "p_soft", colors = { { 1, 1, 1 } }, size = { .02, .035 }, life = { .25, .4 }, vx = { -17, 17 }, vy = { 11, 28 }, gravity = 280, add = true }
-local DROPS_MAX, RINGS_MAX, BUBBLES_MAX = 6, 8, 24
+local DROPS_MAX, RINGS_MAX, BUBBLES_MAX, COLS_MAX = 6, 8, 24, 100   -- a liquid column every ~8 px, 100 on the widest bar
 local SURF_MAX = 80          -- segments of the liquid's surface line
 
 local function SetFxColor(e, c, k)   -- the particle specs above take one colour; set it before each Spawn
@@ -216,14 +217,14 @@ local function MakeAlchemy()
 	for i = n + 1, STATIONS_MAX do local t = bench.stations[i]; t.glass:Hide(); t.liq[1]:Hide(); t.liq[2]:Hide(); t.flame:Hide() end
 	bench.head:Hide()
 
-	-- the trough: one column of liquid every few pixels (the simulation's cells), placed once; per frame only its
-	-- height and the rows it shows change (shaded by height in the bar, so neighbours match: no vertical lines)
+	-- the trough: one column of liquid every ~8 pixels (the simulation's cells), each the bar's full height, placed
+	-- once; per frame only its two top corners move (UpdateTrough), down to the surface at its edges
 	local t = content.trough
-	local N = math.max(40, math.min(#t.cols, math.ceil(W / 4)))   -- a column every 4 pixels (the concept's 3 showed as fine lines)
+	local N = math.max(25, math.min(#t.cols, math.ceil(W / 8)))
 	alch.N, alch.dx = N, W / N
-	alch.h, alch.q, alch.hs, alch.tmp, alch.y, alch.on = {}, {}, {}, {}, {}, {}
+	alch.h, alch.q, alch.hs, alch.tmp, alch.y, alch.ye, alch.on = {}, {}, {}, {}, {}, {}, {}
 	for i = 1, N do alch.h[i], alch.hs[i], alch.tmp[i], alch.y[i], alch.on[i] = 0, 0, 0, 0, false end
-	for i = 1, N + 1 do alch.q[i] = 0 end
+	for i = 1, N + 1 do alch.q[i], alch.ye[i] = 0, 0 end
 	local c = {}
 	for i, tex in ipairs(t.cols) do
 		if i <= N then
@@ -231,12 +232,14 @@ local function MakeAlchemy()
 			tex:SetVertexColor(c[1], c[2], c[3], 1)   -- opaque: overlapping translucent columns show as stripes
 			tex:SetDesaturation(0)
 			tex:ClearAllPoints()
-			tex:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", (i - 1) * alch.dx - .5, 0)
-			tex:SetWidth(alch.dx + 1)
+			tex:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", (i - 1) * alch.dx, 0)
+			tex:SetSize(alch.dx, H)
+			tex:SetTexCoord(0, 1, 0, 1)
+			tex:SetVertexOffset(1, 0, -H); tex:SetVertexOffset(3, 0, -H)   -- UPPER_LEFT_VERTEX, UPPER_RIGHT_VERTEX: start flat
 		end
 		tex:Hide()
 	end
-	-- the surface line: a segment every few columns, tinted along the palette
+	-- the surface line: a segment every few column edges, tinted along the palette
 	alch.step = math.max(1, math.floor(H * .3 / alch.dx + .5), math.ceil(N / SURF_MAX))
 	alch.segs = math.min(SURF_MAX, math.ceil(N / alch.step))
 	for k = 1, SURF_MAX do
@@ -398,35 +401,38 @@ local function UpdateTrough(dt, fillW, casting)
 			end
 		end
 	end
-	-- the columns: the simulated level, with small, slow travelling ripples where it is neither thin nor brimming
-	local dx, ys, on = alch.dx, alch.y, alch.on
-	for i = 1, alch.N do
-		local tex = t.cols[i]
+	-- the columns: the simulated level, with small, slow travelling ripples where it is neither thin nor brimming;
+	-- the surface height at each column's centre, then at each column edge (the mean of its neighbours), and each
+	-- column's top corners moved down to its two edges' heights: the next column starts where this one ends
+	local dx, ys, ye, on, N = alch.dx, alch.y, alch.ye, alch.on, alch.N
+	for i = 1, N do
 		local d = alch.hs[i]
 		local x = (i - .5) * dx
 		local calm = math.max(0, math.min(1, d / (H * .12))) * math.max(0, math.min(1, (H - d) / (H * .15)))
-		local y = math.min(H, d + calm * (math.sin(x / (H * .5) - clock * 2.6) * H * .02 + math.sin(x / (H * .21) + clock * 4.3) * H * .01
+		ys[i] = math.min(H, d + calm * (math.sin(x / (H * .5) - clock * 2.6) * H * .02 + math.sin(x / (H * .21) + clock * 4.3) * H * .01
 			+ math.sin(x / (H * .9) + clock * 1.3) * H * .015))   -- the concept's three ripples
-		ys[i] = y
-		local show = y >= .5
+	end
+	ye[1], ye[N + 1] = ys[1], ys[N]
+	for i = 2, N do ye[i] = (ys[i - 1] + ys[i]) * .5 end
+	for i = 1, N do
+		local tex = t.cols[i]
+		local show = ye[i] >= .5 or ye[i + 1] >= .5
 		if show ~= on[i] then tex:SetShown(show); on[i] = show end
 		if show then
-			tex:SetHeight(y)
-			tex:SetTexCoord(0, 1, 1 - y / H, 1)   -- the rows at this height in the bar, so every column matches its neighbours
+			tex:SetVertexOffset(1, 0, ye[i] - H)       -- UPPER_LEFT_VERTEX
+			tex:SetVertexOffset(3, 0, ye[i + 1] - H)   -- UPPER_RIGHT_VERTEX
 		end
 	end
-	-- the surface: one continuous line along the columns' tops, a soft band of light just under it (alch_band fades to
+	-- the surface: one continuous line along the column edges, a soft band of light just under it (alch_band fades to
 	-- both edges, so it reads the same whichever way the line runs)
-	local step, n = alch.step, alch.N
+	local step, n = alch.step, N + 1
 	local band = math.max(2, H * .18) / 2 - H * .01   -- the band's centre below the surface: its top edge just on it
 	for k = 1, alch.segs do
 		local a, b = math.min(n, (k - 1) * step + 1), math.min(n, k * step + 1)
-		local ya, yb = ys[a], ys[b]
+		local ya, yb = ye[a], ye[b]
 		local sheen, rim = t.sheen[k], t.rim[k]
 		if ya >= 1 and yb >= 1 and b > a then
-			local xa, xb = (a - .5) * dx, (b - .5) * dx
-			if a == 1 then xa = 0 end
-			if b == n then xb = W end
+			local xa, xb = (a - 1) * dx, (b - 1) * dx
 			rim:SetStartPoint("BOTTOMLEFT", content, xa, ya - .5); rim:SetEndPoint("BOTTOMLEFT", content, xb, yb - .5)
 			sheen:SetStartPoint("BOTTOMLEFT", content, xa, ya - band); sheen:SetEndPoint("BOTTOMLEFT", content, xb, yb - band)
 			rim:Show(); sheen:Show()
@@ -509,17 +515,22 @@ local function UpdateAlchemy(dt, fillW, casting)
 		local a, b = alch.st[i], alch.st[i + 1]
 		local f = math.max(0, math.min(1, (X - a.x - d) / (b.x - a.x - d)))
 		local reach = f * L.cum[LINK_SEGS + 1]
+		-- each piece of tube is touched only when its state changes (seg.st: 0 empty, 1 full, 2 the head's piece), so a
+		-- wide bench of forty stations costs a few calls a frame, not hundreds
 		for k = 1, LINK_SEGS do
 			local seg = L.segs[k]
 			local line = seg.line
 			if L.cum[k + 1] <= reach then
-				line:SetEndPoint("BOTTOMLEFT", tools, L.xs[k + 1], L.ys[k + 1])
-				line:Show()
+				if seg.st ~= 1 then
+					seg.st = 1
+					line:SetEndPoint("BOTTOMLEFT", tools, L.xs[k + 1], L.ys[k + 1])
+					line:Show()
+				end
 			elseif L.cum[k] < reach then
 				local t = (reach - L.cum[k]) / math.max(1e-6, L.cum[k + 1] - L.cum[k])
 				local hx, hy = L.xs[k] + (L.xs[k + 1] - L.xs[k]) * t, L.ys[k] + (L.ys[k + 1] - L.ys[k]) * t
 				line:SetEndPoint("BOTTOMLEFT", tools, hx, hy)
-				line:Show()
+				if seg.st ~= 2 then seg.st = 2; line:Show() end
 				if not headOn then
 					headOn = true
 					bench.head:ClearAllPoints(); bench.head:SetPoint("CENTER", tools, "BOTTOMLEFT", hx, hy)
@@ -527,11 +538,15 @@ local function UpdateAlchemy(dt, fillW, casting)
 					bench.head:SetVertexColor(seg.r + (1 - seg.r) * .3, seg.g + (1 - seg.g) * .3, seg.b + (1 - seg.b) * .3)
 					bench.head:SetAlpha(.9 * lit)
 				end
-			else
+			elseif seg.st ~= 0 then
+				seg.st = 0
 				line:Hide()
 			end
 		end
-		if L.valve then bench.valves[i]:SetTexCoord(f > .45 and .5 or 0, f > .45 and 1 or .5, 0, 1) end
+		if L.valve then
+			local open = f > .45
+			if L.open ~= open then L.open = open; bench.valves[i]:SetTexCoord(open and .5 or 0, open and 1 or .5, 0, 1) end
+		end
 	end
 	bench.head:SetShown(headOn and casting)
 	-- an interrupt greys the potion in the tubes too (only while the grey fades in)
@@ -558,12 +573,13 @@ I.Register({
 		local ccfg = c.cfg
 		if ccfg.alchemy then   -- the trough's liquid columns, falling drops, rings and bubbles
 			local t = { cols = {}, drops = {}, rings = {}, bubbles = {}, sheen = {}, rim = {} }
-			for i = 1, 200 do
-				t.cols[i] = ContentTex(c, "alch_column", 2)
-				-- a column only ever changes height, so it can snap to the pixel grid: its edges then land on whole pixels and
-				-- overlap its neighbours' exactly, with no half-covered seam between them (the fine vertical lines)
-				t.cols[i]:SetSnapToPixelGrid(true)
-				t.cols[i]:SetTexelSnappingBias(.5)
+			-- the liquid: full-height columns whose two top corners are moved down to the surface (Texture:SetVertexOffset,
+			-- as Blizzard's PowerDependencyLine tilts its fill), the right corner of each at the same height as the left
+			-- corner of the next, so the surface is one continuous polyline: no steps, no seams (stacked columns of
+			-- different heights read as a volume meter in game whatever the snapping). Unsnapped, so shared corners
+			-- are the same float on both sides
+			for i = 1, COLS_MAX do
+				t.cols[i] = Smooth(ContentTex(c, "alch_column", 2))
 			end
 			-- the surface: one continuous line over the columns' tops (a soft band of light under it, as the concept, so a
 			-- thin layer is as bright as a deep one; a bright edge on it)

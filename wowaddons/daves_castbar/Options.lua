@@ -76,9 +76,10 @@ function ns:InitOptions()
 	local fallback = Settings.RegisterAddOnSetting(category, ADDON .. "_fallback", "fallback", ns.db, Settings.VarType.String, "Other casts", "plain")
 	Settings.CreateDropdown(category, fallback, function()
 		local container = Settings.CreateControlTextContainer()
+		container:Add("class", "Your class")
 		for _, key in ipairs(ns.ELEMENT_ORDER) do container:Add(key, ns.ELEMENTS[key].label) end
 		return container:GetData()
-	end, "The look for casts that don't match an element and your class has no default: other professions, hearthstone, mounts. Plain is Blizzard's own cast bar. Pick one for a single spell with /castbar set <element> right after casting it.")
+	end, "The look for casts that match nothing: hearthstone, mounts, other professions. Plain is Blizzard's own bar; Your class picks your class's element. Pick one for a single spell with /castbar set <element> right after casting it.")
 	settings[#settings + 1] = fallback
 
 	-- Settings write straight into ns.db; react to changes here.

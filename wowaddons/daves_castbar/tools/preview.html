@@ -708,9 +708,10 @@ class Bar {
 		const tipY = H * .04 - saw + lift * H * 1.2;     // up from the bar's bottom
 		g.globalAlpha = 1 - lift;
 		g.drawImage(imgs[this.knifeTex], ox + tipX - KNIFE.tipX * H, oy + H - (tipY + KNIFE.tipY * H), KNIFE.w * H, KNIFE.h * H);
-		const gx = tipX + H * .07, gy = tipY + KNIFE.L * H * (.25 + .5 * (.5 + .5 * Math.sin(this.clock * 13)));
-		g.globalCompositeOperation = 'lighter'; g.globalAlpha = .45 * (1 - lift);
-		g.drawImage(imgs.p_soft, ox + gx - H * .1, oy + H - gy - H * .1, H * .2, H * .2);
+		// a soft glint sliding slowly along the blade (as the addon: it used to jump with the saw, which flickered over the blood)
+		const gx = tipX + H * .07, gy = tipY + KNIFE.L * H * (.3 + .4 * (.5 + .5 * Math.sin(this.clock * 2)));
+		g.globalCompositeOperation = 'lighter'; g.globalAlpha = .25 * (1 - lift);
+		g.drawImage(imgs.p_soft, ox + gx - H * .075, oy + H - gy - H * .075, H * .15, H * .15);
 		g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 	}
 
@@ -924,7 +925,7 @@ class Bar {
 	// ---- alchemy (as Effects.lua): a bench of glassware on the bar, the potion travelling through it into the trough
 	makeAlchemy() {
 		const W = settings.W, H = settings.H, m = H * .7;
-		const n = Math.max(6, Math.min(10, Math.floor((W - 2 * m) / (H * 1.05)) + 1)), Z = (W - 2 * m) / (n - 1), S = Math.min(H, Z * .92);
+		const n = Math.max(6, Math.min(40, Math.floor((W - 2 * m) / (H * 1.05)) + 1)), Z = (W - 2 * m) / (n - 1), S = Math.min(H, Z * .92);   // as the addon: one station per 1.05 H, up to 40
 		const pal = pick(ALCH_PALETTES), shuffle = ALCH_SHUFFLE.slice().sort(() => Math.random() - .5);
 		const a = this.alch = { n, Z, S, tw: Math.max(1.8, S * .075), pal, st: [], links: [] };
 		for (let i = 0; i < n; i++) {
@@ -954,7 +955,7 @@ class Bar {
 			a.links.push({ kind, pts, cum, valve: kind !== 'hose' && Math.random() < .45 });
 		}
 		// the trough
-		const N = Math.max(40, Math.min(200, Math.ceil(W / 4)));   // a column every 4 pixels (Effects.lua MakeAlchemy)
+		const N = Math.max(25, Math.min(100, Math.ceil(W / 8)));   // a column every ~8 pixels (Effects_Alchemy.lua MakeAlchemy)
 		Object.assign(a, { N, dx: W / N, h: new Float32Array(N), q: new Float32Array(N + 1), hs: new Float32Array(N), tmp: new Float32Array(N + 1), drops: [], rings: [], bubbles: [], dripT: rand(.1, .3), bubT: 0 });
 		// one tinted copy of the column texture per trough column, side by side (the addon tints each column)
 		const col = imgs.alch_column, body = document.createElement('canvas'); body.width = N; body.height = col.height;
@@ -1022,22 +1023,29 @@ class Bar {
 			this.spawn(P({ t: 'p_soft', color: [[255, 255, 255]], size: [.02, .04], life: [.25, .45], vx: [-3, 3], vy: [-18, -10], alpha: .7 }), b.x, H - this.alchSurf(b.x));
 			return false;
 		});
-		// the columns: the simulated level with small, slow travelling ripples; each column shows the rows of
-		// alch_column at its height in the bar, so neighbours match (no vertical lines), and they are opaque
-		const bh = a.body.height, ys = a.ys || (a.ys = new Float32Array(a.N));
+		// the liquid: the simulated level with small, slow travelling ripples, as one polygon under the surface polyline
+		// through the column edges (the addon moves each column's top corners to its edges' heights, so the surface is
+		// continuous: no steps, no seams); inside it each column's shading runs from its surface to the bottom
+		const bh = a.body.height, ys = a.ys || (a.ys = new Float32Array(a.N)), ye = a.ye || (a.ye = new Float32Array(a.N + 1));
 		for (let i = 0; i < a.N; i++) {
 			const d = a.hs[i], x = (i + .5) * a.dx, calm = clamp01(d / (H * .12)) * clamp01((H - d) / (H * .15));
-			const y = Math.min(H, d + calm * (Math.sin(x / (H * .5) - this.clock * 2.6) * H * .02 + Math.sin(x / (H * .21) + this.clock * 4.3) * H * .01 + Math.sin(x / (H * .9) + this.clock * 1.3) * H * .015));
-			ys[i] = y;
-			if (y < .5) continue;
-			og.globalAlpha = 1;
-			// on whole pixels, overlapping the next column by one (the game snaps the columns to the pixel grid), and sampled
-			// without smoothing so the neighbouring columns' colours don't bleed into this one's edges: no seams
-			const x0 = Math.round(i * a.dx), x1 = Math.round((i + 1) * a.dx) + 1;
-			og.imageSmoothingEnabled = false;
-			og.drawImage(a.body, i, bh * (1 - y / H), 1, Math.max(1, bh * y / H), x0, H - y, x1 - x0, y);
-			og.imageSmoothingEnabled = true;
+			ys[i] = Math.min(H, d + calm * (Math.sin(x / (H * .5) - this.clock * 2.6) * H * .02 + Math.sin(x / (H * .21) + this.clock * 4.3) * H * .01 + Math.sin(x / (H * .9) + this.clock * 1.3) * H * .015));
 		}
+		ye[0] = ys[0]; ye[a.N] = ys[a.N - 1];
+		for (let i = 1; i < a.N; i++) ye[i] = (ys[i - 1] + ys[i]) * .5;
+		og.save();
+		og.beginPath(); og.moveTo(0, H);
+		for (let i = 0; i <= a.N; i++) og.lineTo(i * a.dx, H - ye[i]);
+		og.lineTo(W, H); og.closePath(); og.clip();
+		og.globalAlpha = 1; og.imageSmoothingEnabled = false;
+		for (let i = 0; i < a.N; i++) {
+			const top = Math.max(ye[i], ye[i + 1]);
+			if (top < .5) continue;
+			const x0 = Math.floor(i * a.dx), x1 = Math.ceil((i + 1) * a.dx);
+			og.drawImage(a.body, i, 0, 1, bh, x0, H - top, x1 - x0, top);
+		}
+		og.imageSmoothingEnabled = true;
+		og.restore();
 		// the surface: one continuous line over the tops (Effects.lua: Line segments every few columns), under it a
 		// soft band of light (the alch_band Line texture: brightest along its middle, fading to both edges; here
 		// stacked strokes) so a thin layer is as bright as a deep one, as the concept

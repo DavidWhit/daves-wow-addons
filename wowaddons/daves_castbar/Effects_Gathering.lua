@@ -238,9 +238,10 @@ end
 -- spell name stay smaller, and the pool thins toward the far left.
 local function PoolTexture(cell, sub, r, g, b)
 	local tex = content.poolPool:Get()
+	tex:Hide()   -- shown once it is anchored and sized (AddBlot): a pooled texture shown before that could draw a frame at its old place
 	tex:SetTexture(MEDIA .. "p_pool")
 	tex:SetTexCoord(cell * .25, (cell + 1) * .25, 0, 1)
-	tex:SetDrawLayer("ARTWORK", sub)
+	tex:SetDrawLayer("ARTWORK", sub)   -- seep 2, rim 3, body 4, glint 5: the meat bands sit at 1, the veil at 6, so nothing shares a level
 	tex:SetBlendMode("BLEND")
 	tex:SetVertexColor(r, g, b)
 	tex:SetDesaturation(0)
@@ -256,12 +257,16 @@ local function AddBlot(x)
 	q.seep = PoolTexture(cell, 2, .16, 0, .02)
 	q.rim = PoolTexture(cell, 3, .64, .07, .1)
 	q.body = PoolTexture(cell, 4, .43, .02, .04)
-	PlaceIn(q.seep, content, q.x + H * .02, q.y - H * .03, .1, .1)
-	PlaceIn(q.rim, content, q.x, q.y, .1, .1)
-	PlaceIn(q.body, content, q.x, q.y, .1, .1)
+	-- anchored and sized (tiny, it swells from here) before it is shown: a texture of size 0 draws at its file's
+	-- own size for a frame, a flash behind the knife
+	PlaceIn(q.seep, content, q.x + H * .02, q.y - H * .03, .5, .5)
+	PlaceIn(q.rim, content, q.x, q.y, .5, .5)
+	PlaceIn(q.body, content, q.x, q.y, .5, .5)
 	q.seep:SetAlpha(.45 * q.fade); q.rim:SetAlpha(q.fade); q.body:SetAlpha(q.fade)
+	q.seep:Show(); q.rim:Show(); q.body:Show()
 	if math.random() < .3 then   -- a few wet glints
 		q.glint = content.poolPool:Get()
+		q.glint:Hide()
 		q.glint:SetTexture(MEDIA .. "p_soft")
 		q.glint:SetTexCoord(0, 1, 0, 1)
 		q.glint:SetDrawLayer("ARTWORK", 5)
@@ -269,6 +274,9 @@ local function AddBlot(x)
 		q.glint:SetVertexColor(1, .88, .88)
 		q.glint:SetDesaturation(0)
 		q.ph = rand(0, 6.283)
+		PlaceIn(q.glint, content, q.x, q.y, .5, .5)
+		q.glint:SetAlpha(0)
+		q.glint:Show()
 	end
 	skin.pool[#skin.pool + 1] = q
 end
@@ -294,12 +302,12 @@ local function UpdateSkin(dt, fillW, casting)
 		skin.poolNext = skin.poolNext + math.max(H * rand(.26, .4), W / POOL_MAX)
 	end
 	for _, q in ipairs(skin.pool) do
-		local s = BlotRadius(q) / .3          -- the blot's main lobe is 0.3 of its texture
+		local s = math.max(.5, BlotRadius(q) / .3)   -- the blot's main lobe is 0.3 of its texture; never a size of 0 (see AddBlot)
 		q.seep:SetSize(s * 1.12, s * 1.12)
 		q.rim:SetSize(s, s)
 		q.body:SetSize(s * .84, s * .84)
 		if q.glint then
-			local gr = BlotRadius(q)
+			local gr = math.max(.5, BlotRadius(q))
 			PlaceIn(q.glint, content, q.x + gr * .15, q.y + gr * .35, gr * .7, gr * .7)
 			q.glint:SetAlpha((.3 + .15 * math.sin(clock * .7 + q.ph)) * q.fade * (1 - (skin.grey or 0)))
 		end
@@ -350,9 +358,10 @@ local function UpdateSkin(dt, fillW, casting)
 	roll.knife:SetSize(KNIFE_W * H, KNIFE_H * H)
 	roll.knife:SetAlpha(1 - lift)
 	roll.knife:Show()
-	-- a glint sliding up and down the blade as it saws
-	PlaceIn(roll.glint, tools, tipX + H * .07, tipY + KNIFE_L * H * (.25 + .5 * (.5 + .5 * math.sin(clock * 13))), H * .2, H * .2)
-	roll.glint:SetAlpha(.45 * (1 - lift))
+	-- a soft glint sliding slowly along the blade (it used to jump with the saw, thirteen times a second, which read as
+	-- a flicker over the blood behind the knife)
+	PlaceIn(roll.glint, tools, tipX + H * .07, tipY + KNIFE_L * H * (.3 + .4 * (.5 + .5 * math.sin(clock * 2))), H * .15, H * .15)
+	roll.glint:SetAlpha(.25 * (1 - lift))
 	roll.glint:Show()
 end
 

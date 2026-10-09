@@ -35,7 +35,7 @@ local DEFAULTS = {
 	style = "framed",      -- "framed" (a thin line in the look's colour) or "borderless" (none); edges are always clean
 	corners = "soft",      -- "square", "soft" (slightly rounded) or "rounded"
 	depth = "flat",        -- "flat" or "bevel" (light along the top, shade along the bottom, a shadow inside the frame)
-	fallback = "plain",     -- the look for casts we can't place (other professions, hearthstone, ...): Blizzard's own bar art
+	fallback = "plain",     -- the look for casts we can't place (other professions, hearthstone, ...): Blizzard's own bar art, or "class"
 	spellElements = {},     -- [spellID] = element, set with /castbar set
 }
 

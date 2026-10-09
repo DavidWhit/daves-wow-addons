@@ -9,8 +9,8 @@
 --   3. crafting casts (tradeskill) by their recipe's profession: Blacksmithing, Mining (smelting), Alchemy,
 --      Tailoring, Leatherworking, Enchanting; else the fallback
 --   4. the spell's name: known names first, then words in it ("Frost", "Flame", "Lightning", ...)
---   5. your class and specialization
---   6. the fallback setting, "Other casts" (Plain by default: Blizzard's own cast bar art)
+--   5. the "Other casts" setting: a look (Plain by default: Blizzard's own cast bar art), or "Your class",
+--      which picks your class's and specialization's element
 
 local _, ns = ...
 
@@ -260,7 +260,7 @@ local NAMES = {
 	["hibernate"] = "nature", ["entangling roots"] = "nature", ["rebirth"] = "nature", ["mind blast"] = "shadow",
 	["mind flay"] = "shadow", ["mind control"] = "shadow", ["mind vision"] = "shadow", ["mind sear"] = "shadow",
 	["smite"] = "holy", ["penance"] = "holy", ["prayer of healing"] = "holy", ["polymorph"] = "arcane",
-	["evocation"] = "arcane", ["hearthstone"] = "arcane", ["lava burst"] = "fire", ["chain heal"] = "nature",
+	["evocation"] = "arcane", ["lava burst"] = "fire", ["chain heal"] = "nature",   -- (Hearthstone is not a spell: it gets the "Other casts" look)
 	["revive pet"] = "nature", ["aimed shot"] = "nature", ["frostbolt"] = "frost", ["fireball"] = "fire",
 	-- shaman and druid heals are nature, not holy
 	["healing wave"] = "nature", ["lesser healing wave"] = "nature", ["healing touch"] = "nature",
@@ -350,13 +350,21 @@ local function CraftElement(spellID)
 	end
 end
 
+-- The "Other casts" setting decides every cast nothing above placed: a look, or "class" for your class's element.
+-- The setting always wins (it used to lose to the class guess, so a mage's Hearthstone was always arcane).
+local function Fallback()
+	local f = ns.db.fallback
+	if f == "class" then return ClassElement() or "plain" end
+	return ns.ELEMENTS[f] and f or "plain"
+end
+
 function ns:ResolveElement(spellID, name, isTradeskill)
 	local own = spellID and not issecretvalue(spellID) and ns.db.spellElements[spellID]
 	if own and ns.ELEMENTS[own] then return own end
 	local plain = type(name) == "string" and not issecretvalue(name)
 	if plain and GATHERING[name:lower()] then return GATHERING[name:lower()] end
 	if plain and name:lower():find("^smelt ") then return "smelting" end   -- Smelt Copper, Smelt Iron, ...
-	if not issecretvalue(isTradeskill) and isTradeskill then return CraftElement(spellID) or ns.db.fallback end
+	if not issecretvalue(isTradeskill) and isTradeskill then return CraftElement(spellID) or Fallback() end
 	if type(name) == "string" and not issecretvalue(name) then
 		local lower = name:lower()
 		if NAMES[lower] then return NAMES[lower] end
@@ -365,5 +373,5 @@ function ns:ResolveElement(spellID, name, isTradeskill)
 			if lower:find(w[1], 1, true) then return w[2] end
 		end
 	end
-	return ClassElement() or ns.db.fallback
+	return Fallback()
 end
