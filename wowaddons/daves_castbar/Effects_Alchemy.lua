@@ -54,7 +54,7 @@ local function SetFxColor(e, c, k)   -- the particle specs above take one colour
 end
 local function PalAt(pal, f, out)
 	f = math.max(0, math.min(1, f)) * (#pal - 1)
-	local i = math.min(#pal - 1, math.floor(f))
+	local i = math.min(#pal - 2, math.floor(f))   -- at f = 1 the last pair (never past the palette's end)
 	local a, b, t = pal[i + 1], pal[i + 2], f - i
 	out = out or {}
 	out[1], out[2], out[3] = a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t
