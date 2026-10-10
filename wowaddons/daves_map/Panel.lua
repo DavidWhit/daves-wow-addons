@@ -54,9 +54,19 @@ local function GroupState(gi)
 	return on, off
 end
 
+-- a search result is "on map" when its pin is drawn on this map (a table lookup, and the same as the map shows)
 local function IsHere(i)
+	local map = ns.CurrentMap()
+	return map and ns.PinsOnMap(map).x[i] ~= nil or false
+end
+-- a chain step also counts when it lies inside this map's rectangle (the map draws neighbouring-zone steps there)
+local function StepHere(i)
 	local x, y = ns.ProjectPin(ns.CurrentMap(), i)
 	return x and x >= 0 and x <= 1 and y >= 0 and y <= 1 or false
+end
+-- the map rebuilds and calls ns.OnLayerChanged itself while it's open; refresh the list directly only when it isn't
+local function RefreshIfMapHidden()
+	if not WorldMapFrame:IsVisible() then ns.OnLayerChanged() end
 end
 
 -- what the list shows now: the chain, the search results or the categories
@@ -67,7 +77,7 @@ local function BuildItems()
 	if chain and #chain.steps > 1 then
 		mode = "chain"
 		items[1] = { kind = "chainhead", n = #chain.steps }
-		for n, i in ipairs(chain.steps) do items[#items + 1] = { kind = "step", i = i, n = n, here = IsHere(i) } end
+		for n, i in ipairs(chain.steps) do items[#items + 1] = { kind = "step", i = i, n = n, here = StepHere(i) } end
 	elseif found then
 		mode = "search"
 		local all = {}
@@ -164,7 +174,7 @@ local function OnRowClick(row)
 	else   -- a search result: select it (its chain is drawn and listed); shift-click for a waypoint
 		if IsShiftKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i) end
 	end
-	ns.OnLayerChanged()
+	RefreshIfMapHidden()   -- Refresh / Focus already update the list while the map is open
 end
 
 local function MakeRow(r)
@@ -258,7 +268,7 @@ local function RunSearch()
 		end
 		ns.SetSearch(set)
 	end
-	ns.OnLayerChanged()
+	RefreshIfMapHidden()   -- SetSearch -> Refresh rebuilds the map, which updates the list, while the map is open
 end
 
 ---------------------------------------------------------------------------
@@ -377,12 +387,16 @@ function ns.InitPanel()
 	local bg = CreateFrame("Frame", nil, panel, "FlatPanelBackgroundTemplate")
 	bg:SetPoint("TOPLEFT", 0, -2)
 	bg:SetPoint("BOTTOMRIGHT", 0, 2)
-	bg:SetFrameLevel(level)
+	bg:SetFrameLevel(level - 1)   -- under the panel's own regions (title, divider, status); still above the map's pins
 	local border = CreateFrame("Frame", nil, panel, "NineSlicePanelTemplate")
 	border:SetFrameLevel(level + 30)   -- the template's own level (500) is under ours
 	NineSliceUtil.ApplyLayoutByName(border, "ButtonFrameTemplateNoPortrait")
 
-	local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	-- the title on a frame of its own above the border, as Blizzard's TitleContainer (the metal top edge would cover it)
+	local titleBar = CreateFrame("Frame", nil, panel)
+	titleBar:SetAllPoints()
+	titleBar:SetFrameLevel(level + 31)
+	local title = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	title:SetPoint("TOP", 0, -5)
 	title:SetText("Dave's Map")
 	local close = CreateFrame("Button", nil, panel, "UIPanelCloseButtonDefaultAnchors")

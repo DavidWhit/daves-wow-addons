@@ -182,8 +182,9 @@ end
 -- another zone still points the right way. nil when the pin is on another continent.
 local EDGE = 0.02
 local function Pos(i)
-	local x, y = ns.ProjectPin(curMap, i)
+	local x, y, mine = ns.ProjectPin(curMap, i)
 	if not x then return nil end
+	if mine then return x, y, true end   -- a pin drawn on this map stays exactly where it is, even at the edge
 	local cx = math.min(1 - EDGE, math.max(EDGE, x))
 	local cy = math.min(1 - EDGE, math.max(EDGE, y))
 	return cx, cy, cx == x and cy == y
@@ -258,9 +259,10 @@ local function Badge(n)   -- a step number on a pin: a frame of its own so it ca
 end
 
 local function DrawLine(i, j, kind, alpha, thickPx)
-	local x1, y1 = Pos(i)
-	local x2, y2 = Pos(j)
+	local x1, y1, on1 = Pos(i)
+	local x2, y2, on2 = Pos(j)
 	if not (x1 and x2) or (x1 == x2 and y1 == y2) then return end
+	if not (on1 or on2) then return end   -- both ends off this map: it would only run along the border
 	nLines = nLines + 1
 	local ln = Line(nLines)
 	local c = LINK_COLORS[kind]
@@ -288,9 +290,27 @@ local function Mark(i, focus)
 	t:Show()
 end
 
+-- steps off this map share one badge per zone at the edge ("3, 4, 7"), so they don't pile up on one point
+local edgeBadges = {}
+
+local function FitBadge(b)
+	b:SetWidth(math.max(18, b.text:GetStringWidth() + 10))
+end
+
 local function DrawStep(i, n, isRoot)
 	local x, y, on = Pos(i)
 	if not x then return end
+	if not on then
+		local zone = P.zone[i] or 0
+		local shared = edgeBadges[zone]
+		if shared then
+			shared.nums[#shared.nums + 1] = n
+			shared.text:SetText(table.concat(shared.nums, ", "))
+			FitBadge(shared)
+			if isRoot then shared.bg:SetVertexColor(.95, .72, .15); shared.text:SetTextColor(0, 0, 0) end
+			return
+		end
+	end
 	nBadges = nBadges + 1
 	local b = Badge(nBadges)
 	local k = curScale or 1
@@ -307,11 +327,15 @@ local function DrawStep(i, n, isRoot)
 	end
 	b.zone:SetText(on and "" or (ns.ZoneName(i) or ""))
 	b:SetAlpha(on and 1 or .85)
+	b.nums = { n }
+	FitBadge(b)
+	if not on then edgeBadges[P.zone[i] or 0] = b end
 	b:Show()
 end
 
 local function DrawLinks()
 	nRings, nLines, nLinked, nBadges = 0, 0, 0, 0
+	wipe(edgeBadges)
 	if curMap and ns.db.enabled then
 		if lockedPin then
 			if not chain or chain.root ~= lockedPin then chain = BuildChain(lockedPin) end
