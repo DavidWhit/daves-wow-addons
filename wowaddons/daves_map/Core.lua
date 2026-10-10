@@ -78,14 +78,14 @@ function ns:PLAYER_LOGIN()
 	if D then
 		ns.Print(("v%s loaded: %d map pins from %s (%s). /dmap for commands."):format(ns.VERSION, #D.x, D.source.map, D.source.fetched))
 	else
-		-- installed but disabled, or not built on this machine? (an addon that isn't there comes back with reason "MISSING")
-		local installed = false
-		if C_AddOns and C_AddOns.GetAddOnInfo then
-			local ok, name, _, _, _, reason = pcall(C_AddOns.GetAddOnInfo, "daves_map_data")
-			installed = ok and name ~= nil and reason ~= "MISSING"
-		end
-		if installed then
-			ns.Print(("v%s: its map data (Dave's Map (data)) is installed but not loaded: enable it in the AddOns list."):format(ns.VERSION))
+		-- installed but not loaded (disabled, out of date, ...), or not on this machine at all?
+		local exists = C_AddOns and C_AddOns.DoesAddOnExist and C_AddOns.DoesAddOnExist("daves_map_data")
+		if exists then
+			-- why it didn't load, in the game's own words (the AddOns list shows the same: ADDON_<reason>)
+			local ok, _, _, _, _, reason = pcall(C_AddOns.GetAddOnInfo, "daves_map_data")
+			local why = ok and type(reason) == "string" and reason ~= "" and (_G["ADDON_" .. reason] or reason) or nil
+			ns.Print(("v%s: its map data (Dave's Map (data)) is installed but not loaded%s. Check it in the AddOns list."):format(
+				ns.VERSION, why and (" (" .. why .. ")") or ""))
 		else
 			ns.Print(("v%s loaded without its map data. Ask for daves_map_data.zip, unzip it into Interface\\AddOns and restart the game (or build it: wowaddons\\daves_map\\tools\\Update-MapData.ps1)."):format(ns.VERSION))
 		end

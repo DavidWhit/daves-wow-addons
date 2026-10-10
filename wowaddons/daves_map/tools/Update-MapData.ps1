@@ -24,14 +24,20 @@
 #>
 param(
 	[string]$Url = 'https://mapgenie.io/world-of-warcraft-forever/maps/azeroth',
-	# the data goes into its own addon, daves_map_data (next to daves_map; gitignored as a whole): daves_map lists it
-	# in ## OptionalDeps, so a copy without it (a fresh clone) loads with no error and says how to build it
-	[string]$Out = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'daves_map_data\Data.lua'),
 	[switch]$NoQuestDb,
 	[string]$QuestDbRef = 'master',
 	[switch]$KeepRaw
 )
 $ErrorActionPreference = 'Stop'
+# The data goes into its own addon, daves_map_data, next to daves_map. daves_map lists it in ## OptionalDeps, so a
+# copy without it (a fresh clone) loads with no error and says how to get it. The path is fixed on purpose: the repo
+# root's .gitignore covers exactly wowaddons/daves_map_data/, and Map Genie's data must never land anywhere git sees.
+$Out = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'daves_map_data\Data.lua'
+# The data addon's TOC takes daves_map's Interface numbers. Read them before anything is downloaded or written: without
+# them the data addon would show as out of date and never load, from a build that otherwise looked fine.
+$mapToc = Join-Path (Split-Path $PSScriptRoot -Parent) 'daves_map.toc'
+$iface = ([regex]::Match([IO.File]::ReadAllText($mapToc), '(?m)^## Interface:\s*(.+?)\s*$')).Groups[1].Value
+if (-not $iface) { throw "No '## Interface:' line in $mapToc; the data addon needs it to load." }
 Add-Type -AssemblyName System.Web.Extensions
 $UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -414,9 +420,7 @@ $prevPath = if (Test-Path -LiteralPath $Out) { $Out } elseif (Test-Path -Literal
 $prev = if ($prevPath) { [IO.File]::ReadAllText($prevPath) } else { $null }
 [IO.File]::WriteAllText($Out, $sb.ToString(), (New-Object Text.UTF8Encoding $false))
 Write-Host ("Wrote {0} ({1:N0} KB)" -f $Out, ((Get-Item -LiteralPath $Out).Length / 1KB))
-# the companion addon's TOC, with daves_map's own Interface numbers
-$mapToc = Join-Path (Split-Path $PSScriptRoot -Parent) 'daves_map.toc'
-$iface = ([regex]::Match([IO.File]::ReadAllText($mapToc), '(?m)^## Interface:\s*(.+?)\s*$')).Groups[1].Value
+# the companion addon's TOC, with daves_map's own Interface numbers (read and checked at the start)
 $tocText = @"
 ## Interface: $iface
 ## Title: |cffd4a94eDave's|r Map (data)
