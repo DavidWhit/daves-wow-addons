@@ -742,6 +742,7 @@ ns.UpdatePixels = UpdatePixels
 function ns.ApplyScale()
 	refitHeight = true
 	frame:SetScale(ns.db.scale)
+	if ns.SyncCloseButton then ns.SyncCloseButton() end
 	UpdatePixels()
 	ns.ResetPosition()
 	-- A bigger scale can push the columns past the screen: the limits win.
@@ -1091,18 +1092,54 @@ local function Build()
 	title:SetPoint("TOP", 0, -15)
 	title:SetText(INVENTORY_TOOLTIP or "Inventory")
 
-	local close = TryTemplate("Button", nil, frame, "UIPanelCloseButton")
+	-- The close button is a secure action button that clicks Blizzard's backpack button (the "click" action):
+	-- Blizzard's ToggleAllBags then runs as Blizzard code, untainted, so its bag state stays in step with our
+	-- window (the hooks below follow it) and its own close sound plays. Calling CloseAllBags from here would
+	-- taint that state (1.7.7). If Blizzard's bags are already closed (/sack opened ours) the click just hides us.
+	-- It is NOT a child of the window: a frame holding a protected button is protected itself, and the window
+	-- could then not be shown, hidden, moved or resized in combat. It lives on UIParent, anchored to the window,
+	-- and mirrors the window's visibility and scale (SyncClose) outside combat; in combat the mirror waits.
+	local secure = MainMenuBarBackpackButton ~= nil
+	local closeParent = secure and UIParent or frame
+	local close = TryTemplate("Button", nil, closeParent, secure and "UIPanelCloseButton, SecureActionButtonTemplate" or "UIPanelCloseButton")
 	if close then
-		close:SetPoint("TOPRIGHT")
+		close:SetPoint("TOPRIGHT", frame, "TOPRIGHT")
 	else
-		close = CreateFrame("Button", nil, frame)
-		close:SetSize(32, 32); close:SetPoint("TOPRIGHT", 2, 2)
+		close = CreateFrame("Button", nil, closeParent, secure and "SecureActionButtonTemplate" or nil)
+		close:SetSize(32, 32); close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 2, 2)
 		close:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
 		close:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
 		close:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", "ADD")
 	end
+	close:SetFrameStrata(frame:GetFrameStrata())
 	close:SetFrameLevel(frame:GetFrameLevel() + 5)
-	close:SetScript("OnClick", function() frame:Hide() end)
+	if secure and close.SetAttribute then
+		close:RegisterForClicks("AnyDown", "AnyUp")   -- the secure template acts on whichever the client's cvar says
+		close:SetAttribute("type", "click")
+		close:SetAttribute("clickbutton", MainMenuBarBackpackButton)
+		close:SetScript("PreClick", function(self)
+			if InCombatLockdown() then return end   -- attributes are locked in combat: the click acts as last set
+			-- an item on the cursor goes into the bags our way (PostClick), not through Blizzard's button
+			local held = CursorHasItem and CursorHasItem()
+			self:SetAttribute("type", (not held and ns.BlizzardBagsOpen()) and "click" or nil)
+		end)
+		close:SetScript("PostClick", function()
+			if CursorHasItem and CursorHasItem() then ns.StoreCursorItem(); return end
+			-- in combat the attributes may be stale: hide ours regardless, Blizzard's state catches up at the next key press
+			if frame:IsShown() and (InCombatLockdown() or not ns.BlizzardBagsOpen()) then frame:Hide() end
+		end)
+		local closeDirty
+		function ns.SyncCloseButton()
+			if InCombatLockdown() then closeDirty = true; return end
+			closeDirty = false
+			close:SetScale(frame:GetScale())
+			close:SetShown(frame:IsShown())
+		end
+		function ns.SyncCloseButtonAfterCombat() if closeDirty then ns.SyncCloseButton() end end
+		ns.SyncCloseButton()
+	else
+		close:SetScript("OnClick", function() frame:Hide() end)
+	end
 
 	-- Sort (Blizzard's standard red panel button), then the search box.
 	local searchRight = -PAD
@@ -1310,6 +1347,8 @@ local function Build()
 	end
 
 	frame:SetScript("OnShow", function()
+		ns.BagSound("IG_BACKPACK_OPEN")
+		if ns.SyncCloseButton then ns.SyncCloseButton() end
 		-- Categories ticked under "Start collapsed" in Settings open collapsed each time.
 		local collapsed, startFolded = ns.db.collapsed, ns.db.startFolded
 		for cat = 1, FREE_CAT do
@@ -1324,7 +1363,11 @@ local function Build()
 	-- here: they'd run tainted and taint Blizzard's bag state. The merchant
 	-- window then inherits it when it opens the bags, and right-clicking an item
 	-- there is blocked ("only available to the Blizzard UI", UseContainerItem).
-	frame:SetScript("OnHide", function() search:ClearFocus() end)
+	frame:SetScript("OnHide", function()
+		search:ClearFocus()
+		ns.BagSound("IG_BACKPACK_CLOSE")
+		if ns.SyncCloseButton then ns.SyncCloseButton() end
+	end)
 end
 
 ---------------------------------------------------------------------------
@@ -1332,7 +1375,30 @@ end
 ---------------------------------------------------------------------------
 function ns.Open()  if not frame:IsShown() then frame:Show() end end
 function ns.Close() if frame:IsShown() then frame:Hide() end end
-function ns.Toggle() frame:SetShown(not frame:IsShown()) end   -- not ToggleAllBags: see OnHide
+-- /sack toggles our window alone (a slash command can't click Blizzard's backpack button securely), so Blizzard's
+-- bags may be left out of step until the next key press or button click, which the hooks below follow.
+function ns.Toggle() frame:SetShown(not frame:IsShown()) end
+
+-- Whether Blizzard considers any of the bags we show open: read only (IsBagOpen looks at its frames' IsShown),
+-- so nothing of Blizzard's is written from addon code.
+local BACKPACK = Enum and Enum.BagIndex and Enum.BagIndex.Backpack or 0
+function ns.BlizzardBagsOpen()
+	if not IsBagOpen then return false end
+	if IsBagOpen(BACKPACK) then return true end
+	for id in pairs(inList) do if IsBagOpen(id) then return true end end
+	return false
+end
+
+-- The bag open/close sounds. Blizzard's container frames play them from their own OnShow/OnHide, which still run
+-- while a frame is parked on the hidden parent (below). When our window opens or closes in the same frame tick as
+-- one of theirs (the hooks below follow them), theirs has just sounded and we stay quiet; when ours moves on its
+-- own (/sack) we play it. Escape is Blizzard's path too: its CloseAllWindows calls CloseAllBags before it reaches
+-- our UISpecialFrames entry (Blizzard_UIParentPanelManager).
+local blizzSoundAt
+local function NoteBlizzardSound() blizzSoundAt = GetTime() end
+function ns.BagSound(kit)
+	if blizzSoundAt ~= GetTime() then Sound(kit) end
+end
 
 local hidden = CreateFrame("Frame"); hidden:Hide()
 
@@ -1347,11 +1413,15 @@ local BLIZZ_EVENTS = {
 	"PLAYER_SPECIALIZATION_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_MONEY", "CURRENCY_DISPLAY_UPDATE",
 	"ITEM_DATA_LOAD_RESULT", "EQUIPMENT_SETS_CHANGED", "PLAYERBANKSLOTS_CHANGED",
 }
-local origParent, mutedEvents = {}, {}
+local origParent, mutedEvents, soundHooked = {}, {}, {}
 
 local function Silence(f)
 	if f:GetParent() ~= hidden then origParent[f] = f:GetParent() end
 	f:SetParent(hidden)
+	if not soundHooked[f] then   -- note when Blizzard's own open/close sound plays (ns.BagSound)
+		soundHooked[f] = true
+		f:HookScript("OnShow", NoteBlizzardSound); f:HookScript("OnHide", NoteBlizzardSound)
+	end
 	if not f.IsEventRegistered then return end
 	local saved = mutedEvents[f] or {}
 	for _, e in ipairs(BLIZZ_EVENTS) do
@@ -1375,53 +1445,50 @@ local function Claim(f)
 end
 
 local function TakeOverBlizzardBags()
-	if ContainerFrame_GenerateFrame then
-		hooksecurefunc("ContainerFrame_GenerateFrame", Claim)
-	else
-		local n = (NUM_BAG_SLOTS or 4) + 1 + (NUM_REAGENTBAG_SLOTS or 0)
-		for i = 1, n do local f = _G["ContainerFrame" .. i]; if f then Silence(f) end end
-	end
+	-- Park every container frame now, before Blizzard first shows one: shown under UIParent first and parked
+	-- after, a frame would play its open sound and then its close sound in the same instant. Bank bags get
+	-- theirs back through Claim.
+	for i = 1, 20 do local f = _G["ContainerFrame" .. i]; if f then Silence(f) end end
+	if ContainerFrame_GenerateFrame then hooksecurefunc("ContainerFrame_GenerateFrame", Claim) end
 	local combined = ContainerFrameCombinedBags
 	if combined then
 		Silence(combined)
 		combined:HookScript("OnShow", Silence)
 	end
 
-	-- Several of these call each other internally; only the first per frame acts.
+	-- After any of Blizzard's bag calls, our window follows Blizzard's own open/closed state (read only) instead
+	-- of toggling by itself: the two can't drift apart (a drift made Blizzard's frames, and their sounds, run
+	-- the opposite way to ours), and Blizzard's rules - bags opened by the mailbox or vendor close with it, bags
+	-- you opened yourself stay open - apply to us for free. Several of these call each other; following the state
+	-- is idempotent, so that doesn't matter.
+	local function Follow()
+		local open = ns.BlizzardBagsOpen()
+		if open ~= frame:IsShown() then frame:SetShown(open) end
+	end
+	if IsBagOpen then
+		for _, name in ipairs({ "ToggleAllBags", "ToggleBackpack", "ToggleKeyRing", "OpenAllBags", "OpenBackpack",
+			"CloseAllBags", "CloseBackpack", "ToggleBag", "OpenBag", "CloseBag" }) do
+			if _G[name] then hooksecurefunc(name, Follow) end
+		end
+		return
+	end
+	-- A client without IsBagOpen (none seen yet): toggle along with Blizzard's calls instead. Several of these
+	-- call each other internally, so only the first per frame tick acts.
 	local stamp
-	local function First()
-		local t = GetTime()
-		if stamp == t then return false end
-		stamp = t
-		return true
+	local function Once(fn)
+		return function(...)
+			local t = GetTime()
+			if stamp == t then return end
+			stamp = t
+			fn(...)
+		end
 	end
-
-	-- Like Blizzard: bags opened by the mailbox/vendor close with it, bags you
-	-- opened yourself stay open.
-	local openedBy
-	local function Open(src)
-		if not frame:IsShown() then openedBy = src; frame:Show() end
+	for _, name in ipairs({ "ToggleAllBags", "ToggleBackpack", "ToggleKeyRing" }) do
+		if _G[name] then hooksecurefunc(name, Once(ns.Toggle)) end
 	end
-	local function Close(src, force)
-		if frame:IsShown() and (force or not src or src == openedBy) then openedBy = nil; frame:Hide() end
-	end
-	local function ToggleSelf()
-		if frame:IsShown() then Close(nil, true) else Open(nil) end
-	end
-
-	local function Hook(name, fn)
-		if _G[name] then hooksecurefunc(name, function(...) if First() then fn(...) end end) end
-	end
-	Hook("ToggleAllBags", ToggleSelf)
-	Hook("ToggleBackpack", ToggleSelf)
-	Hook("ToggleKeyRing", ToggleSelf)
-	Hook("OpenAllBags", Open)
-	Hook("OpenBackpack", Open)
-	Hook("CloseAllBags", Close)
-	Hook("CloseBackpack", Close)
-	if ToggleBag then
-		hooksecurefunc("ToggleBag", function(id) if inList[id] and First() then ToggleSelf() end end)
-	end
+	for _, name in ipairs({ "OpenAllBags", "OpenBackpack" }) do if _G[name] then hooksecurefunc(name, Once(ns.Open)) end end
+	for _, name in ipairs({ "CloseAllBags", "CloseBackpack" }) do if _G[name] then hooksecurefunc(name, Once(ns.Close)) end end
+	if ToggleBag then hooksecurefunc("ToggleBag", Once(function(id) if inList[id] then ns.Toggle() end end)) end
 end
 
 ---------------------------------------------------------------------------
@@ -1474,6 +1541,8 @@ local function RescaleSoon()
 end
 handlers.UI_SCALE_CHANGED = RescaleSoon
 handlers.DISPLAY_SIZE_CHANGED = RescaleSoon
+-- the secure close button can't follow the window in combat: catch it up afterwards
+handlers.PLAYER_REGEN_ENABLED = function() if ns.SyncCloseButtonAfterCombat then ns.SyncCloseButtonAfterCombat() end end
 
 events:SetScript("OnEvent", function(_, event, ...) handlers[event](...) end)
 
