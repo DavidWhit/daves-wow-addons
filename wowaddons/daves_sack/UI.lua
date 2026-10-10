@@ -748,21 +748,71 @@ function ns.ApplyScale()
 	if frame:IsShown() and ns.ClampColumns(ns.db.columns) ~= ns.db.columns then Layout() else ns.ApplyView() end
 end
 
--- Background darkness behind the items. 80% is Blizzard's translucent Edit
--- Mode dialog (the default look); 100% is as solid as its opaque dialogs
--- (checked in Blizzard_SharedXML/Shared/Dialog/DialogTemplates.xml: the
+-- Background behind the items: a standard Blizzard background (the Background
+-- style setting) at the Background slider's darkness. 80% is Blizzard's
+-- translucent Edit Mode dialog (the default look); 100% is as solid as its
+-- opaque dialogs (Blizzard_SharedXML/Shared/Dialog/DialogTemplates.xml: the
 -- translucent border is a black "Bg" texture at 0.8, the opaque one at 1).
--- The Settings window follows the same setting.
-local function SetBackground(border, a)
+-- The styles are the backgrounds Blizzard's own dialogs use (same file): the
+-- light and dark dialog papers (DialogBorderTemplate / DialogBorderDarkTemplate)
+-- and the marble and rock of the old panels (Interface\FrameGeneral\UI-Background-*).
+-- A style may name an atlas (guarded by C_Texture.GetAtlasInfo) with a file to fall
+-- back on; none does at present. The
+-- slider's alpha is applied as the texture's vertex alpha, so every style keeps
+-- the translucency. The Settings window follows the same settings.
+ns.BACKGROUND_STYLES = {
+	{ key = "dark",       name = "Dark (default)" },                                                                  -- plain black, the translucent dialog
+	{ key = "dialog",     name = "Light dialog",  file = "Interface\\DialogFrame\\UI-DialogBox-Background", tile = true },
+	{ key = "darkdialog", name = "Dark dialog",   file = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark", tile = true },
+	{ key = "marble",     name = "Marble",        file = "Interface\\FrameGeneral\\UI-Background-Marble", tile = true },
+	{ key = "rock",       name = "Rock",          file = "Interface\\FrameGeneral\\UI-Background-Rock", tile = true },
+}
+-- (Tooltip and Parchment were offered in 1.7.9 and removed the same day at the user's request; a saved key
+-- that no longer exists falls back to Dark in ns.BackgroundStyle.)
+
+function ns.BackgroundStyle(key)
+	for _, s in ipairs(ns.BACKGROUND_STYLES) do if s.key == key then return s end end
+	return ns.BACKGROUND_STYLES[1]
+end
+
+local function HasAtlas(name)
+	return name and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(name) ~= nil
+end
+
+local function SetBackground(border, a, style)
 	if not border then return end
-	if border.Bg then border.Bg:SetColorTexture(0, 0, 0, a)
-	elseif border.SetBackdropColor then border:SetBackdropColor(0, 0, 0, a) end
+	local bg = border.Bg
+	if bg then   -- the dialog template's background texture: swap what it shows, keep the alpha on top
+		if style.atlas and HasAtlas(style.atlas) then
+			bg:SetHorizTile(false); bg:SetVertTile(false)
+			bg:SetAtlas(style.atlas, false)
+			bg:SetVertexColor(1, 1, 1, a)
+		elseif style.file then
+			local wrap = style.tile and "REPEAT" or "CLAMP"
+			bg:SetTexture(style.file, wrap, wrap)
+			bg:SetTexCoord(0, 1, 0, 1)
+			bg:SetHorizTile(style.tile or false); bg:SetVertTile(style.tile or false)
+			bg:SetVertexColor(1, 1, 1, a)
+		else
+			bg:SetHorizTile(false); bg:SetVertTile(false)
+			bg:SetColorTexture(0, 0, 0, a)
+		end
+	elseif border.SetBackdrop then   -- the classic backdrop fallback: files only (a backdrop can't show an atlas)
+		local file = style.file
+		border:SetBackdrop({
+			bgFile = file or "Interface\\Buttons\\WHITE8X8", tile = style.tile or false, tileSize = 256,
+			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 32,
+			insets = { left = 11, right = 12, top = 12, bottom = 11 },
+		})
+		if file then border:SetBackdropColor(1, 1, 1, a) else border:SetBackdropColor(0, 0, 0, a) end
+	end
 end
 
 function ns.ApplyBackground()
 	local a = max(0.2, min(1, ns.db.background or 0.8))
-	SetBackground(bagBorder, a)
-	SetBackground(ns.optionsBorder, a)
+	local style = ns.BackgroundStyle(ns.db.backgroundStyle)
+	SetBackground(bagBorder, a, style)
+	SetBackground(ns.optionsBorder, a, style)
 end
 
 function ns.Relayout()

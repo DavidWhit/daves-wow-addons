@@ -151,6 +151,47 @@ local function PanelButton(text, width)
 	return b
 end
 
+-- Dropdown: label on the left, Blizzard's styled dropdown underneath (its menu is
+-- a radio list of the items). Where the client has no menu system, a button that
+-- cycles through the items instead.
+local function Dropdown(x, y, width, label, items, get, set, tip)
+	local f = CreateFrame("Frame", nil, opt)
+	f:SetSize(width, 46)
+	f:SetPoint("TOPLEFT", x, y)
+	f.label = Label(f, label, "GameFontHighlight"); f.label:SetPoint("TOPLEFT")
+	local function Current()
+		for _, it in ipairs(items) do if it.key == get() then return it end end
+		return items[1]
+	end
+	local dd = TryTemplate("DropdownButton", nil, f, "WowStyle1DropdownTemplate")
+	if dd and dd.SetupMenu then
+		dd:SetPoint("BOTTOMLEFT", 0, 0); dd:SetWidth(width)
+		dd:SetupMenu(function(_, root)
+			for _, it in ipairs(items) do
+				root:CreateRadio(it.name, function() return get() == it.key end, function() set(it.key) end)
+			end
+		end)
+		function f:Refresh() dd:GenerateMenu() end
+		Tooltip(dd, tip)
+	else
+		local b = TryTemplate("Button", nil, f, "UIPanelButtonTemplate") or CreateFrame("Button", nil, f)
+		b:SetPoint("BOTTOMLEFT", 0, 0); b:SetSize(width, 22)
+		if not b.SetText then b.text = Label(b, "", "GameFontHighlight"); b.text:SetPoint("CENTER"); b.SetText = function(_, t) b.text:SetText(t) end end
+		b:SetScript("OnClick", function()
+			local cur = Current()
+			for i, it in ipairs(items) do
+				if it == cur then set(items[i % #items + 1].key); break end
+			end
+			b:SetText(Current().name)
+		end)
+		function f:Refresh() b:SetText(Current().name) end
+		Tooltip(b, tip)
+	end
+	Tooltip(f.label, tip)
+	controls[#controls + 1] = f
+	return f
+end
+
 local function RefreshAll()
 	for _, c in ipairs(controls) do c:Refresh() end
 	if controls.height then controls.height:SetActive(ns.db.viewHeight ~= nil) end
@@ -235,6 +276,10 @@ local function Build()
 		function(v) return format("%d%%", floor(v * 100 + 0.5)) end,
 		function() return db.background or 0.8 end,
 		function(v) db.background = v; ns.ApplyBackground() end)
+	Dropdown(LEFT_X, -314, LEFT_W, "Background style", ns.BACKGROUND_STYLES,
+		function() return db.backgroundStyle or "dark" end,
+		function(key) db.backgroundStyle = key; ns.ApplyBackground() end,
+		"Which of Blizzard's standard backgrounds shows behind your items, at the darkness set above. The Settings window follows it too.")
 
 	-- Right column: Sub-categories + Show -------------------------------------
 	local y = -50
@@ -294,7 +339,7 @@ local function Build()
 	y = y - 26
 
 	-- Full width: Start collapsed (3 x 3) -------------------------------------
-	local foldY = math.min(-308, y) - 20          -- below whichever column is longer
+	local foldY = math.min(-360, y) - 20          -- below whichever column is longer
 	Header("Start collapsed", LEFT_X, foldY, FULL_W)
 	local names = {}
 	for i, n in ipairs(ns.CATEGORY_NAMES) do names[i] = n end
@@ -322,7 +367,7 @@ local function Build()
 	local defaults = PanelButton("Restore Defaults", 150)
 	defaults:SetPoint("TOPRIGHT", -24, resetY - 22)
 	defaults:SetScript("OnClick", function()
-		db.columns, db.scale, db.viewHeight, db.pos, db.background = ns.ClampColumns(10), 1, nil, nil, 0.8
+		db.columns, db.scale, db.viewHeight, db.pos, db.background, db.backgroundStyle = ns.ClampColumns(10), 1, nil, nil, 0.8, "dark"
 		db.splitReagents, db.splitConsumables = true, true
 		db.showCurrencies, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag = true, true, true, true
 		wipe(db.collapsed); wipe(db.startFolded); wipe(db.offGroups)

@@ -294,6 +294,7 @@ local DEFAULTS = {
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot
 	preferReagentBag = true,                         -- reagents dropped on the window go into the reagent bag first
 	background = 0.8,                                -- window background darkness (0.8 = Blizzard's translucent dialog)
+	backgroundStyle = "dark",                        -- which Blizzard background shows at that darkness (UI.lua BACKGROUND_STYLES)
 }
 
 local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
