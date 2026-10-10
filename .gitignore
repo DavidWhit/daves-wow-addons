@@ -9,3 +9,9 @@ desktop.ini
 
 # Local copy of Blizzard UI source (rebuild with Update-WowUiSource.ps1)
 wow-addon-kit/plugins/wow-forever-addons/data/ui-source/
+
+# ForeverLoot: never committed (user rule)
+wowaddons/ForeverLoot/
+
+# daves_map_data: generated from Map Genie by wowaddons/daves_map/tools/Update-MapData.ps1 (their data; public repo)
+wowaddons/daves_map_data/

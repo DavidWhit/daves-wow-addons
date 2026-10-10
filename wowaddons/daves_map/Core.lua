@@ -57,6 +57,10 @@ function ns:ADDON_LOADED(name)
 	if type(daves_mapDB.hidden) ~= "table" then daves_mapDB.hidden = {} end   -- [Map Genie category id] = true: off
 	ns.db = daves_mapDB
 
+	-- The map data lives in the companion addon daves_map_data (generated on this machine, not in git). It is our
+	-- ## OptionalDeps, so when it's installed and enabled it has loaded by now and left one global behind.
+	if type(DAVES_MAP_DATA) == "table" and DAVES_MAP_DATA.x then ns.DATA = DAVES_MAP_DATA end
+
 	ns:InitOptions()
 	-- the world map is a Blizzard add-on of its own: it may load before us or after
 	if WorldMapFrame then ns.InitLayer() end
@@ -74,7 +78,17 @@ function ns:PLAYER_LOGIN()
 	if D then
 		ns.Print(("v%s loaded: %d map pins from %s (%s). /dmap for commands."):format(ns.VERSION, #D.x, D.source.map, D.source.fetched))
 	else
-		ns.Print(("v%s loaded without map data: build it with tools/Update-MapData.ps1 (the daves-map-refresh skill)."):format(ns.VERSION))
+		-- installed but disabled, or not built on this machine? (an addon that isn't there comes back with reason "MISSING")
+		local installed = false
+		if C_AddOns and C_AddOns.GetAddOnInfo then
+			local ok, name, _, _, _, reason = pcall(C_AddOns.GetAddOnInfo, "daves_map_data")
+			installed = ok and name ~= nil and reason ~= "MISSING"
+		end
+		if installed then
+			ns.Print(("v%s: its map data (Dave's Map (data)) is installed but not loaded: enable it in the AddOns list."):format(ns.VERSION))
+		else
+			ns.Print(("v%s loaded without its map data. Ask for daves_map_data.zip, unzip it into Interface\\AddOns and restart the game (or build it: wowaddons\\daves_map\\tools\\Update-MapData.ps1)."):format(ns.VERSION))
+		end
 	end
 end
 

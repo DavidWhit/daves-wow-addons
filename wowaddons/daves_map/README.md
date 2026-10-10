@@ -21,15 +21,22 @@ Targets: Forever (`## Interface: 16001`).
   - Green lines join the steps, and thin gold lines show each step's turn-in.
   - Steps in other zones sit at the map's edge with their zone name.
   - The panel lists the steps in order. Click one to set a waypoint to it.
-- `/dmap` (or `/davesmap`) toggles the layer. Also `/dmap panel`, `/dmap options`, `/dmap calib` (how well the pins line up) and `/dmap version` (the data's date).
+- `/dmap` (or `/davesmap`) toggles the layer. Also `/dmap panel`, `/dmap options`, `/dmap calib` (how well the pins lined up; the lining-up itself is automatic) and `/dmap version` (the data's date).
 
 ## Where the data comes from
 
-`Data.lua` is generated, and it is **not in git**: Map Genie's data is theirs and this repo is public. Build or refresh it with:
+The map data lives in a separate, generated addon, **`wowaddons/daves_map_data`** (its TOC and `Data.lua`). It is **not in git**: Map Genie's data is theirs and this repo is public. daves_map lists it in `## OptionalDeps`, so a copy without it, such as a fresh clone, loads with no error and says in chat how to build it.
+
+**First time on a machine** (after cloning or pulling):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File tools\Update-MapData.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File wowaddons\daves_map\tools\Update-MapData.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.ps1 -Path wowaddons\daves_map_data
 ```
+
+Then restart the client fully, and make sure **Dave's Map (data)** is enabled in the AddOns list.
+
+**For a tester, no scripts needed:** every build also writes `wowaddons\daves_map_data.zip` (about 130 KB, gitignored). Send it to them privately. They unzip it into `World of Warcraft\_classic_beta_\Interface\AddOns`, so that it becomes `AddOns\daves_map_data\`, and restart the game. Send a fresh zip after each refresh. Afterwards, run the first command again any time to refresh the data, then `/reload`.
 
 The `daves-map-refresh` skill (in `.claude/skills/`) runs it, checks the result and tells you what changed.
 
@@ -40,7 +47,7 @@ Everything downloaded is read as data, never run. The script saves downloads int
 
 ### How positions line up
 
-Map Genie's positions are pixels on their own picture of Azeroth. `Calibrate.lua` matches Map Genie's flight master pins to the game's flight points by name, using `C_TaxiMap.GetTaxiNodesForMap`, which also returns undiscovered nodes. It then fits an affine transform per continent. Each pin gets its continent position, its zone and its world position, and from those its position on any map. `/dmap calib` prints the anchors used and the error.
+Map Genie's positions are pixels on their own picture of Azeroth. `Calibrate.lua` matches Map Genie's flight master pins to the game's flight points by name, using `C_TaxiMap.GetTaxiNodesForMap`, which also returns undiscovered nodes. It then fits an affine transform per continent. Each pin gets its continent position, its zone and its world position, and from those its position on any map. This runs by itself the first time the map opens each session; `/dmap calib` only prints the anchors used and the error.
 
 ### Why a layer of its own
 
@@ -59,7 +66,7 @@ The pins are plain textures on a frame of ours on the map canvas. One small butt
 | File | Purpose |
 | --- | --- |
 | `Core.lua` | Startup, saved settings, the slash command |
-| `Data.lua` | Generated: groups, categories, pins (columns), links |
+| `../daves_map_data/` | Generated, not in git: the data addon (`Data.lua`: groups, categories, pins in columns, links, as the global `DAVES_MAP_DATA`) |
 | `Calibrate.lua` | Map Genie pixels to game map positions, using the flight points |
 | `Layer.lua` | The pins, link lines, hover, click and tooltip on the world map |
 | `Panel.lua` | Search, factions, quest filters, categories, results |
