@@ -34,6 +34,8 @@ Windows PowerShell 5.1, no admin needed. Run them from `plugins/wow-forever-addo
 | `New-WowAddon.ps1 -Name X [-Flavor forever,retail] [-EditMode]` | Scaffold from `templates/addon`; `-EditMode` adds the shared Edit Mode behaviour and an `EditMode.lua` wired up with it |
 | `Test-WowAddon.ps1 -Path X [-Flavor ...] [-Json]` | Static validator; exit code 1 on errors |
 | `Find-WowApi.ps1 <name or pattern> [-Events] [-SecretOnly]` | Look up functions/events in the Forever API index |
+| `Get-WowScriptErrors.ps1 [-Addon X] [-Session n]` | Lua errors (with stacks), blocked/forbidden actions and Lua warnings recorded in game by the dev addon `devaddons/!WowKitErrors` (link it once with `Link-WowAddons.ps1 -Path devaddons\!WowKitErrors`). Read first when something breaks in game |
+| `Get-WowTaintLog.ps1 [-Addon X]` | The client's `Logs\taint.log`: which addon tainted what, and the blocked call. Read second |
 | `Deploy-WowAddon.ps1 -Path X [-Mode Link/Copy] [-Remove]` | Junction or copy into `Interface\AddOns`; never deletes real folders |
 | `Link-WowAddons.ps1 [-Path dir] [-Flavor ...] [-Remove] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into each client its TOC targets; real folders go to `AddOns.backup`. Also runs under PowerShell 7 on macOS (symlinks) |
 | `link-wow-addons.sh [--dry-run] [--remove] [--wow-root DIR] [dir]` | The same for a Mac without PowerShell (bash, symlinks, every addon into every client) |

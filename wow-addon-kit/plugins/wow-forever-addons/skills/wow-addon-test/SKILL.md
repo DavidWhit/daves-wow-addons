@@ -1,6 +1,6 @@
 ---
 name: wow-addon-test
-description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck), an advisor-mode code review whose fixes wait for the user's approval, plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, when the game reports an error, "action blocked" or "only available to the Blizzard UI" (it reads the client's taint.log first), or when asked to check, lint, verify or debug a WoW addon.
+description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck), an advisor-mode code review whose fixes wait for the user's approval, plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, when the game reports an error, "action blocked" or "only available to the Blizzard UI" (it reads the recorded script errors first, then the client's taint.log), or when asked to check, lint, verify or debug a WoW addon.
 argument-hint: "[addon folder] [flavors]"
 ---
 
@@ -10,10 +10,26 @@ Arguments: `$ARGUMENTS` (addon folder and optional flavors, e.g. `C:\dev\CampTra
 
 ## 0. Bug reports: start from the game's own evidence
 
-When the user reports something going wrong in game ("action blocked", "only available to the Blizzard UI", an error, odd behaviour), read what the client recorded **before** reading addon code or forming a theory:
+When the user reports something going wrong in game ("action blocked", "only available to the Blizzard UI", an error, odd behaviour, "it doesn't work"), read what the client recorded **before** reading addon code or forming a theory. Run both, in this order:
+
+**a. Script errors first.**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "C:/Users/David/Documents/daves-wow-addons/wow-addon-kit/plugins/wow-forever-addons/scripts/Get-WowTaintLog.ps1" -Addon <addon folder name>
+powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.ps1" -Addon <addon folder name>
+```
+
+The client only shows Lua errors in a pop-up (`/console scriptErrors 1`) and keeps no record of them. The kit's development addon `devaddons/!WowKitErrors` records every Lua error (message and stack), blocked or forbidden action, and Lua warning to its SavedVariables, which the game writes on `/reload` or logout. Blizzard's pop-up still shows.
+
+- **Error:** the first stack line inside the addon is where it failed. Read that file:line before anything else, and explain the failure from the message and the stack.
+- **Repeats** (`x7`) usually mean an OnUpdate or an event handler.
+- **`blocked` / `forbidden`:** go on to the taint log for the cause.
+- **"Not installed":** link it once with the command the script prints (`Link-WowAddons.ps1 -Path <kit>/devaddons/!WowKitErrors`). Then ask the user to restart the client fully, reproduce, and `/reload`.
+- **No entries:** the session shown is the newest with entries. Check its start time against when the user reproduced the problem. `-Session 0` shows all sessions.
+
+**b. Then the taint log:**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1" -Addon <addon folder name>
 ```
 
 Then work from the root cause outward:
@@ -77,7 +93,7 @@ Fixing the validator's own errors in step 1 doesn't need to wait. Design changes
 
 1. **First load / TOC or new-file changes:** fully restart the client. Otherwise `/reload`.
 2. At character select, open **AddOns**: the addon should be listed and not marked "out of date".
-3. In game, turn on errors: `/console scriptErrors 1`. Optionally install BugSack + BugGrabber to collect them.
+3. In game, turn on errors: `/console scriptErrors 1`. The kit's `!WowKitErrors` (linked from `devaddons/`) records them too. After reproducing, `/reload`, then run `Get-WowScriptErrors.ps1 -Addon <name>`.
 4. Exercise every feature, then repeat **in combat and in an instance**. For an Edit Mode addon, open Edit Mode and click each of its frames, plus one of Blizzard's: only one settings dialog should be open at a time, none should cover its frame or Edit Mode's window, every number should sit inside the dialog at its widest value, and Escape should close it. With Snap ticked, drag each frame slowly past grid lines, the screen centre and a Blizzard frame. It should move freely and pull on only within a few pixels, the same as Blizzard's own frames. For a cast bar, check a channel (e.g. Blizzard) ending normally in combat: it must not show as interrupted. Secret values and addon-comms lockdown only show up there.
 5. Taint: `/console taintLog 1`, reproduce, `/reload`, then read `Logs\taint.log` in the client folder (e.g. `_classic_beta_\Logs`). Lines naming the addon mean it touched secure code.
 6. Useful commands: `/dump <expr>` prints a value, `/fstack` identifies the frame under the mouse, `/etrace` shows live events, `/run <lua>` runs a line.
