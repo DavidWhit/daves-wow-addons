@@ -47,6 +47,7 @@ It takes about 20 seconds and prints:
 
 ## 3. Tell the user
 
-- What changed: per-category counts, new and removed pins, and the match rate.
+- **The fresh zip to send privately:** every build rebuilds `wowaddons\daves_map_data.zip` from the new data. It is gitignored, and the script prints its path and size. Give the user that full path, and say that testers unzip it into `World of Warcraft\_classic_beta_\Interface\AddOns` (so they end up with `AddOns\daves_map_data\`) and restart the game. Never commit or push the zip or the folder.
+- What changed: per-category counts, new and removed pins, and the match rate. This is what to tell testers when sending the new zip.
 - In game: `/reload`, then `/dmap version` shows the new data date. Open the map, and run `/dmap calib` if pins look shifted. Calibration uses the flight points, so a large error means a flight point name changed on one side.
 - Don't commit unless asked. If asked, commit only the script or code changes, never `daves_map_data`.
