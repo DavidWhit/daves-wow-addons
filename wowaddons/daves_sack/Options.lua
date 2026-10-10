@@ -166,12 +166,16 @@ local function Dropdown(x, y, width, label, items, get, set, tip)
 	local dd = TryTemplate("DropdownButton", nil, f, "WowStyle1DropdownTemplate")
 	if dd and dd.SetupMenu then
 		dd:SetPoint("BOTTOMLEFT", 0, 0); dd:SetWidth(width)
+		-- the button's text is the selected radio's; the saved item's name is also its default text, so the
+		-- saved choice shows the moment Settings opens, before and without any menu selection
+		local function Show() if dd.SetDefaultText then dd:SetDefaultText(Current().name) end end
 		dd:SetupMenu(function(_, root)
 			for _, it in ipairs(items) do
-				root:CreateRadio(it.name, function() return get() == it.key end, function() set(it.key) end)
+				root:CreateRadio(it.name, function() return get() == it.key end, function() set(it.key); Show() end)
 			end
 		end)
-		function f:Refresh() dd:GenerateMenu() end
+		function f:Refresh() Show(); dd:GenerateMenu() end
+		Show()
 		Tooltip(dd, tip)
 	else
 		local b = TryTemplate("Button", nil, f, "UIPanelButtonTemplate") or CreateFrame("Button", nil, f)

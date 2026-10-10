@@ -761,9 +761,9 @@ end
 -- slider's alpha is applied as the texture's vertex alpha, so every style keeps
 -- the translucency. The Settings window follows the same settings.
 ns.BACKGROUND_STYLES = {
-	{ key = "dark",       name = "Dark (default)" },                                                                  -- plain black, the translucent dialog
-	{ key = "dialog",     name = "Light dialog",  file = "Interface\\DialogFrame\\UI-DialogBox-Background", tile = true },
-	{ key = "darkdialog", name = "Dark dialog",   file = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark", tile = true },
+	{ key = "dark",       name = "Dark" },                                                                            -- plain black, the translucent dialog (the default)
+	{ key = "dialog",     name = "Light paper",   file = "Interface\\DialogFrame\\UI-DialogBox-Background", tile = true },
+	{ key = "darkdialog", name = "Dark paper",    file = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark", tile = true },
 	{ key = "marble",     name = "Marble",        file = "Interface\\FrameGeneral\\UI-Background-Marble", tile = true },
 	{ key = "rock",       name = "Rock",          file = "Interface\\FrameGeneral\\UI-Background-Rock", tile = true },
 }
