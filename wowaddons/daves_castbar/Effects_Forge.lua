@@ -65,6 +65,10 @@ end
 local function SmeltFold() return W * smelt.cool + H * 1.2 end
 local function SmeltSpan() return 3.2 * SmeltFold() end
 local SEAM_SEGS = 5          -- the seams' glow is drawn in this many gradient segments, so it follows the exponential
+-- One more seam piece covers the stub past the landing point (land to the fill edge), level at the landing heat. While
+-- the pour runs the opaque hot layer hides it; at the end the hot layer fades and this keeps the stub cooling in step with
+-- the metal behind it (without it the bare grey crust showed there first: a grey block at the end of the finished bar).
+local SEAM_CAP = SEAM_SEGS + 1
 
 local function MakeForge()
 	forge = {}
@@ -229,7 +233,7 @@ local function MakeSmelt()
 	smelt = { cool = rand(.16, .22), sparkAcc = 0, streamV = rand(0, 1), bob = ns.Wobble(2), grey = 0 }
 	forge.ladle:SetDesaturation(0); forge.stream:SetDesaturation(0)   -- the last cast may have been interrupted
 	content.forge.hot:SetDesaturation(0)
-	for i = 1, SEAM_SEGS do content.forge["seam" .. i]:SetDesaturation(0) end
+	for i = 1, SEAM_CAP do content.forge["seam" .. i]:SetDesaturation(0) end
 	content.forge.hot:Show()
 end
 
@@ -269,11 +273,26 @@ local function UpdateSmelt(dt, fillW, casting)
 		end
 		x0 = math.max(x0, x1)
 	end
+	-- the stub past the landing point, level at the landing heat (SEAM_CAP)
+	local right = math.max(fillW, land + 1)
+	local cap = f["seam" .. SEAM_CAP]
+	if right - land < .5 then
+		cap:Hide()
+	else
+		cap:ClearAllPoints()
+		cap:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", land, 0)
+		cap:SetSize(right - land, H)
+		cap:SetTexCoord(L.u + land / W * uspan, L.u + right / W * uspan, 0, 1)
+		local c = content.seamCols[SEAM_CAP]
+		local r, g, b = HeatRGB(MELT_HEAT, math.min(1, cool + .03))
+		c[1]:SetRGBA(r, g, b, 1); c[2]:SetRGBA(r, g, b, 1)
+		cap:SetGradient("HORIZONTAL", c[1], c[2])
+		cap:Show()
+	end
 
 	-- the fresh pour: pale yellow where it lands, through orange to the crust behind it
 	local span = SmeltSpan()
 	local left = land - span
-	local right = math.max(fillW, land + 1)
 	f.hot:ClearAllPoints()
 	f.hot:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", left, 0)
 	f.hot:SetSize(right - left, H)
@@ -362,9 +381,10 @@ I.Register({
 				c.forge.temper:SetAllPoints(c)
 				c.flarePool = Pool(function() return Smooth(c:CreateTexture(nil, "ARTWORK")) end)
 			else
-				-- the seams' glow in segments along the bar, each a gradient of the heat there (UpdateSmelt)
+				-- the seams' glow in segments along the bar, each a gradient of the heat there, and the stub past the
+				-- landing point (UpdateSmelt)
 				c.seamCols = {}
-				for i = 1, SEAM_SEGS do
+				for i = 1, SEAM_CAP do
 					c.forge["seam" .. i] = Tex("smelt_seam", 1, "BLEND", true)
 					c.seamCols[i] = { CreateColor(1, 1, 1, 1), CreateColor(1, 1, 1, 1) }
 				end
@@ -400,7 +420,7 @@ I.Register({
 			local f = content.forge
 			f.hot:SetDesaturation(k)
 			if f.edge then f.edge:SetDesaturation(k) end
-			for i = 1, SEAM_SEGS do if f["seam" .. i] then f["seam" .. i]:SetDesaturation(k) end end
+			for i = 1, SEAM_CAP do if f["seam" .. i] then f["seam" .. i]:SetDesaturation(k) end end
 			forge.hammer:SetDesaturation(k); forge.ladle:SetDesaturation(k); forge.stream:SetDesaturation(k)
 		end
 	end,

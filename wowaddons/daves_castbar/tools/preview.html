@@ -808,9 +808,12 @@ class Bar {
 			for (const x of [x0, x1]) if (land > 0) gr.addColorStop(clamp01(x / land), rgba(heatRGB(MELT_HEAT, Math.min(1, cool * Math.exp(-(land - x) / fold) + .03)).map(v => v * 255), 1));
 			x0 = Math.max(x0, x1);
 		}
-		t.fillStyle = gr; t.fillRect(0, 0, land * dpr, T.height);
-		t.globalCompositeOperation = 'destination-in'; t.fillStyle = pattern(t, seam, this.layerOff[0].u, 0); t.fillRect(0, 0, land * dpr, T.height);
-		if (land > .5) og.drawImage(T, 0, 0, land * dpr, T.height, 0, 0, land, H);
+		// the seams run on past the landing point to the fill edge, level at the landing heat (the gradient's last stop
+		// holds past its end), as Effects_Forge.lua SEAM_CAP: the stub cools with the rest once the hot layer fades
+		const right = Math.max(fillW, land + 1);
+		t.fillStyle = gr; t.fillRect(0, 0, right * dpr, T.height);
+		t.globalCompositeOperation = 'destination-in'; t.fillStyle = pattern(t, seam, this.layerOff[0].u, 0); t.fillRect(0, 0, right * dpr, T.height);
+		if (right > .5) og.drawImage(T, 0, 0, right * dpr, T.height, 0, 0, right, H);
 		og.globalAlpha = cool;
 		og.drawImage(img, left, 0, span, H);
 		if (fillW > land) og.drawImage(img, img.width - 1, 0, 1, img.height, land, 0, fillW - land + 1, H);   // past the landing point it stays at its hottest

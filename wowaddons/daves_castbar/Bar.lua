@@ -116,9 +116,12 @@ local function GetContent(key)
 	content.key, content.cfg = key, cfg
 	ns.MaskAllTextures(content)   -- its art follows the corners
 
+	-- the black the layers build on. Not for the plain look: Blizzard's filling lies straight over its background
+	-- there, as on their status bar (solid black under it showed through as a black box behind the name)
 	local black = content:CreateTexture(nil, "BACKGROUND")
 	black:SetAllPoints(content)
 	black:SetColorTexture(0, 0, 0, 1)
+	black:SetShown(not cfg.plain)
 
 	content.layers = {}
 	for i, L in ipairs(cfg.layers) do
