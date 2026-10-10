@@ -1,0 +1,5 @@
+{
+	"Lua.runtime.version": "Lua 5.1",
+	"Lua.diagnostics.globals": ["daves_mapDB", "daves_map_OnAddonCompartmentClick"],
+	"files.encoding": "utf8"
+}

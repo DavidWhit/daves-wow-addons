@@ -1,0 +1,4 @@
+.release/
+*.zip
+# Generated from Map Genie by tools/Update-MapData.ps1: their data, kept out of this public repo
+Data.lua
