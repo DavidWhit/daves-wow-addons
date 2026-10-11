@@ -15,14 +15,17 @@ ns.IS_RETAIL = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
 -- Feature detection, never version checks: C_AddOns on modern clients, the old global elsewhere.
 local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
+ns.NO_DATA = "Tell Dave to give me the data file."   -- shown in chat and on the map when daves_map_data isn't loaded
 
 local DEFAULTS = {
 	enabled = true,         -- draw the layer on the world map
-	panelOpen = true,       -- the search and filter panel beside the map
+	panelOpen = true,       -- the search and filter panel beside the map; its X, the map tab, /dmap panel and Options all set it
 	pinScale = 1.0,         -- pin size
 	hideCompleted = false,  -- completed quests are dimmed; hidden when this is on
 	otherClasses = false,   -- show quests only other classes can take
 	hideHighLevel = false,  -- hide quests above your level
+	hideLowLevel = false,   -- hide quests well below your level
+	lowLevelGap = 5,        -- ...this many levels or more below it (1-5)
 }
 
 function ns.Print(...)
@@ -84,10 +87,10 @@ function ns:PLAYER_LOGIN()
 			-- why it didn't load, in the game's own words (the AddOns list shows the same: ADDON_<reason>)
 			local ok, _, _, _, _, reason = pcall(C_AddOns.GetAddOnInfo, "daves_map_data")
 			local why = ok and type(reason) == "string" and reason ~= "" and (_G["ADDON_" .. reason] or reason) or nil
-			ns.Print(("v%s: its map data (Dave's Map (data)) is installed but not loaded%s. Check it in the AddOns list."):format(
-				ns.VERSION, why and (" (" .. why .. ")") or ""))
+			ns.Print(("v%s: %s (Dave's Map (data) is installed but not loaded%s: check it in the AddOns list.)"):format(
+				ns.VERSION, ns.NO_DATA, why and (", " .. why) or ""))
 		else
-			ns.Print(("v%s loaded without its map data. Ask for daves_map_data.zip, unzip it into Interface\\AddOns and restart the game (or build it: wowaddons\\daves_map\\tools\\Update-MapData.ps1)."):format(ns.VERSION))
+			ns.Print(("v%s: %s (daves_map_data.zip: unzip it into Interface\\AddOns and restart the game.)"):format(ns.VERSION, ns.NO_DATA))
 		end
 	end
 end

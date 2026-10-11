@@ -343,10 +343,17 @@ function ns.UpdatePanel()
 end
 
 local function RefreshControls()
+	if not checks then return end   -- no panel: the map data isn't loaded
 	local f = ns.db.factions or {}
 	for k, t in ipairs(factionTicks) do t:SetChecked(f[k]) end
 	for key, t in pairs(checks) do t:SetChecked(ns.db[key]) end
+	local low = checks.hideLowLevel
+	if low then
+		low.text:SetText(ns.LowLevelLabel())
+		low.text:GetParent():SetWidth(low.text:GetStringWidth() + 26)
+	end
 end
+ns.RefreshControls = RefreshControls
 
 -- a line of the quest log's tick box and a label, clickable as a whole
 local function TickLine(parent, label, r, g, b, onClick, tooltip)
@@ -359,10 +366,11 @@ local function TickLine(parent, label, r, g, b, onClick, tooltip)
 	text:SetText(label)
 	if r then text:SetTextColor(r, g, b) end
 	btn:SetWidth(text:GetStringWidth() + 26)
+	t.text = text
 	btn:SetScript("OnClick", onClick)
 	if tooltip then
 		btn:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine(label, 1, 1, 1); GameTooltip:AddLine(tooltip, .9, .9, .9, true); GameTooltip:Show()
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine(text:GetText(), 1, 1, 1); GameTooltip:AddLine(tooltip, .9, .9, .9, true); GameTooltip:Show()
 		end)
 		btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	end
@@ -428,6 +436,7 @@ function ns.InitPanel()
 		{ "hideCompleted", "Hide completed quests", "Completed quests are dimmed; tick to hide them. (Matched to the game's quest IDs through pfQuest.)" },
 		{ "otherClasses", "Other classes' quests", "Show quests only other classes can take." },
 		{ "hideHighLevel", "Hide quests above my level", "Hide quests whose required level is above yours." },
+		{ "hideLowLevel", ns.LowLevelLabel(), "Hide quests whose required level is this many levels or more below yours. Set how many (1 to 5) in /dmap options." },
 	}
 	for n, def in ipairs(CHECKS) do
 		local btn, t = TickLine(panel, def[2], nil, nil, nil, function()
@@ -441,15 +450,15 @@ function ns.InitPanel()
 	-- the quest log's divider, then the list on its parchment
 	local divider = panel:CreateTexture(nil, "ARTWORK")
 	divider:SetAtlas("QuestLog-frame-devider")
-	divider:SetPoint("TOPLEFT", 4, -142)
-	divider:SetPoint("TOPRIGHT", -4, -142)
+	divider:SetPoint("TOPLEFT", 4, -162)
+	divider:SetPoint("TOPRIGHT", -4, -162)
 	divider:SetHeight(8)
 	status = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	status:SetPoint("BOTTOMLEFT", PAD, PAD)
 	status:SetPoint("BOTTOMRIGHT", -PAD, PAD)
 	status:SetJustifyH("LEFT")
 	list = CreateFrame("Frame", nil, panel)
-	list:SetPoint("TOPLEFT", 6, -150)
+	list:SetPoint("TOPLEFT", 6, -170)
 	list:SetPoint("BOTTOMRIGHT", -6, PAD + 34)
 	list:EnableMouseWheel(true)
 	list:SetScript("OnMouseWheel", function(_, delta) offset = offset - delta * 3; Render() end)

@@ -7,6 +7,11 @@
 
 local ADDON, ns = ...
 
+function ns.LowLevelLabel()
+	local n = ns.db.lowLevelGap
+	return ("Hide quests %d+ level%s below me"):format(n, n == 1 and "" or "s")
+end
+
 function ns:InitOptions()
 	if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end   -- very old clients
 
@@ -28,10 +33,28 @@ function ns:InitOptions()
 	end)
 	Settings.CreateSlider(category, pinScale, sliderOptions, "Size of the pins on the map.")
 
+	local hideLowLevel = Settings.RegisterAddOnSetting(category, ADDON .. "_hideLowLevel", "hideLowLevel", ns.db,
+		Settings.VarType.Boolean, "Hide low-level quests", false)
+	Settings.CreateCheckbox(category, hideLowLevel, "Hide quests whose required level is well below yours (also on the map's panel).")
+
+	local lowLevelGap = Settings.RegisterAddOnSetting(category, ADDON .. "_lowLevelGap", "lowLevelGap", ns.db,
+		Settings.VarType.Number, "Levels below me", 5)
+	local gapOptions = Settings.CreateSliderOptions(1, 5, 1)
+	gapOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
+		return ("%d+"):format(value)
+	end)
+	Settings.CreateSlider(category, lowLevelGap, gapOptions, "Hide quests this many levels or more below yours: 1 hides everything under your level, 5 only the far lower ones.")
+
 	-- Settings write straight into ns.db; react to changes here.
 	enabled:SetValueChangedCallback(function() if ns.Refresh then ns.Refresh() end end)
 	panelOpen:SetValueChangedCallback(function() if ns.UpdatePanel then ns.UpdatePanel() end end)
 	pinScale:SetValueChangedCallback(function() if ns.Refresh then ns.Refresh() end end)
+	local function LevelChanged()
+		if ns.RefreshControls then ns.RefreshControls() end
+		if ns.Refresh then ns.Refresh() end
+	end
+	hideLowLevel:SetValueChangedCallback(LevelChanged)
+	lowLevelGap:SetValueChangedCallback(LevelChanged)
 
 	Settings.RegisterAddOnCategory(category)
 	ns.settingsCategory = category

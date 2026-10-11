@@ -7,9 +7,9 @@ Targets: Forever (`## Interface: 16001`).
 ## Use
 
 - Open the world map. The pins are on by default.
-- **The panel** is dressed like the map: the same metal frame and background, with the quest log's list headers, tick boxes and parchment. It docks beside the windowed map, on the left if there's room, otherwise on the right. When the map is maximized it sits inside it. The map icon at the map's bottom left toggles it.
+- **The panel** is dressed like the map: the same metal frame and background, with the quest log's list headers, tick boxes and parchment. It docks beside the windowed map, on the left if there's room, otherwise on the right. When the map is maximized it sits inside it. It opens with the map the way you left it: its X, the map icon, `/dmap panel` and the option all remember the choice. The map icon at the map's bottom left toggles it.
 - **Search** matches titles, NPCs, descriptions, categories and zones. While you search, the map shows only the matches, and the list shows them with the ones on this map first. Click a result to select it, or shift-click to set a waypoint.
-- **Filters:** factions (yours and Neutral to start with), hide completed quests (dimmed otherwise), other classes' quests, quests above your level, and every group and category with its count on this map. Click a group's header to show or hide all of it.
+- **Filters:** factions (yours and Neutral to start with), hide completed quests (dimmed otherwise), other classes' quests, quests above your level, quests 1 to 5 or more levels below it (set how many in `/dmap options`), and every group and category with its count on this map. Click a group's header to show or hide all of it.
 - **Hover a pin** to draw its links. They reach into other zones too: a pin off this map is held at the map's edge in the direction it lies.
   - Gold lines lead to where a quest is turned in.
   - Blue lines lead to the quests it requires.
@@ -25,7 +25,7 @@ Targets: Forever (`## Interface: 16001`).
 
 ## Where the data comes from
 
-The map data lives in a separate, generated addon, **`wowaddons/daves_map_data`** (its TOC and `Data.lua`). It is **not in git**: Map Genie's data is theirs and this repo is public. daves_map lists it in `## OptionalDeps`, so a copy without it, such as a fresh clone, loads with no error and says in chat how to build it.
+The map data lives in a separate, generated addon, **`wowaddons/daves_map_data`** (its TOC and `Data.lua`). It is **not in git**: Map Genie's data is theirs and this repo is public. daves_map lists it in `## OptionalDeps`, so a copy without it, such as a fresh clone, loads with no error and says "Tell Dave to give me the data file." in chat and across the top of the world map.
 
 **First time on a machine** (after cloning or pulling):
 

@@ -101,7 +101,11 @@ local function Passes(i)
 	local cls = D.cls[i]
 	local mine = ns.playerClass and CLASS_BITS[ns.playerClass]
 	if cls ~= 0 and mine and not db.otherClasses and bit.band(cls, mine) == 0 then return false end
-	if db.hideHighLevel and D.lvl[i] > (UnitLevel("player") or 0) then return false end
+	if db.hideHighLevel or db.hideLowLevel then
+		local lvl, me = D.lvl[i], UnitLevel("player") or 0
+		if db.hideHighLevel and lvl > me then return false end
+		if db.hideLowLevel and lvl ~= 0 and lvl <= me - db.lowLevelGap then return false end   -- 0: level unknown, kept
+	end
 	local q = D.qid[i]
 	if q ~= 0 and db.hideCompleted and IsDone(q) then return false end
 	return true
@@ -607,15 +611,29 @@ function ns:QUEST_TURNED_IN(questID)
 	ns.Refresh()
 end
 
-function ns:PLAYER_LEVEL_UP() ns.Refresh() end   -- "Hide quests above my level"
+function ns:PLAYER_LEVEL_UP() ns.Refresh() end   -- "Hide quests above / below my level"
 
 function ns:PLAYER_REGEN_ENABLED()
 	ns.events:UnregisterEvent("PLAYER_REGEN_ENABLED")
 	if hot then hot:SetPassThroughButtons("RightButton") end
 end
 
+-- Without the companion data addon there is nothing to draw: say so on the map itself, every time it opens.
+local notice
+local function ShowNoDataNotice()
+	if notice then return end
+	notice = CreateFrame("Frame", nil, WorldMapFrame.ScrollContainer)
+	notice:SetAllPoints()
+	notice:SetFrameLevel(WorldMapFrame:GetPinFrameLevelsManager():GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST") + 10)
+	local text = notice:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+	text:SetPoint("TOP", 0, -40)
+	text:SetText(ns.NO_DATA)
+end
+
 function ns.InitLayer()
-	if overlay or not ns.DATA or not WorldMapFrame then return end
+	if not WorldMapFrame then return end
+	if not ns.DATA then ShowNoDataNotice(); return end
+	if overlay then return end
 	Init()
 	if ns.InitPanel then ns.InitPanel() end
 end
