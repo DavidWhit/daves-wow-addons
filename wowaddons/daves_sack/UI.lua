@@ -219,11 +219,23 @@ local function Paint(b)
 	local r = b.fbRec
 	if b.pTex == r.texture and b.pCount == r.count and b.pLock == r.locked and b.pQ == r.quality then return end
 	b.pTex, b.pCount, b.pLock, b.pQ = r.texture, r.count, r.locked, r.quality
-	SetItemButtonTexture(b, r.texture)
-	b.fbIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-	SetItemButtonCount(b, r.count)
-	SetItemButtonDesaturated(b, r.locked)
-	if b.fbCount then b.fbCount:SetTextColor(1, 1, 1) end
+	-- Widget calls only, never Blizzard's SetItemButton* helpers: SetItemButtonCount writes button.count from
+	-- addon code, and Blizzard reads that when you sell a refundable item back at a vendor (ContainerFrame.lua
+	-- GetExtendedPriceString), which then runs tainted.
+	local icon = b.fbIcon
+	icon:SetTexture(r.texture); icon:SetShown(r.texture ~= nil)
+	icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	icon:SetDesaturated(r.locked and true or false)
+	local cnt = b.fbCount
+	if cnt then
+		local n = r.count or 0
+		if n > 1 then
+			cnt:SetText(GetFormattedItemQuantity and GetFormattedItemQuantity(n) or n)
+			cnt:SetTextColor(1, 1, 1); cnt:Show()
+		else
+			cnt:Hide()
+		end
+	end
 	local c = r.id and r.quality and r.quality >= 2 and ITEM_QUALITY_COLORS[r.quality]
 	if c then
 		b.fbEdge:SetVertexColor(c.r, c.g, c.b, 0.9)
@@ -742,7 +754,6 @@ ns.UpdatePixels = UpdatePixels
 function ns.ApplyScale()
 	refitHeight = true
 	frame:SetScale(ns.db.scale)
-	if ns.SyncCloseButton then ns.SyncCloseButton() end
 	UpdatePixels()
 	ns.ResetPosition()
 	-- A bigger scale can push the columns past the screen: the limits win.
@@ -1092,54 +1103,75 @@ local function Build()
 	title:SetPoint("TOP", 0, -15)
 	title:SetText(INVENTORY_TOOLTIP or "Inventory")
 
-	-- The close button is a secure action button that clicks Blizzard's backpack button (the "click" action):
-	-- Blizzard's ToggleAllBags then runs as Blizzard code, untainted, so its bag state stays in step with our
-	-- window (the hooks below follow it) and its own close sound plays. Calling CloseAllBags from here would
-	-- taint that state (1.7.7). If Blizzard's bags are already closed (/sack opened ours) the click just hides us.
-	-- It is NOT a child of the window: a frame holding a protected button is protected itself, and the window
-	-- could then not be shown, hidden, moved or resized in combat. It lives on UIParent, anchored to the window,
-	-- and mirrors the window's visibility and scale (SyncClose) outside combat; in combat the mirror waits.
-	local secure = MainMenuBarBackpackButton ~= nil
-	local closeParent = secure and UIParent or frame
-	local close = TryTemplate("Button", nil, closeParent, secure and "UIPanelCloseButton, SecureActionButtonTemplate" or "UIPanelCloseButton")
-	if close then
-		close:SetPoint("TOPRIGHT", frame, "TOPRIGHT")
-	else
-		close = CreateFrame("Button", nil, closeParent, secure and "SecureActionButtonTemplate" or nil)
-		close:SetSize(32, 32); close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 2, 2)
-		close:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
-		close:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
-		close:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", "ADD")
+	-- Two close buttons in one spot. Outside combat the secure one: a SecureActionButtonTemplate "click" on
+	-- Blizzard's backpack button, so Blizzard's ToggleAllBags runs as Blizzard code, untainted, its bag state stays
+	-- in step with our window (the hooks below follow it) and its own close sound plays. Calling CloseAllBags from
+	-- here would taint that state (1.7.7). If Blizzard's bags are already closed (/sack opened ours) the click just
+	-- hides us.
+	-- A protected button makes the window protected too, as a child and even when only anchored to it (1.7.10 had
+	-- it on UIParent, anchored: every B press in combat was blocked). So it sits on the window only outside combat:
+	-- PLAYER_REGEN_DISABLED fires just before lockdown and parks it off the window until PLAYER_REGEN_ENABLED.
+	-- In combat the plain button stands in. It hides our window only (our own close sound plays), so Blizzard's
+	-- bags stay "open" and the next B press closes them; the one after opens them.
+	local function PinClose(b)   -- on the window's corner, above its contents
+		b:SetParent(frame); b:ClearAllPoints()
+		b:SetPoint("TOPRIGHT", frame, "TOPRIGHT", b.anchorX, b.anchorY)
+		b:SetFrameLevel(frame:GetFrameLevel() + 5)
 	end
-	close:SetFrameStrata(frame:GetFrameStrata())
-	close:SetFrameLevel(frame:GetFrameLevel() + 5)
-	if secure and close.SetAttribute then
+	local function MakeClose(template)
+		local b = TryTemplate("Button", nil, frame, template and ("UIPanelCloseButton, " .. template) or "UIPanelCloseButton")
+		if b then
+			b.anchorX, b.anchorY = 0, 0
+		else
+			b = CreateFrame("Button", nil, frame, template)
+			b:SetSize(32, 32); b.anchorX, b.anchorY = 2, 2
+			b:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
+			b:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
+			b:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", "ADD")
+		end
+		PinClose(b)
+		return b
+	end
+	local plainClose = MakeClose(nil)
+	plainClose:SetScript("OnClick", function()
+		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem(); return end
+		frame:Hide()
+	end)
+
+	local close
+	local park = CreateFrame("Frame"); park:Hide()
+	local function MakeSecureClose()
+		close = MakeClose("SecureActionButtonTemplate")
 		close:RegisterForClicks("AnyDown", "AnyUp")   -- the secure template acts on whichever the client's cvar says
 		close:SetAttribute("type", "click")
 		close:SetAttribute("clickbutton", MainMenuBarBackpackButton)
 		close:SetScript("PreClick", function(self)
-			if InCombatLockdown() then return end   -- attributes are locked in combat: the click acts as last set
+			if InCombatLockdown() then return end   -- attributes are locked in combat (it is parked then anyway)
 			-- an item on the cursor goes into the bags our way (PostClick), not through Blizzard's button
 			local held = CursorHasItem and CursorHasItem()
 			self:SetAttribute("type", (not held and ns.BlizzardBagsOpen()) and "click" or nil)
 		end)
 		close:SetScript("PostClick", function()
 			if CursorHasItem and CursorHasItem() then ns.StoreCursorItem(); return end
-			-- in combat the attributes may be stale: hide ours regardless, Blizzard's state catches up at the next key press
-			if frame:IsShown() and (InCombatLockdown() or not ns.BlizzardBagsOpen()) then frame:Hide() end
+			if frame:IsShown() and not ns.BlizzardBagsOpen() then frame:Hide() end
 		end)
-		local closeDirty
-		function ns.SyncCloseButton()
-			if InCombatLockdown() then closeDirty = true; return end
-			closeDirty = false
-			close:SetScale(frame:GetScale())
-			close:SetShown(frame:IsShown())
-		end
-		function ns.SyncCloseButtonAfterCombat() if closeDirty then ns.SyncCloseButton() end end
-		ns.SyncCloseButton()
-	else
-		close:SetScript("OnClick", function() frame:Hide() end)
 	end
+	-- Outside combat only (PLAYER_REGEN_DISABLED counts: lockdown starts after it).
+	function ns.CloseButtonForCombat(inCombat)
+		if not MainMenuBarBackpackButton then return end   -- no backpack button to click: the plain one stays
+		if not close then
+			if inCombat then return end
+			MakeSecureClose()
+		end
+		if inCombat then
+			close:ClearAllPoints(); close:SetParent(park)
+		else
+			PinClose(close)
+		end
+		plainClose:SetShown(inCombat)
+	end
+	-- A /reload in combat: the plain button until it ends (PLAYER_REGEN_ENABLED makes the secure one).
+	if not InCombatLockdown() then ns.CloseButtonForCombat(false) end
 
 	-- Sort (Blizzard's standard red panel button), then the search box.
 	local searchRight = -PAD
@@ -1348,7 +1380,6 @@ local function Build()
 
 	frame:SetScript("OnShow", function()
 		ns.BagSound("IG_BACKPACK_OPEN")
-		if ns.SyncCloseButton then ns.SyncCloseButton() end
 		-- Categories ticked under "Start collapsed" in Settings open collapsed each time.
 		local collapsed, startFolded = ns.db.collapsed, ns.db.startFolded
 		for cat = 1, FREE_CAT do
@@ -1366,7 +1397,6 @@ local function Build()
 	frame:SetScript("OnHide", function()
 		search:ClearFocus()
 		ns.BagSound("IG_BACKPACK_CLOSE")
-		if ns.SyncCloseButton then ns.SyncCloseButton() end
 	end)
 end
 
@@ -1541,8 +1571,9 @@ local function RescaleSoon()
 end
 handlers.UI_SCALE_CHANGED = RescaleSoon
 handlers.DISPLAY_SIZE_CHANGED = RescaleSoon
--- the secure close button can't follow the window in combat: catch it up afterwards
-handlers.PLAYER_REGEN_ENABLED = function() if ns.SyncCloseButtonAfterCombat then ns.SyncCloseButtonAfterCombat() end end
+-- the secure close button leaves the window for combat, so the window can still be shown and hidden (see Build)
+handlers.PLAYER_REGEN_DISABLED = function() if ns.CloseButtonForCombat then ns.CloseButtonForCombat(true) end end
+handlers.PLAYER_REGEN_ENABLED = function() if ns.CloseButtonForCombat then ns.CloseButtonForCombat(false) end end
 
 events:SetScript("OnEvent", function(_, event, ...) handlers[event](...) end)
 
