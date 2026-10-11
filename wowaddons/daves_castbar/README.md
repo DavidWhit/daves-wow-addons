@@ -1,7 +1,7 @@
 # Dave's Cast Bar (daves_castbar)
 
-An animated, elemental player cast bar for WoW Forever. Each spell gets one of nineteen looks (seven elements,
-four gathering and six crafting professions, Disenchant, and a plain bar), and every cast is different:
+An animated, elemental player cast bar for WoW Forever. Each spell gets one of twenty looks (seven elements,
+four gathering and six crafting professions, Disenchant, First Aid, and a plain bar), and every cast is different:
 
 | Element | Look |
 | --- | --- |
@@ -23,6 +23,7 @@ four gathering and six crafting professions, Disenchant, and a plain bar), and e
 | Leatherworking | Tooled leather panels (five tones; the tooling changes each cast: basket-weave, scrolling vine, diamond lattice, bordered shells, knotwork band) lie across the bar with their lacing holes punched, apart by the gaps still open. As the cast reaches each joint the gap closes and a steel needle cross-laces it shut with a thong; running stitches follow along both edges |
 | Enchanting | Dark velvet the magic settles on (a palette per cast: violet, sea-blue, orchid or indigo): behind the cast edge it shimmers with flowing bands of light and glitter; at the edge a vortex of spinning rings pulls glittering dust out of the unfilled part and spins it in |
 | Disenchant | The bar starts solid with magic; the vortex comes in at the right end and moves left, drawing the magic out of the solid part ahead of it (it fades as it is drawn off) and throwing it out behind as glittering dust and small shimmers that settle on the cloth it leaves spent; the vortex leads the edge and is clipped away by the time the cast completes. For the spell Disenchant |
+| First Aid | An open crimson wound bleeding ahead of the cast: the blood runs down and pulses with a heartbeat, beads swell on its lower edge and drip off. Broad bandage turns (a seventh of the bar's length wide, 1.4 to 5 bar heights, so a long bar takes about as many turns as a short one) wrap round it at the cast edge, a roll riding the end of the band (it passes behind the limb at the bar's edges, clipped to the bar), and blood soaks through each turn a moment after it is laid, creeping and drying darker, the soaked turns dripping; the heartbeat slows and the bleeding eases as it binds. Every cast takes a random wrap (spiral, figure-eight, reverse spiral with a fold in each turn, spica, circular), never the last one, and a random lean and way round; the bandage itself is always the same. Using a bandage (the First Aid channel) wraps in from the right as the channel drains. Bandage recipes, and the First Aid channel by name |
 | Plain | Blizzard's own cast bar art (its filling, green for channels, full when done, red when interrupted), no effects. The default for casts the addon can't place (the "Other casts" setting) |
 
 Spell looks mark the cast edge with a spark, like Blizzard's bar for damage and healing casts; casts that are not spells (the gathering and crafting professions) get no marker, and their own art shows the progress.
@@ -43,8 +44,8 @@ Targets: forever (`## Interface: 16001`).
 - `/castbar unlock` / `lock` lets you move the bar outside Edit Mode. `/castbar reset` puts it back.
 
 WoW gives addons no way to read a spell's school, so the element comes from your choice for that
-spell, then the gathering and smelting spells and Disenchant by name, then for crafting casts the recipe's
-profession (Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting; Mining recipes are smelts), then the spell's name ("Frostbolt", anything
+spell, then the gathering and smelting spells, Disenchant and First Aid (using a bandage) by name, then for crafting casts the recipe's
+profession (Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting, First Aid; Mining recipes are smelts), then the spell's name ("Frostbolt", anything
 with "Flame", ...), then the "Other casts" setting: a look (Plain, Blizzard's own bar, unless you pick another) or "Your class", which picks your class's and specialization's element. Hearthstone, mounts and anything else without a match get that setting.
 
 ## Develop
@@ -55,7 +56,7 @@ with "Flame", ...), then the "Other casts" setting: a look (Plain, Blizzard's ow
 | Link into the game | `Deploy-WowAddon.ps1 -Path . -Flavor forever` |
 | Rebuild the art | `& .\tools\Make-CastbarMedia.ps1` |
 | Animated preview in the browser | `& .\tools\Show-Preview.ps1` |
-| Concepts the looks were designed from | open `tools/concepts/index.html` (see its README) |
+| Concept of the look being designed (only that one; finished looks live in the code) | open `tools/concepts/index.html` (see its README) |
 | Reload after editing Lua | `/reload` in game (new files, textures or TOC changes need a full restart) |
 
 The approved look is kept in `tools/reference/` for future changes.
@@ -65,7 +66,7 @@ Files:
 | File | What it does |
 | --- | --- |
 | `Core.lua` | Startup, saved settings, slash command |
-| `Elements.lua` | The nineteen looks and which spell gets which (Fishing, Mining, Herb Gathering, Skinning, Smelt ... and Disenchant get theirs by name; Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting and Mining crafts by their recipe's profession) |
+| `Elements.lua` | The twenty looks and which spell gets which (Fishing, Mining, Herb Gathering, Skinning, Smelt ..., Disenchant and First Aid get theirs by name; Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting, First Aid and Mining crafts by their recipe's profession) |
 | `Bar.lua` | The bar, casting states, fill, glow, spark, frame, text, hiding Blizzard's bar |
 | `Effects.lua` | Particles, the shared helpers (`ns.FXi`) and the hooks the bar calls; the looks register with it from the files below (Lua allows 200 locals a file, so each group has its own) |
 | `Effects_Spells.lua` | Frost, nature and herbalism vines, arcane, holy |
@@ -76,7 +77,31 @@ Files:
 | `Effects_Tailor.lua` | The tailoring loom |
 | `Effects_Leather.lua` | The leatherworking panels and laces |
 | `Effects_Ench.lua` | Enchanting and disenchant |
+| `Effects_FirstAid.lua` | First Aid: the wound, the bandage turns, the blood, the roll |
 | `EditModeDialog.lua` | The kit's shared Edit Mode settings dialog and selection art (copied from `wow-addon-kit`; don't edit it here) |
 | `EditMode.lua` | Moving, resizing, grid snapping, what the settings dialog holds |
 | `Options.lua` | Settings panel |
 | `Media/` | Generated textures (`tools/Make-CastbarMedia.ps1`) |
+
+## Rules for every look
+
+Every look follows these, so all bars match on frames, corners and depth. Check a new look against them, in the
+concept (`tools/concepts`) and again in the add-on. To compare a new look with the others, read their code (`Elements.lua`,
+`Bar.lua`, `Effects_*.lua`), not old concepts: a look's concept is deleted once it is built.
+
+| Rule | What it means |
+| --- | --- |
+| Its own colours | Each look sets `border` (the frame's lit line, in the look's colour), `glow`, `spark` (also the finishing flash) and `veil` in `Elements.lua`; `flashAlpha` lowers the .8 finishing flash where it would glare on pale or dark art (enchanting .18) |
+| The bar draws the frame | Framed is `Bar.lua`'s two lines: a dark line .1 bar heights thick, 2/3 of it outside the bar, and the lit line in the look's colour, half as thick, inside. Borderless draws none. A look never paints its own frame, outline or edge, and its edges are never frayed or ragged |
+| The masks make the corners | Art is painted as a full rectangle out to the bar's edges, never with corners or rounded ends of its own; every texture that reaches an edge gets the corner masks (`ns.MaskCorners`, `ns.MaskAllTextures`), so square, soft and rounded all work |
+| The overlay makes the depth | The bevel is laid over every look. A look doesn't paint its own bevel, inner shadow or heavy dark top and bottom edges; its own shading stays light at the edges (about .2 alpha at most) so Flat looks flat and Bevel isn't doubled |
+| Inside the bar | The look's material (cloth, leather, metal, bandage, liquid) never shows past the bar's lines. Only live effects (particles, sparks, steam, dust, drops of blood) spill over the frame line |
+| Tools | Tools that work inside the bar (the loom's shuttle and reed, the enchanting vortex, the bandage roll) are clipped to the bar. Tools held in front of it (knife, hammer, ladle, needle) stand over the frame line, below the text |
+| Track and fill | The unfilled part is the track: dark, or the look's own art (`track`). Art that crosses the fill edge (a liquid's level, leaning bands, a vortex) uses `wholeBar` and shows the progress itself, still clipped to the bar |
+| Channels | A channel drains from the right, so its art runs the other way (frost's channels freeze in from the right) |
+| Interrupts | The bar greys its layers; every other piece greys in the look's `interrupted(k)` as the tint fades in over .25 s, and the next cast resets it |
+| Markers | Spell looks have the spark at the cast edge; professions and gathering set `noSpark` and their own motion shows the progress |
+| Different every cast | Each cast takes the next variation (cloth, pelt, tooling, palette ...) in turn, or a random one that is never the last (first aid's wrap), so two casts in a row differ |
+| Sizes | The art reads at the smallest bar (200 x 20) and scales with the bar's height; the spell name and time stay readable over it |
+| Nothing turns | Nothing rotates per frame (it shimmers); anything that swings or tips is painted as fixed poses. A piece that only leans may be rotated once when it is laid out and held there (first aid's bandage turns, each set at its own lean when the cast starts) |
+| One file per look group | Each look group has its own `Effects_*.lua` registering through `ns.FXi` (Lua allows 200 locals a file) |

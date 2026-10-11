@@ -1685,7 +1685,7 @@ public static class CastbarArt
 	}
 
 	// ---------------------------------------------------------------- the forged pouring ladle (smelting)
-	// The hand ladle of the smelting concepts (smelt-a3, drawn as in B3): a deep forged-iron bowl, sooty and
+	// The smelting hand ladle: a deep forged-iron bowl, sooty and
 	// heat-tinted under the rim, slag on the metal inside, molten metal spilling over the spout; no handle (it
 	// was dropped 2026-10-09, so only the bowl rides the cast edge). Its own frame, in bar heights (y down): the
 	// spout lip at the origin, the bowl to the right. The atlas holds LADLE_TILT.Length cells, the lip at
@@ -2419,8 +2419,8 @@ public static class CastbarArt
 
 	// ---------------------------------------------------------------- the cloud: the user's reference painting, cut out
 	// storm_cloud (512x256): the painted cloud of tools/ref_cloud.jpg (the user's indigo cloud painting, 2026-10-09, a JPEG
-	// over a checkerboard, scaled to 1000 px wide), keyed as the concept
-	// does (tools/concepts/lightning_sprites.js): alpha from how much bluer than red a pixel is (the checker is neutral),
+	// over a checkerboard, scaled to 1000 px wide), keyed:
+	// alpha from how much bluer than red a pixel is (the checker is neutral),
 	// the matte choked by a pixel, the edge pixels darkened toward the underside blue-grey so no light rim is left, the
 	// alpha softened by a small blur (the colours stay sharp), then scaled to fill the texture's width; the cloud is
 	// CLOUD_FILL of the texture's height. The game draws the whole texture at (2 / CLOUD_FILL) by (1 / CLOUD_FILL) of
@@ -2964,6 +2964,272 @@ public static class CastbarArt
 	}
 	// edge_h: a left-to-right fade over the texture's width, used as a soft gradient (skinning's shade ahead
 	// of the roll, blacksmithing's hot edge, lightning's leading glow). No ragged edge masks: bars are framed.
+	// ================================================================ FIRST AID: the wound, the gauze, blood soaked through, the fold, the roll, drops
+	// Painted from the approved concept (tools/concepts/firstaid.js); Effects_FirstAid.lua places them.
+	static readonly double[] FA_CRIM = { 150/255.0, 8/255.0, 24/255.0 }, FA_CRIM_D = { 74/255.0, 2/255.0, 10/255.0 }, FA_CRIM_L = { 214/255.0, 30/255.0, 44/255.0 };
+	// the bandage, as Effects_FirstAid.lua CLOTH: base, shade, how strong the weave reads, sheen (linen)
+	static readonly double[][] FA_CLOTH = {
+		new double[] { 238, 230, 214, 170, 156, 132, 0.55, 0 },    // linen
+	};
+	static double[] FaMix(double[] a, double[] b, double t) { return new[] { Lerp(a[0], b[0], t), Lerp(a[1], b[1], t), Lerp(a[2], b[2], t) }; }
+	static readonly double[] FA_WHITE = { 1, 1, 1 }, FA_BLACK = { 0, 0, 0 };
+	// paint colour c at alpha a over the pixel (straight alpha)
+	static void FaOver(Img img, int x, int y, double[] c, double a)
+	{
+		if (a <= 0 || x < 0 || y < 0 || x >= img.W || y >= img.H) return;
+		int i = y*img.W + x; double ia = img.A[i], oa = a + ia*(1 - a);
+		if (oa <= 0) return;
+		img.R[i] = (c[0]*a + img.R[i]*ia*(1 - a))/oa; img.G[i] = (c[1]*a + img.G[i]*ia*(1 - a))/oa; img.B[i] = (c[2]*a + img.B[i]*ia*(1 - a))/oa;
+		img.A[i] = oa;
+	}
+	// a soft elliptical blob: alpha a at its centre falling to 0 at its rim (a canvas radial gradient), wrapping if asked
+	static void FaBlob(Img img, double cx, double cy, double rx, double ry, double[] c, double a, bool wrapX, bool wrapY)
+	{
+		for (int y = (int)Math.Floor(cy - ry); y <= (int)Math.Ceiling(cy + ry); y++)
+		{
+			int yy = wrapY ? Mod(y, img.H) : y; if (yy < 0 || yy >= img.H) continue;
+			for (int x = (int)Math.Floor(cx - rx); x <= (int)Math.Ceiling(cx + rx); x++)
+			{
+				int xx = wrapX ? Mod(x, img.W) : x; if (xx < 0 || xx >= img.W) continue;
+				double dx = (x + 0.5 - cx)/rx, dy = (y + 0.5 - cy)/ry, q = Math.Sqrt(dx*dx + dy*dy);
+				if (q < 1) FaOver(img, xx, yy, c, a*(1 - q));
+			}
+		}
+	}
+	// a filled ellipse with a one-pixel soft edge
+	static void FaDisc(Img img, double cx, double cy, double rx, double ry, double[] c, double a, bool wrapX, bool wrapY)
+	{
+		for (int y = (int)Math.Floor(cy - ry - 1); y <= (int)Math.Ceiling(cy + ry + 1); y++)
+		{
+			int yy = wrapY ? Mod(y, img.H) : y; if (yy < 0 || yy >= img.H) continue;
+			for (int x = (int)Math.Floor(cx - rx - 1); x <= (int)Math.Ceiling(cx + rx + 1); x++)
+			{
+				int xx = wrapX ? Mod(x, img.W) : x; if (xx < 0 || xx >= img.W) continue;
+				double dx = (x + 0.5 - cx)/rx, dy = (y + 0.5 - cy)/ry, q = Math.Sqrt(dx*dx + dy*dy);
+				FaOver(img, xx, yy, c, a*Clamp((1 - q)*Math.Min(rx, ry) + 0.5));
+			}
+		}
+	}
+	// a coloured polyline, round-capped, antialiased; drawn again shifted by the image size where it wraps
+	static void FaStroke(Img img, double[] xs, double[] ys, double w, double[] c, double a, bool wrapX, bool wrapY)
+	{
+		for (int ox = wrapX ? -1 : 0; ox <= (wrapX ? 1 : 0); ox++)
+		for (int oy = wrapY ? -1 : 0; oy <= (wrapY ? 1 : 0); oy++)
+		{
+			double sx = ox*img.W, sy = oy*img.H, x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+			for (int i = 0; i < xs.Length; i++) { x0 = Math.Min(x0, xs[i] + sx); x1 = Math.Max(x1, xs[i] + sx); y0 = Math.Min(y0, ys[i] + sy); y1 = Math.Max(y1, ys[i] + sy); }
+			for (int y = Math.Max(0, (int)(y0 - w - 1)); y <= Math.Min(img.H - 1, (int)(y1 + w + 1)); y++)
+			for (int x = Math.Max(0, (int)(x0 - w - 1)); x <= Math.Min(img.W - 1, (int)(x1 + w + 1)); x++)
+			{
+				double d = 1e9, px = x + 0.5, py = y + 0.5;
+				for (int i = 0; i + 1 < xs.Length; i++) d = Math.Min(d, SegDist(px, py, xs[i] + sx, ys[i] + sy, xs[i + 1] + sx, ys[i + 1] + sy));
+				FaOver(img, x, y, c, a*Clamp(w/2 - d + 0.5));
+			}
+		}
+	}
+	static void FaQuadPts(double x0, double y0, double cx, double cy, double x1, double y1, int n, out double[] xs, out double[] ys)
+	{
+		xs = new double[n + 1]; ys = new double[n + 1];
+		for (int i = 0; i <= n; i++) { double t = (double)i/n, it = 1 - t; xs[i] = it*it*x0 + 2*it*t*cx + t*t*x1; ys[i] = it*it*y0 + 2*it*t*cy + t*t*y1; }
+	}
+
+	// The open wound (concept makeWound): crimson running downward, tiling both ways, so the addon scrolls it down the bar
+	// (a layer, one bar height tall and eight long). Streaks of blood stretched downward, bright rivulets, dark clots.
+	public static Img FaWound()
+	{
+		var img = new Img(W, H); var rnd = new Random(6101); double hp = H;
+		var b = FaMix(FA_CRIM, FA_CRIM_D, 0.4);
+		for (int i = 0; i < W*H; i++) { img.R[i] = b[0]; img.G[i] = b[1]; img.B[i] = b[2]; img.A[i] = 1; }
+		double[][] cs = { FA_CRIM_D, FA_CRIM, FA_CRIM_L, new[] { 112/255.0, 4/255.0, 16/255.0 } };
+		for (int n = 0; n < W/H*10; n++)
+		{
+			double x = Rnd(rnd, 0, W), y = Rnd(rnd, 0, H), r = hp*Rnd(rnd, 0.1, 0.45); var c = cs[rnd.Next(4)]; double a = Rnd(rnd, 0.25, 0.6);
+			FaBlob(img, x, y, r*0.55, r*1.7, c, a, true, true);
+		}
+		double[] xs, ys;
+		for (int n = 0; n < W/H*4; n++)
+		{
+			double x = Rnd(rnd, 0, W), y = Rnd(rnd, 0, H), l = hp*Rnd(rnd, 0.3, 0.9), w = hp*Rnd(rnd, 0.02, 0.05), cx = Rnd(rnd, -0.1, 0.1)*hp, ex = Rnd(rnd, -0.08, 0.08)*hp, a = Rnd(rnd, 0.2, 0.45);
+			FaQuadPts(x, y, x + cx, y + l*0.5, x + ex, y + l, 12, out xs, out ys);
+			FaStroke(img, xs, ys, w, FA_CRIM_L, a, true, true);
+		}
+		var clot = new[] { 40/255.0, 0, 4/255.0 };
+		for (int n = 0; n < W/H*5; n++)
+		{
+			double x = Rnd(rnd, 0, W), y = Rnd(rnd, 0, H), r = hp*Rnd(rnd, 0.03, 0.08);
+			FaDisc(img, x, y, r, r*1.4, clot, 0.55, true, true);
+		}
+		return img;
+	}
+	// Wet shine on the wound (concept makeGloss), added over it and held still while the blood runs under it.
+	public static Img FaGloss()
+	{
+		var img = new Img(W, H); var rnd = new Random(6111); double hp = H;
+		var hi = new[] { 1, 215/255.0, 220/255.0 }; var dot = new[] { 1, 235/255.0, 235/255.0 };
+		for (int n = 0; n < (int)(W/H*2.5); n++)
+		{
+			double x = Rnd(rnd, 0, W), y = hp*Rnd(rnd, 0.18, 0.4), rx = hp*Rnd(rnd, 0.25, 0.8), ry = hp*Rnd(rnd, 0.03, 0.07);
+			FaBlob(img, x, y, rx, ry, hi, 0.35, true, false);
+		}
+		for (int n = 0; n < W/H*6; n++)
+		{
+			double r = Math.Max(0.6, hp*Rnd(rnd, 0.012, 0.025));
+			FaDisc(img, Rnd(rnd, 0, W), hp*Rnd(rnd, 0.12, 0.6), r, r, dot, Rnd(rnd, 0.25, 0.6), true, false);
+		}
+		return img;
+	}
+	// The bandage strip (concept makeBand), FA_BAND_W across and FA_BAND_L along: four band widths long, so each
+	// turn shows its own stretch of it. Open gauze weave, slubs, clean hems (never frayed), a hint of roundness across;
+	// the outermost columns fade out so the band's long edges stay smooth when the addon leans it.
+	public const int FA_BAND_W = 128, FA_BAND_L = 512;
+	public static Img FaBand()
+	{
+		var cl = FA_CLOTH[0]; double[] bas = { cl[0]/255, cl[1]/255, cl[2]/255 }, sh = { cl[3]/255, cl[4]/255, cl[5]/255 };
+		double weave = cl[6], sheen = cl[7], bw = FA_BAND_W, hp = bw/1.5, len = FA_BAND_L;
+		var img = new Img(FA_BAND_W, FA_BAND_L); var rnd = new Random(6201);
+		double[] us = { 0, 0.2, 0.55, 1 };
+		double[][] stops = { FaMix(bas, sh, 0.5), bas, FaMix(bas, FA_WHITE, 0.3 + sheen*0.2), FaMix(bas, sh, 0.6) };
+		for (int x = 0; x < FA_BAND_W; x++)
+		{
+			double u = (x + 0.5)/bw; int s = u < 0.2 ? 0 : u < 0.55 ? 1 : 2; var c = FaMix(stops[s], stops[s + 1], (u - us[s])/(us[s + 1] - us[s]));
+			for (int y = 0; y < FA_BAND_L; y++) img.Set(x, y, c[0], c[1], c[2], 1);
+		}
+		for (int n = 0; n < (int)(len/hp*4); n++) { double r = hp*Rnd(rnd, 0.1, 0.3); FaBlob(img, Rnd(rnd, 0, bw), Rnd(rnd, 0, len), r, r, sh, 0.14, false, false); }
+		double sp = Math.Max(1.6, hp*0.055), lw = Math.Max(0.45, sp*0.3);
+		for (double lx = sp*0.5; lx < bw; lx += sp)   // threads along the band
+		{
+			double a = weave*Rnd(rnd, 0.3, 0.5);
+			for (int x = (int)(lx - lw - 1); x <= (int)(lx + lw + 1); x++) { if (x < 0 || x >= FA_BAND_W) continue; double cov = Clamp(lw/2 - Math.Abs(x + 0.5 - lx) + 0.5); for (int y = 0; y < FA_BAND_L; y++) FaOver(img, x, y, sh, a*cov); }
+		}
+		for (double ly = sp*0.5; ly < len; ly += sp)  // and across it
+		{
+			double a = weave*Rnd(rnd, 0.25, 0.45);
+			for (int y = (int)(ly - lw - 1); y <= (int)(ly + lw + 1); y++) { if (y < 0 || y >= FA_BAND_L) continue; double cov = Clamp(lw/2 - Math.Abs(y + 0.5 - ly) + 0.5); for (int x = 0; x < FA_BAND_W; x++) FaOver(img, x, y, sh, a*cov); }
+		}
+		for (int n = 0; n < (int)(len/hp*7); n++)   // slubs: thicker bits of thread
+		{
+			double x = Rnd(rnd, 0, bw), y = Rnd(rnd, 0, len); bool light = rnd.NextDouble() < 0.5;
+			double a = light ? Rnd(rnd, 0.25, 0.45) : Rnd(rnd, 0.25, 0.4);
+			FaStroke(img, new[] { x, x + Rnd(rnd, -0.4, 0.4) }, new[] { y, y + hp*Rnd(rnd, 0.06, 0.16) }, Math.Max(0.6, sp*0.42), light ? FA_WHITE : sh, a, false, false);
+		}
+		double hem = Math.Max(1, bw*0.06), hl = Math.Max(0.6, bw*0.025);
+		for (int x = 0; x < FA_BAND_W; x++)
+		{
+			double cx = x + 0.5, a = (cx < hem || cx > bw - hem) ? 0.6 : 0, w = (cx >= hem && cx < hem + hl) ? 0.4 : 0;
+			for (int y = 0; y < FA_BAND_L; y++) { if (a > 0) FaOver(img, x, y, sh, a); if (w > 0) FaOver(img, x, y, FA_WHITE, w); }
+		}
+		for (int y = 0; y < FA_BAND_L; y++)   // smooth long edges when leaned
+		{
+			img.A[y*FA_BAND_W] = 0; img.A[y*FA_BAND_W + FA_BAND_W - 1] = 0;
+			img.A[y*FA_BAND_W + 1] *= 0.6; img.A[y*FA_BAND_W + FA_BAND_W - 2] *= 0.6;
+		}
+		return img;
+	}
+	// Blood soaked into gauze (concept makeBlot): four blots 64 px square in a row, a darker tide line at the rim, a lighter
+	// heart, the weave showing through. The addon tints it darker as it dries.
+	public static Img FaBlots()
+	{
+		var img = new Img(256, 64); var rnd = new Random(6301);
+		double[] col = FA_CRIM, rim = FA_CRIM_D;
+		double sz = 64, c0 = 32;
+		for (int cell = 0; cell < 4; cell++)
+		{
+			var bx = new double[9]; var by = new double[9]; var br = new double[9];
+			for (int i = 0; i < 9; i++) { double a = Rnd(rnd, 0, 6.283), d = i > 0 ? sz*Rnd(rnd, 0.05, 0.22) : 0; bx[i] = c0 + Math.Cos(a)*d; by[i] = c0 + Math.Sin(a)*d; br[i] = sz*(i > 0 ? Rnd(rnd, 0.1, 0.2) : 0.26); }
+			double b1 = Math.Max(0.8, sz*0.05), b2 = Math.Max(0.8, sz*0.07), sp = Math.Max(1.4, sz*0.09), lw = Math.Max(0.4, sp*0.3);
+			var hc = FaMix(col, new[] { 1, 90/255.0, 100/255.0 }, 0.22);
+			for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+			{
+				double px = x + 0.5, py = y + 0.5, d1 = 1e9, d2 = 1e9;
+				for (int i = 0; i < 9; i++)
+				{
+					double ax = c0 + (bx[i] - c0)*0.95, ay = c0 + (by[i] - c0)*0.95, cx = c0 + (bx[i] - c0)*0.72, cy = c0 + (by[i] - c0)*0.72;
+					d1 = Math.Min(d1, Math.Sqrt((px - ax)*(px - ax) + (py - ay)*(py - ay)) - br[i]*0.95);
+					d2 = Math.Min(d2, Math.Sqrt((px - cx)*(px - cx) + (py - cy)*(py - cy)) - br[i]*0.72);
+				}
+				double ar = 0.75*Smooth(b1, -b1, d1), ai = 0.8*Smooth(b2, -b2, d2), oa = ai + ar*(1 - ai);
+				if (oa <= 0) continue;
+				var c = new[] { (col[0]*ai + rim[0]*ar*(1 - ai))/oa, (col[1]*ai + rim[1]*ar*(1 - ai))/oa, (col[2]*ai + rim[2]*ar*(1 - ai))/oa };
+				double q = Math.Sqrt((px - c0)*(px - c0) + (py - c0)*(py - c0))/(sz*0.35);
+				if (q < 1) c = FaMix(c, hc, 0.5*(1 - q));
+				double wv = Math.Max(Clamp(lw/2 - Math.Abs(((px % sp) + sp) % sp - sp*0.5) + 0.5), Clamp(lw/2 - Math.Abs(((py % sp) + sp) % sp - sp*0.5) + 0.5));
+				c = FaMix(c, new[] { 1, 220/255.0, 220/255.0 }, 0.12*wv);
+				img.Set(cell*64 + x, y, c[0], c[1], c[2], oa);
+			}
+		}
+		return img;
+	}
+	// The reverse spiral's fold (concept drawTurn): a turn folded back on itself, one band width square, centred on the fold:
+	// the folded-under triangle a little darker, the crease, a lit line along it. Neutral, so it suits every cloth.
+	public static Img FaFold()
+	{
+		var img = new Img(128, 128); double bw = 128, hp = bw/1.5, d = bw*0.32, c = 64;
+		var tri = new List<double[]> { new[] { 0, c - d }, new[] { bw, c + d }, new[] { 0, c + d } };
+		for (int y = 0; y < 128; y++) for (int x = 0; x < 128; x++) if (InPoly(tri, x + 0.5, y + 0.5)) FaOver(img, x, y, FA_BLACK, 0.11);
+		double lw = Math.Max(0.7, hp*0.025);
+		FaStroke(img, new[] { 0.0, bw }, new[] { c - d, c + d }, lw, FA_BLACK, 0.3, false, false);
+		FaStroke(img, new[] { 0.0, bw }, new[] { c - d - hp*0.03, c + d - hp*0.03 }, lw, FA_WHITE, 0.5, false, false);
+		return img;
+	}
+	// The bandage roll (concept drawRoll), seen side on: a short cylinder whose axis runs across the band, layered ends,
+	// a lit line along it and its soft shadow. Neutral (tinted to the cloth). The texture spans 1.16 roll widths by 1.6
+	// thicknesses, the roll centred in it (Effects_FirstAid.lua ROLL_W, ROLL_D).
+	public static Img FaRoll()
+	{
+		var img = new Img(128, 64); double w = 128/1.16, d = 64/1.6, cx = 64, cy = 32, hp = w/1.56, nom = 0.9;
+		FaDisc(img, cx + hp*0.04, cy + d*0.2, w*0.55, d*0.55, FA_BLACK, 0.35, false, false);
+		double r = d*0.12;
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 128; x++)
+		{
+			double qx = Math.Abs(x + 0.5 - cx) - (w/2 - r), qy = Math.Abs(y + 0.5 - cy) - (d/2 - r);
+			double sd = Math.Sqrt(Math.Max(qx, 0)*Math.Max(qx, 0) + Math.Max(qy, 0)*Math.Max(qy, 0)) + Math.Min(Math.Max(qx, qy), 0) - r;
+			double a = Clamp(0.5 - sd); if (a <= 0) continue;
+			double v = (y + 0.5 - (cy - d/2))/d, l;
+			if (v < 0.3) l = Lerp(nom*0.79, 1.0, v/0.3); else if (v < 0.6) l = Lerp(1.0, nom, (v - 0.3)/0.3); else l = Lerp(nom, nom*0.7*0.75, (v - 0.6)/0.4);
+			FaOver(img, x, y, new[] { l, l, l }, a);
+		}
+		var ring = new[] { nom*0.7, nom*0.7, nom*0.7 };
+		foreach (double ex in new[] { cx - w/2, cx + w/2 })
+			for (int j = 1; j <= 3; j++)
+			{
+				int n = 40; var xs = new double[n + 1]; var ys = new double[n + 1];
+				for (int i = 0; i <= n; i++) { double t = i*2*Math.PI/n; xs[i] = ex + d*0.1*j/3*Math.Cos(t); ys[i] = cy + d*0.5*j/3.2*Math.Sin(t); }
+				FaStroke(img, xs, ys, 1, ring, 0.45, false, false);
+			}
+		FaStroke(img, new[] { cx - w*0.4, cx + w*0.4 }, new[] { cy - d*0.22, cy - d*0.22 }, 1.2, FA_WHITE, 0.4, false, false);
+		return img;
+	}
+	// A drop of blood (and a bead swelling on the wound's edge): a round head at the bottom tapering to a point at the top,
+	// crimson with a darker rim and a pale glint. 32x64; the head's centre 18 px up from the bottom, radius 13.
+	public static Img FaDrop()
+	{
+		var img = new Img(32, 64); double cx = 16, cy = 46, r = 13, tip = 6;
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 32; x++)
+		{
+			double px = x + 0.5, py = y + 0.5, dc = Math.Sqrt((px - cx)*(px - cx) + (py - cy)*(py - cy)) - r, dt = 1e9;
+			if (py <= cy && py >= tip) { double half = r*Math.Pow((py - tip)/(cy - tip), 1.4); dt = Math.Abs(px - cx) - half; }
+			double sd = Math.Min(dc, dt), a = Clamp(0.5 - sd); if (a <= 0) continue;
+			var c = FaMix(FA_CRIM, FA_CRIM_D, Clamp((sd + 4)/4)*0.6);
+			img.Set(x, y, c[0], c[1], c[2], a);
+		}
+		FaDisc(img, cx - r*0.35, cy - r*0.25, r*0.25, r*0.25, new[] { 1, 200/255.0, 205/255.0 }, 0.6, false, false);
+		return img;
+	}
+	// The limb's roundness over the whole bar (concept, kept light so the bevel option isn't doubled): a little shade at
+	// the top, a faint light just below it, nothing through the middle, a little more shade at the bottom. 8x64.
+	public static Img FaRound()
+	{
+		var img = new Img(8, 64);
+		double[] vs = { 0, 0.28, 0.5, 1 }; double[][] cs = { new[] { 10/255.0, 0, 0, 0.16 }, new[] { 1, 240/255.0, 235/255.0, 0.06 }, new[] { 0.0, 0, 0, 0 }, new[] { 10/255.0, 0, 0, 0.2 } };
+		for (int y = 0; y < 64; y++)
+		{
+			double v = (y + 0.5)/64; int s = v < 0.28 ? 0 : v < 0.5 ? 1 : 2; double t = (v - vs[s])/(vs[s + 1] - vs[s]);
+			double a = Lerp(cs[s][3], cs[s + 1][3], t), pr = Lerp(cs[s][0]*cs[s][3], cs[s + 1][0]*cs[s + 1][3], t), pg = Lerp(cs[s][1]*cs[s][3], cs[s + 1][1]*cs[s + 1][3], t), pb = Lerp(cs[s][2]*cs[s][3], cs[s + 1][2]*cs[s + 1][3], t);
+			for (int x = 0; x < 8; x++) img.Set(x, y, a > 0 ? pr/a : 0, a > 0 ? pg/a : 0, a > 0 ? pb/a : 0, a);
+		}
+		return img;
+	}
+
 	// ---------------------------------------------------------------- corners and depth (Bar.lua)
 	// Signed distance to a rectangle rounded at its left corners only (it runs on to the right): negative inside.
 	static double RoundLeft(double x, double y, double x0, double y0, double y1, double R)
@@ -3312,6 +3578,11 @@ $jobs = [ordered]@{
 	'ench_flow1' = { [CastbarArt]::EnchFlow(0) };   'ench_flow2'  = { [CastbarArt]::EnchFlow(1) }
 	'p_vortex'   = { [CastbarArt]::Vortex() };      'p_dot'       = { [CastbarArt]::Dot() }
 	'p_essence'  = { [CastbarArt]::Essence() }
+	'fa_wound'   = { [CastbarArt]::FaWound() };     'fa_gloss'    = { [CastbarArt]::FaGloss() }
+	'fa_band'    = { [CastbarArt]::FaBand() }
+	'fa_blot'    = { [CastbarArt]::FaBlots() }
+	'fa_fold'    = { [CastbarArt]::FaFold() };      'fa_roll'     = { [CastbarArt]::FaRoll() }
+	'fa_drop'    = { [CastbarArt]::FaDrop() };      'fa_round'    = { [CastbarArt]::FaRound() }
 	'p_flame'    = { [CastbarArt]::AlchFlame() };   'p_valve'     = { [CastbarArt]::AlchValve() }
 	'p_chip'     = { [CastbarArt]::Chip() };        'p_flower'    = { [CastbarArt]::Flower() }
 	'fire_base'  = { [CastbarArt]::FireBase() };    'fire_flow'   = { [CastbarArt]::FireFlow() }

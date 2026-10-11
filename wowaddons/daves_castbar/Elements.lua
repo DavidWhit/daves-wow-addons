@@ -1,13 +1,14 @@
 -- daves_castbar / Elements.lua
--- The looks (seven elements, four gathering and six crafting professions plus Disenchant, and a plain bar),
+-- The looks (seven elements, four gathering and six crafting professions plus Disenchant and First Aid, and a plain bar),
 -- and which one a spell gets.
 --
 -- WoW has no API that returns a spell's school (C_Spell.GetSpellInfo has none, and the combat
 -- log is closed to addons on Forever), so the element comes from, in order:
 --   1. your own choice for that spell (/castbar set <element>)
---   2. the gathering spells by name: Fishing, Mining, Herb Gathering, Skinning, and Smelt ... for smelting; Disenchant too
+--   2. the gathering spells by name: Fishing, Mining, Herb Gathering, Skinning, and Smelt ... for smelting; Disenchant and
+--      First Aid (using a bandage) too
 --   3. crafting casts (tradeskill) by their recipe's profession: Blacksmithing, Mining (smelting), Alchemy,
---      Tailoring, Leatherworking, Enchanting; else the fallback
+--      Tailoring, Leatherworking, Enchanting, First Aid; else the fallback
 --   4. the spell's name: known names first, then words in it ("Frost", "Flame", "Lightning", ...)
 --   5. the "Other casts" setting: a look (Plain by default: Blizzard's own cast bar art), or "Your class",
 --      which picks your class's and specialization's element
@@ -25,7 +26,7 @@ local _, ns = ...
 local function C(r, g, b) return { r / 255, g / 255, b / 255 } end
 
 ns.ELEMENT_ORDER = { "frost", "fire", "shadow", "nature", "lightning", "arcane", "holy", "fishing", "herbalism", "mining", "skinning",
-	"smelting", "blacksmithing", "alchemy", "tailoring", "leatherworking", "enchanting", "disenchant", "plain" }
+	"smelting", "blacksmithing", "alchemy", "tailoring", "leatherworking", "enchanting", "disenchant", "firstaid", "plain" }
 
 ns.ELEMENTS = {
 	frost = {
@@ -222,6 +223,32 @@ ns.ELEMENTS = {
 		flashAlpha = .18,   -- a calm finish, as enchanting
 		emit = {},
 	},
+	firstaid = {
+		-- an open wound bleeding ahead of the cast, bound up in broad bandage turns that wrap round it at the cast edge (a
+		-- random wrap and lean every cast, the cloth by the bandage's name), blood soaking through them and drying darker,
+		-- a roll riding the band's end (Effects_FirstAid.lua). Bandage recipes by profession; using one (the First Aid
+		-- channel) by name, as firstaid_channel
+		label = "First Aid", border = C(178, 28, 40), glow = C(120, 16, 24), spark = C(255, 214, 214), veil = C(0, 0, 0),
+		layers = { { tex = "fa_wound", sv = -.22 }, { tex = "fa_gloss", add = true } },   -- the blood runs down; the shine holds still
+		track = { tex = "fa_wound", a = 0 },   -- the wound covers the whole bar; nothing of the track shows
+		firstaid = { soak = 2, dry = true, calm = true, bleed = 1.4 },   -- the concept's C: soaked through
+		wholeBar = true,    -- the turns lean across the fill edge: they show the progress, not the fill
+		noSpark = true,     -- no marker: the turn coming round is the cast edge
+		flashAlpha = .3,    -- a calm finish over the pale bandage
+		channelLook = "firstaid_channel",
+		emit = {},
+	},
+	firstaid_channel = {   -- not in ELEMENT_ORDER: StartCast picks it for the First Aid channel (using a bandage)
+		-- the concept's D: the bandage wraps in from the right as the channel drains; the bleeding slows and stops as it binds
+		label = "First Aid", border = C(178, 28, 40), glow = C(120, 16, 24), spark = C(255, 214, 214), veil = C(0, 0, 0),
+		layers = { { tex = "fa_wound", sv = -.22 }, { tex = "fa_gloss", add = true } },
+		track = { tex = "fa_wound", a = 0 },
+		firstaid = { soak = 1, calm = true, bleed = 1, channel = true },
+		wholeBar = true,
+		noSpark = true,
+		flashAlpha = .3,
+		emit = {},
+	},
 
 	-- Casts the addon can't place: Blizzard's own cast bar art, no effects. Channels use plain_channel.
 	plain = {
@@ -241,10 +268,11 @@ ns.ELEMENTS = {
 	},
 }
 
--- Gathering spells (lowercase names), checked before anything else that guesses; Disenchant is cast by name too.
+-- Gathering spells (lowercase names), checked before anything else that guesses; Disenchant and First Aid (the
+-- channel of using a bandage) are cast by name too.
 local GATHERING = {
 	["fishing"] = "fishing", ["mining"] = "mining", ["herb gathering"] = "herbalism", ["herbalism"] = "herbalism",
-	["skinning"] = "skinning", ["disenchant"] = "disenchant",
+	["skinning"] = "skinning", ["disenchant"] = "disenchant", ["first aid"] = "firstaid",   -- First Aid: using a bandage
 }
 
 ---------------------------------------------------------------------------
@@ -269,6 +297,7 @@ local NAMES = {
 
 -- Words in a name, checked in this order (so "Flash of Light" is holy, not fire's "flash").
 local WORDS = {
+	{ "bandage", "firstaid" },                    -- a bandage the profession check missed
 	{ "lightning", "lightning" }, { "thunder", "lightning" }, { "storm", "lightning" },   -- before "light" (holy)
 	{ "frost", "frost" }, { "ice ", "frost" }, { "icy", "frost" }, { "blizzard", "frost" }, { "cone of cold", "frost" },
 	{ "glacial", "frost" }, { "freez", "frost" }, { "chill", "frost" }, { "snow", "frost" },
@@ -324,6 +353,9 @@ local CRAFTS = Enum and Enum.Profession and {
 	[Enum.Profession.Leatherworking] = "leatherworking",
 	[Enum.Profession.Enchanting] = "enchanting",
 } or {}
+if Enum and Enum.Profession and Enum.Profession.FirstAid then   -- bandages (ProfessionConstantsDocumentation.lua: FirstAid = 0)
+	CRAFTS[Enum.Profession.FirstAid] = "firstaid"
+end
 
 -- the readable profession in a ProfessionInfo table, or nil
 local function Profession(info)

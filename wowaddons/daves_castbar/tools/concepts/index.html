@@ -32,17 +32,18 @@
 	<label>Height <input id="h" type="range" min="18" max="60" value="30"></label>
 	<label>Speed <input id="speed" type="range" min="0.25" max="2" step="0.05" value="1"></label>
 	<label><input id="freeze" type="checkbox"> Hold at <input id="hold" type="range" min="0" max="100" value="70"></label>
+	<label>Style <select id="style"><option value="framed">Framed</option><option value="borderless">Borderless</option></select></label>
 	<button id="restart">Restart all</button>
 </header>
 <div id="errors"></div>
 <main id="bars"></main>
-<footer>Concepts only, drawn in the browser, so each can be judged before any game art is made. Showing the final draft per profession; add <code>?all</code> to the address to see every variant.</footer>
+<footer>Concepts only, drawn in the browser, so a new look can be judged before any game art is made. Once a look is built into the add-on its concept is removed; the add-on's code is the reference for every finished look.</footer>
 
 <script>
 window.onerror = (m, src, line) => { document.getElementById('errors').textContent += `${m} (${(src || '').split('/').pop()}:${line})\n`; };
 const CONCEPTS = [];
-// The final drafts (2026-10-08). ?all shows every variant, ?only=skin,smith-a a selection.
-const PICKS = ['skin-c2', 'light-c2', 'smelt-a3', 'smith-a', 'alch-b2', 'tail-a2', 'ench-c', 'ench-c3', 'lw-b'];   // final drafts
+// The look being designed now; ?only=fa-b,fa-c shows a selection. A look built into the add-on leaves this page:
+// compare new looks with the add-on's code, not with old concepts.
 
 // ------------------------------------------------------------------ helpers for concept files
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -107,7 +108,7 @@ class Particles {
 }
 
 // ------------------------------------------------------------------ the bar
-const settings = { W: 340, H: 30, speed: 1, freeze: false, hold: .7 };
+const settings = { W: 340, H: 30, speed: 1, freeze: false, hold: .7, style: 'framed' };
 const dpr = Math.min(2, window.devicePixelRatio || 1);
 
 class Bar {
@@ -161,12 +162,21 @@ class Bar {
 		// finished: a bright flash that fades
 		if (s.done) {
 			g.save(); roundRectPath(g, 0, 0, W, H, H * .18); g.clip();
-			g.globalCompositeOperation = 'lighter'; g.globalAlpha = clamp(1 - this.stateT / .35) * .7;
+			g.globalCompositeOperation = 'lighter'; g.globalAlpha = clamp(1 - this.stateT / .35) * (c.flashAlpha ?? .7);   // the add-on's flashAlpha
 			g.fillStyle = rgba(c.flash || [255, 240, 200]); g.fillRect(0, 0, W, H); g.restore();
 			g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
 		}
-		// thin dark frame so every concept reads as a bar
-		roundRectPath(g, -.5, -.5, W + 1, H + 1, H * .18); g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 1.5; g.stroke();
+		// the frame. A concept with its own frame colour (c.frame, the add-on's `border`) gets the add-on's frame: a dark
+		// outer line and a lit inner line in that colour, or none when borderless. A concept without one keeps a thin dark line.
+		// Sizes as Bar.lua LayoutShape: the dark line .1 H thick with 2/3 of it outside the bar, the lit line half as
+		// thick, inside the bar and ending at its edge.
+		if (c.frame && settings.style === 'framed') {
+			const d = H * .1, o = d / 6, l = d / 2;
+			roundRectPath(g, -o, -o, W + o * 2, H + o * 2, H * .18 + o); g.strokeStyle = 'rgba(0,0,0,.8)'; g.lineWidth = d; g.stroke();
+			roundRectPath(g, l / 2, l / 2, W - l, H - l, Math.max(0, H * .18 - l / 2)); g.strokeStyle = rgba(c.frame, .95); g.lineWidth = l; g.stroke();
+		} else if (!c.frame) {
+			roundRectPath(g, -.5, -.5, W + 1, H + 1, H * .18); g.strokeStyle = 'rgba(0,0,0,.75)'; g.lineWidth = 1.5; g.stroke();
+		}
 		// tools held in front of the bar (knife, hammer, ladle) draw over its frame line
 		if (c.over) {
 			g.save();
@@ -190,23 +200,22 @@ const $ = id => document.getElementById(id);
 function bind() {
 	const upd = () => {
 		settings.W = +$('w').value; settings.H = +$('h').value; settings.speed = +$('speed').value;
-		settings.freeze = $('freeze').checked; settings.hold = $('hold').value / 100;
+		settings.freeze = $('freeze').checked; settings.hold = $('hold').value / 100; settings.style = $('style').value;
 	};
-	['w', 'h', 'speed', 'freeze', 'hold'].forEach(id => $(id).addEventListener('input', upd));
+	['w', 'h', 'speed', 'freeze', 'hold', 'style'].forEach(id => $(id).addEventListener('input', upd));
 	$('restart').addEventListener('click', () => bars.forEach(b => b.newCast()));
 	upd();
 }
 function start() {
 	// URL options, e.g. ?only=skin&h=40&hold=60&sim=2 (sim: seconds to pre-run, for screenshots)
 	const q = new URLSearchParams(location.search);
-	for (const id of ['w', 'h', 'speed', 'hold']) if (q.has(id)) $(id).value = q.get(id);
+	for (const id of ['w', 'h', 'speed', 'hold', 'style']) if (q.has(id)) $(id).value = q.get(id);
 	if (q.has('hold')) $('freeze').checked = true;
 	bind();
 	const main = $('bars');
 	let group = null;
 	for (const c of CONCEPTS) {
 		if (q.get('only') && !q.get('only').split(',').some(k => c.id === k || c.id.startsWith(k + '-'))) continue;
-		if (!q.get('only') && !q.has('all') && !PICKS.includes(c.id)) continue;
 		if (c.group !== group) { group = c.group; const h = document.createElement('h2'); h.textContent = group; main.appendChild(h); }
 		bars.push(new Bar(c, main));
 	}
@@ -221,18 +230,7 @@ function start() {
 }
 </script>
 <!--CONCEPTS-->
-<script src="skinning.js"></script>
-<script src="lightning.js"></script>
-<script src="lightning_painted.js"></script>
-<script src="ref_cloud_data.js"></script>
-<script src="lightning_sprites.js"></script>
-<script src="smelting.js"></script>
-<script src="smelting_foundry.js"></script>
-<script src="blacksmithing.js"></script>
-<script src="alchemy.js"></script>
-<script src="tailoring.js"></script>
-<script src="enchanting.js"></script>
-<script src="leatherworking.js"></script>
+<script src="firstaid.js"></script>
 <!--/CONCEPTS-->
 <script>start();</script>
 </body>

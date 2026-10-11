@@ -200,7 +200,7 @@ function ns:InitBar()
 
 	-- live effects (particles, sprites, the spark, vines, the pond, the mine cart): above the frame line (border, + 7),
 	-- so embers, flakes, wisps, twinkles, the bobber and the cart overlap the frame when the bar is framed, on
-	-- every look alike. Only the loom's tools are clipped to the bar (Effects_Tailor.lua), on purpose.
+	-- every look alike.
 	fx = CreateFrame("Frame", nil, bar)
 	fx:SetAllPoints()
 	fx:SetFrameLevel(bar:GetFrameLevel() + 8)
@@ -237,10 +237,12 @@ function ns:InitBar()
 	border.blizz:Hide()
 
 	-- depth: the bevel, laid over the fill and under the effects: light along the top, shade along the bottom
-	-- and a shadow just inside the frame, all following the corners (LayoutShape sizes it, db.depth shows it)
+	-- and a shadow just inside the frame, all following the corners (LayoutShape sizes it, db.depth shows it).
+	-- At + 6: a look's content is at + 3 and its own frames above it (leatherworking's laces, first aid's turns) reach
+	-- + 5, and a frame at the same level as the bevel could draw over it or under it
 	depth = CreateFrame("Frame", nil, bar)
 	depth:SetAllPoints()
-	depth:SetFrameLevel(bar:GetFrameLevel() + 5)
+	depth:SetFrameLevel(bar:GetFrameLevel() + 6)
 	ns.MaskAllTextures(depth)
 	local function Bevel(sub, r, g, b, a, ...)
 		local t = depth:CreateTexture(nil, "ARTWORK", nil, sub)
@@ -500,7 +502,9 @@ local function ActivateElement(key)
 	track.cfg = T
 	track.atlas = T and T.atlas
 	if track.atlas then
-		track.tex:SetAtlas(T.atlas)
+		-- reset the texcoords and the wrap: the look before left its scrolling REPEAT coords on this texture, and kept,
+		-- they cut a dark gap out of Blizzard's background (SetAtlas's resetTexCoords, SimpleTextureBaseAPIDocumentation.lua)
+		track.tex:SetAtlas(T.atlas, false, nil, true, "CLAMP", "CLAMP")
 		track.tex:SetAlpha(1)
 	else
 		track.tex:SetTexture(MEDIA .. (T and T.tex or cfg.layers[1].tex), "REPEAT", "REPEAT")

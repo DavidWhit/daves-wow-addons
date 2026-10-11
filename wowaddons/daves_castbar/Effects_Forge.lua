@@ -44,7 +44,7 @@ local LADLE_SPAN, LADLE_OX, LADLE_OY, LADLE_SCALE = 2.6, .3, 1.8, .38 / .56
 local FORGE_PARTS = { "hammer", "stream", "ladle", "spout", "flash", "land", "nose" }
 local LADLE_PARTS = { "ladle", "spout", "stream", "nose" }
 local QUENCH_MAX = 60        -- steam puffs in the quench burst at most (a long, thin bar would want hundreds)
--- Heat colours, as the concepts and Make-CastbarMedia.ps1 IRON_HEAT / MELT_HEAT: { heat, r, g, b }.
+-- Heat colours, as Make-CastbarMedia.ps1 IRON_HEAT / MELT_HEAT: { heat, r, g, b }.
 local IRON_HEAT = { { 0, 42, 34, 32 }, { .22, 104, 20, 10 }, { .45, 190, 46, 12 }, { .66, 245, 118, 28 }, { .85, 255, 196, 84 }, { 1.05, 255, 246, 214 }, { 1.3, 255, 255, 250 } }
 local MELT_HEAT = { { 0, 52, 50, 56 }, { .16, 84, 38, 26 }, { .34, 165, 42, 14 }, { .52, 228, 92, 18 }, { .72, 255, 160, 44 }, { .88, 255, 208, 104 }, { 1, 255, 228, 150 } }
 local function HeatRGB(ramp, t)
