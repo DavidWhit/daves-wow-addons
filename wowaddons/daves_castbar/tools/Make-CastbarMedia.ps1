@@ -3240,14 +3240,20 @@ public static class CastbarArt
 		return Math.Sqrt(ox*ox + oy*oy) + Math.Min(Math.Max(qx, qy), 0) - R;
 	}
 	static double Cov(double d) { return Clamp(0.5 - d); }
-	// The corner mask: the bar's left end square (64 px = one bar height) with its left corners rounded by r bar
-	// heights, white. Bar.lua anchors it to the bar's left end, and mirrored to its right end, on every texture that
-	// reaches the bar's edges. r = 0 is the all-white square mask.
-	public static Img CornerMask(double r)
+	// The corner mask: a long white strip, 64 bar heights across (64 px = one bar height), with its corners at one end
+	// rounded by r bar heights: the left end's (corner_*), or with right the right end's (corner_*_r). Bar.lua anchors
+	// each to its end of the bar at its own proportions (64 H x H), longer than any bar (800 x 20 is 40 H), so the
+	// whole bar lies inside both masks and nothing is stretched, mirrored or sampled outside a mask's rect: the game
+	// doesn't extend a mask's edge pixels reliably (a 64 px square mask, CLAMPed past its edge, smeared the corner's
+	// curve along the whole bar and cut its top and bottom). r = 0 is the all-white mask.
+	public static Img CornerMask(double r, bool right)
 	{
-		var img = new Img(64, 64);
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
-			img.Set(x, y, 1, 1, 1, r <= 0 ? 1 : Cov(RoundLeft(x + 0.5, y + 0.5, 0, 0, 64, r*64)));
+		var img = new Img(4096, 64);
+		for (int y = 0; y < 64; y++) for (int x = 0; x < 4096; x++)
+		{
+			double px = right ? 4096 - (x + 0.5) : x + 0.5;
+			img.Set(x, y, 1, 1, 1, r <= 0 ? 1 : Cov(RoundLeft(px, y + 0.5, 0, 0, 64, r*64)));
+		}
 		return img;
 	}
 	// The frame line's end cap for rounded corners (Bar.lua LayoutBorder): the square reaching e outside the bar on
@@ -3603,7 +3609,8 @@ $jobs = [ordered]@{
 	'p_twinkle'  = { [CastbarArt]::Twinkle() }
 	'vine'       = { [CastbarArt]::Vine() }
 	'edge_h'     = { [CastbarArt]::EdgeH() }
-	'corner_square' = { [CastbarArt]::CornerMask(0) }; 'corner_soft' = { [CastbarArt]::CornerMask(0.18) }; 'corner_rounded' = { [CastbarArt]::CornerMask(0.36) }
+	'corner_square' = { [CastbarArt]::CornerMask(0, $false) }; 'corner_soft' = { [CastbarArt]::CornerMask(0.18, $false) }; 'corner_rounded' = { [CastbarArt]::CornerMask(0.36, $false) }
+	'corner_square_r' = { [CastbarArt]::CornerMask(0, $true) }; 'corner_soft_r' = { [CastbarArt]::CornerMask(0.18, $true) }; 'corner_rounded_r' = { [CastbarArt]::CornerMask(0.36, $true) }
 	'cap_dark_square' = { [CastbarArt]::CapRing(0, $false) }; 'cap_lit_square' = { [CastbarArt]::CapRing(0, $true) }
 	'cap_dark_soft' = { [CastbarArt]::CapRing(0.18, $false) }; 'cap_lit_soft' = { [CastbarArt]::CapRing(0.18, $true) }
 	'cap_dark_rounded' = { [CastbarArt]::CapRing(0.36, $false) }; 'cap_lit_rounded' = { [CastbarArt]::CapRing(0.36, $true) }

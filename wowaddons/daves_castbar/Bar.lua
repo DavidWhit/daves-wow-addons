@@ -44,27 +44,35 @@ local W, H = 300, 26
 ---------------------------------------------------------------------------
 -- Corners (db.corners): "square", "soft" (rounded by .18 bar heights, the look so far) or "rounded" (.36).
 -- A mask on every texture that reaches the bar's edges rounds them: each frame holding such textures gets
--- two masks, the bar's left end square and its right one (mirrored), wrapped CLAMP so they change nothing
--- beyond their square. A hidden mask stops masking, so they are never hidden: square is an all-white mask.
+-- two masks, one for the bar's left end and one for its right. Each is a long strip, 64 bar heights by one, with the
+-- corners at its own end (corner_* and corner_*_r), anchored to that end of the bar at its own proportions: longer
+-- than any bar (800 x 20 is 40 H), so the whole bar lies inside both, and nothing is stretched, mirrored or sampled
+-- outside a mask's rect. Masks used to be bar-height squares, CLAMPed past their edge to cover the rest of the bar,
+-- which the game doesn't do reliably: in game rounded's curve was smeared along the bar and cut its top and bottom.
+-- A hidden mask stops masking, so they are never hidden: square is an all-white mask.
 -- A texture takes three masks at most (Blizzard's EncounterTimelineTrackView checks that); the looks' own
 -- masks (the storm's glow, the spent velvet) make one each, so there is room for these two.
 ---------------------------------------------------------------------------
 local CORNERS = { square = { r = 0, mask = "corner_square" }, soft = { r = .18, mask = "corner_soft" }, rounded = { r = .36, mask = "corner_rounded" } }
+local CORNER_SPAN = 64             -- a corner strip's length in bar heights (4096 x 64 px)
 local cornerMasks = {}             -- every mask made, for Layout to size and retexture
 local function CornerStyle() return CORNERS[ns.db and ns.db.corners] or CORNERS.soft end
 
+-- A mask's file for the corners setting (the right end's has its corners at the right) and its size for the bar.
+local function CornerFile(mask) return MEDIA .. CornerStyle().mask .. (mask.right and "_r" or "") end
+local function CornerSize(mask) mask:SetSize(CORNER_SPAN * H, H) end
+
 local function CornerMasksFor(frame)
 	if frame.cornerMasks then return frame.cornerMasks end
-	local file = MEDIA .. CornerStyle().mask
 	local m = {}
 	for i = 1, 2 do
 		local mask = frame:CreateMaskTexture()
-		mask:SetTexture(file, "CLAMP", "CLAMP")
-		mask.file = file
+		mask.right = i == 2
+		mask.file = CornerFile(mask)
+		mask:SetTexture(mask.file, "CLAMP", "CLAMP")
 		mask:SetSnapToPixelGrid(false); mask:SetTexelSnappingBias(0)
-		if i == 1 then mask:SetPoint("TOPLEFT", bar, "TOPLEFT")
-		else mask:SetPoint("TOPRIGHT", bar, "TOPRIGHT"); mask:SetTexCoord(1, 0, 0, 1) end
-		mask:SetSize(H, H)
+		if mask.right then mask:SetPoint("TOPRIGHT", bar, "TOPRIGHT") else mask:SetPoint("TOPLEFT", bar, "TOPLEFT") end
+		CornerSize(mask)
 		m[i] = mask
 		cornerMasks[#cornerMasks + 1] = mask
 	end
@@ -380,10 +388,10 @@ end
 local function LayoutShape()
 	local db = ns.db
 	local style = CornerStyle()
-	local file = MEDIA .. style.mask
 	for _, mask in ipairs(cornerMasks) do
-		mask:SetSize(H, H)
+		local file = CornerFile(mask)
 		if mask.file ~= file then mask.file = file; mask:SetTexture(file, "CLAMP", "CLAMP") end
+		CornerSize(mask)
 	end
 	-- the frame: the dark line .1 H thick with 2/3 of it outside the bar, so its pieces are squares of H + 2e at both
 	-- ends and a strip of that height between them (the painted pieces hold both lines' thickness and corners)
