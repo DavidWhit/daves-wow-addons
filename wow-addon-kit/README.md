@@ -34,15 +34,15 @@ Windows PowerShell 5.1, no admin needed. Run them from `plugins/wow-forever-addo
 | `New-WowAddon.ps1 -Name X [-Flavor forever,retail] [-EditMode]` | Scaffold from `templates/addon`; `-EditMode` adds the shared Edit Mode behaviour and an `EditMode.lua` wired up with it |
 | `Test-WowAddon.ps1 -Path X [-Flavor ...] [-Json]` | Static validator; exit code 1 on errors |
 | `Find-WowApi.ps1 <name or pattern> [-Events] [-SecretOnly]` | Look up functions/events in the Forever API index |
-| `Get-WowScriptErrors.ps1 [-Addon X] [-Session n]` | Lua errors (with stacks), blocked/forbidden actions and Lua warnings recorded in game by the dev addon `devaddons/!WowKitErrors` (link it once with `Link-WowAddons.ps1 -Path devaddons\!WowKitErrors`). Read first when something breaks in game |
-| `Get-WowTaintLog.ps1 [-Addon X]` | The client's `Logs\taint.log`: which addon tainted what, and the blocked call. Read second |
+| `Get-WowScriptErrors.ps1 [-Addon X] [-Session n]` | Lua errors (with stacks), blocked/forbidden actions and Lua warnings recorded in game by the dev addon `devaddons/!WowKitErrors` (installed by every kit link: `Link-WowAddons.ps1`, `Deploy-WowAddon.ps1`, and by this script when it's missing). Read first when something breaks in game (the order: wow-addon-test step 0) |
+| `Get-WowTaintLog.ps1 [-Addon X]` | The client's `Logs\taint.log`: which addon tainted what, and the blocked call. Read when nothing was recorded, or for a blocked action |
 | `Deploy-WowAddon.ps1 -Path X [-Mode Link/Copy] [-Remove]` | Junction or copy into `Interface\AddOns`; never deletes real folders |
-| `Link-WowAddons.ps1 [-Path dir] [-Flavor ...] [-Remove] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into each client its TOC targets; real folders go to `AddOns.backup`. Also runs under PowerShell 7 on macOS (symlinks) |
-| `link-wow-addons.sh [--dry-run] [--remove] [--wow-root DIR] [dir]` | The same for a Mac without PowerShell (bash, symlinks, every addon into every client) |
+| `Link-WowAddons.ps1 [-Path dir] [-Flavor ...] [-Remove] [-NoDevAddons] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into each client its TOC targets, plus the kit's error recorder; real folders go to `AddOns.backup`. Also runs under PowerShell 7 on macOS (symlinks) |
+| `link-wow-addons.sh [--dry-run] [--remove] [--no-dev-addons] [--wow-root DIR] [dir]` | The same for a Mac without PowerShell (bash, symlinks, every addon into every client, error recorder included) |
 | `Install-WowDevTools.ps1` | luacheck from its official GitHub release, plus the API index |
 | `Update-WowApiIndex.ps1 [-Branch forever]` | Rebuild `data/api-<branch>.json` from Blizzard's UI source (after patches) |
 
-Self-test: `plugins/wow-forever-addons/tests/Invoke-KitSelfTest.ps1` checks that every planted bug in `tests/fixtures/BrokenAddon` is caught, that a fresh scaffold and the example come out clean, and that `Link-WowAddons.ps1` links, re-points, backs up and unlinks correctly in a fake install.
+Self-test: `plugins/wow-forever-addons/tests/Invoke-KitSelfTest.ps1` checks that every planted bug in `tests/fixtures/BrokenAddon` is caught, that a fresh scaffold and the example come out clean, and that `Link-WowAddons.ps1` links, re-points, backs up and unlinks correctly in a fake install, error recorder included.
 
 ## Example addon
 

@@ -23,6 +23,10 @@
   -Path defaults to the nearest "wowaddons" folder found walking up from the current
   directory, then from this script's folder. It may also be one addon folder, to link just that addon.
 
+  The kit's development addons (devaddons\: !WowKitErrors, which records in-game Lua errors and blocked actions for
+  Get-WowScriptErrors.ps1) are linked too, every run, so errors are captured whenever the kit is in use.
+  -NoDevAddons leaves them out. -Remove with a folder of addons unlinks them as well; with one addon, it leaves them.
+
 .EXAMPLE
   .\Link-WowAddons.ps1 -WhatIf                          # show what would change
   .\Link-WowAddons.ps1                                  # link everything in the repo's wowaddons\
@@ -37,6 +41,7 @@ param(
 	[string[]]$Flavor,
 	[string]$Root,
 	[switch]$Remove,
+	[switch]$NoDevAddons,
 	[switch]$PassThru
 )
 
@@ -64,24 +69,36 @@ function Get-AddonToc($dir) {
 	})
 }
 # -Path may also be a single addon folder: then link just that one.
-$candidates = if ((Get-AddonToc (Get-Item -LiteralPath $Path)).Count) { @(Get-Item -LiteralPath $Path) } else { @(Get-ChildItem -LiteralPath $Path -Directory) }
-$addons = foreach ($dir in $candidates) {
-	$tocs = Get-AddonToc $dir
-	if (-not $tocs.Count) { continue }
-	# Flavors the TOCs target, from "## Interface: 16001, 120100" (and "## Interface-Xyz:" lines).
-	$targets = @(foreach ($t in $tocs) {
-		foreach ($line in (Get-Content -LiteralPath $t.FullName -TotalCount 40)) {
-			if ($line -match '^\s*##\s*Interface(-\w+)?\s*:\s*(.+)$') {
-				foreach ($n in ($Matches[2] -split ',')) {
-					if ($n.Trim() -match '^\d{5,6}$') { Get-WowFlavorForInterface ([int]$n.Trim()) }
+$single = (Get-AddonToc (Get-Item -LiteralPath $Path)).Count -gt 0
+$candidates = if ($single) { @(Get-Item -LiteralPath $Path) } else { @(Get-ChildItem -LiteralPath $Path -Directory) }
+function Get-AddonInfo($dirs) {
+	foreach ($dir in $dirs) {
+		$tocs = Get-AddonToc $dir
+		if (-not $tocs.Count) { continue }
+		# Flavors the TOCs target, from "## Interface: 16001, 120100" (and "## Interface-Xyz:" lines).
+		$targets = @(foreach ($t in $tocs) {
+			foreach ($line in (Get-Content -LiteralPath $t.FullName -TotalCount 40)) {
+				if ($line -match '^\s*##\s*Interface(-\w+)?\s*:\s*(.+)$') {
+					foreach ($n in ($Matches[2] -split ',')) {
+						if ($n.Trim() -match '^\d{5,6}$') { Get-WowFlavorForInterface ([int]$n.Trim()) }
+					}
 				}
 			}
-		}
-	}) | Where-Object { $_ } | Select-Object -Unique
-	[pscustomobject]@{ Name = $dir.Name; Path = $dir.FullName; Flavors = @($targets) }
+		}) | Where-Object { $_ } | Select-Object -Unique
+		[pscustomobject]@{ Name = $dir.Name; Path = $dir.FullName; Flavors = @($targets) }
+	}
 }
-$addons = @($addons)
+$addons = @(Get-AddonInfo $candidates)
 if (-not $addons.Count) { throw "No addon folders (<Folder>\<Folder>.toc) in $Path." }
+
+# The kit's development addons (devaddons\, e.g. !WowKitErrors, the error recorder Get-WowScriptErrors.ps1 reads) go
+# in with every link, so in-game errors are always captured. -Remove of one addon leaves them; of a folder, takes them out.
+$devDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'devaddons'
+if (-not $NoDevAddons -and -not ($Remove -and $single) -and (Test-Path -LiteralPath $devDir)) {
+	foreach ($dev in (Get-AddonInfo @(Get-ChildItem -LiteralPath $devDir -Directory))) {
+		if ($addons.Name -notcontains $dev.Name) { $dev | Add-Member Dev $true; $addons += $dev }
+	}
+}
 
 # --- The clients to link into ---
 if (-not $Root) { $Root = Get-WowRoot }
@@ -103,6 +120,7 @@ if ($Flavor) {
 # --- Link (or unlink) each addon in each client ---
 $results = New-Object System.Collections.Generic.List[object]
 function Add-Result($client, $addon, [string]$status, [string]$detail = '') {
+	if ($addon.Dev) { $detail = ('kit error recorder; ' + $detail).TrimEnd(' ', ';') }
 	$results.Add([pscustomobject]@{ Client = $client.Folder; Flavor = $client.Flavor; Addon = $addon.Name; Status = $status; Detail = $detail })
 }
 

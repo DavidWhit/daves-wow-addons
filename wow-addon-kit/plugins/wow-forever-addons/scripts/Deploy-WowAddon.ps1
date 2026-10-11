@@ -37,6 +37,15 @@ if (-not $AddOnsPath) {
 	if (-not $client) { throw "No installed $Flavor client found. Run Find-WowInstall.ps1, or pass -AddOnsPath." }
 	$AddOnsPath = $client.AddOns
 }
+# The kit's error recorder goes in alongside, so Get-WowScriptErrors.ps1 has something to read.
+function Add-ErrorRecorder {
+	if (-not $client -or $WhatIfPreference) { return }
+	try {
+		& (Join-Path $PSScriptRoot 'Link-WowAddons.ps1') -Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'devaddons\!WowKitErrors') -Flavor $Flavor 6>$null | Out-Null
+		Write-Host "Kit error recorder (!WowKitErrors) linked in $($client.Folder) too: it records Lua errors for Get-WowScriptErrors.ps1."
+	} catch { Write-Warning "Could not link the kit's error recorder (!WowKitErrors): $($_.Exception.Message)" }
+}
+
 New-Item -ItemType Directory -Force -Path $AddOnsPath | Out-Null
 $target = Join-Path $AddOnsPath $name
 
@@ -46,7 +55,7 @@ if (Test-Path -LiteralPath $target) {
 		if ($Remove -or $Mode -eq 'Copy' -or ($current -and -not (Test-WowSamePath $current $src))) {
 			if ($PSCmdlet.ShouldProcess($target, 'Unlink junction')) { Remove-WowLink $target; Write-Host "Unlinked $target" }
 		} elseif ($Mode -eq 'Link') {
-			Write-Host "Already linked: $target -> $src" -ForegroundColor Green; exit 0
+			Write-Host "Already linked: $target -> $src" -ForegroundColor Green; Add-ErrorRecorder; exit 0
 		}
 	} elseif ($Remove) {
 		throw "$target is a real folder, not a link made by this script; not removing it."
@@ -75,5 +84,6 @@ if ($Mode -eq 'Link') {
 	Set-Content -Path (Join-Path $target '.deployed-by-wow-addon-kit') -Value (Get-Date -Format s)
 	Write-Host "Copied $src -> $target" -ForegroundColor Green
 }
+Add-ErrorRecorder
 Write-Host 'In game: /reload picks up Lua/XML edits. New files, TOC changes and new textures need a full client restart.'
 exit 0   # robocopy's 1-7 "success" codes would otherwise leak out as failures

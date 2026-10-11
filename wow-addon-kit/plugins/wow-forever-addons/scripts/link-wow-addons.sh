@@ -11,8 +11,12 @@
 #   - a real folder is moved to <client>/Interface/AddOns.backup/<Name>-<timestamp> first.
 #   --remove deletes only symlinks that point at these addons; nothing else is touched.
 #
+# The kit's development addons (devaddons/: !WowKitErrors, which records in-game Lua errors for
+# Get-WowScriptErrors.ps1) are linked too, every run; --no-dev-addons leaves them out. --remove with
+# a folder of addons unlinks them as well; with one addon, it leaves them.
+#
 # Usage:
-#   bash link-wow-addons.sh [--dry-run] [--remove] [--wow-root DIR] [ADDONS_DIR]
+#   bash link-wow-addons.sh [--dry-run] [--remove] [--no-dev-addons] [--wow-root DIR] [ADDONS_DIR]
 #   WOW_ROOT="/Volumes/Games/World of Warcraft" bash link-wow-addons.sh
 #
 # ADDONS_DIR defaults to the nearest "wowaddons" folder walking up from the current folder,
@@ -23,6 +27,7 @@ set -eu
 
 dry_run=0
 remove=0
+no_dev=0
 wow_root="${WOW_ROOT:-/Applications/World of Warcraft}"
 addons_dir=""
 
@@ -33,6 +38,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		-n|--dry-run) dry_run=1 ;;
 		--remove) remove=1 ;;
+		--no-dev-addons) no_dev=1 ;;
 		--wow-root) [ $# -ge 2 ] || { echo "--wow-root needs a folder" >&2; exit 2; }; wow_root="$2"; shift ;;
 		-h|--help) usage; exit 0 ;;
 		-*) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -52,8 +58,8 @@ find_up() {
 	return 1
 }
 
+script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 if [ -z "$addons_dir" ]; then
-	script_dir="$(cd "$(dirname "$0")" && pwd -P)"
 	addons_dir="$(find_up "$(pwd -P)" || find_up "$script_dir" || true)"
 	if [ -z "$addons_dir" ]; then
 		echo "No wowaddons folder found above the current folder or this script. Pass the addons folder as an argument." >&2
@@ -88,7 +94,16 @@ run() {
 }
 
 # ADDONS_DIR may also be one addon folder: then link just that one.
-if is_addon "$addons_dir"; then srcs=("$addons_dir/"); else srcs=("$addons_dir"/*/); fi
+if is_addon "$addons_dir"; then single=1; srcs=("$addons_dir/"); else single=0; srcs=("$addons_dir"/*/); fi
+# ...plus the kit's development addons (see the top), unless this is --remove of one addon
+dev_dir="$script_dir/../devaddons"
+if [ "$no_dev" -eq 0 ] && ! { [ "$remove" -eq 1 ] && [ "$single" -eq 1 ]; } && [ -d "$dev_dir" ]; then
+	dev_dir="$(cd "$dev_dir" && pwd -P)"
+	for d in "$dev_dir"/*/; do
+		[ -d "$d" ] || continue
+		srcs+=("$d")
+	done
+fi
 
 stamp="$(date +%Y%m%d-%H%M%S)"
 rows=""

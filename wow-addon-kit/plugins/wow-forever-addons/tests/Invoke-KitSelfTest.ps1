@@ -2,7 +2,8 @@
 .SYNOPSIS
   Self-test for the kit: proves the validator catches every planted problem in
   fixtures\BrokenAddon, that a freshly scaffolded addon comes out clean, and that
-  Link-WowAddons.ps1 links, re-points, backs up and unlinks correctly in a fake install.
+  Link-WowAddons.ps1 links, re-points, backs up and unlinks correctly in a fake install, bringing the kit's
+  error recorder (devaddons\!WowKitErrors) along every time.
 
 .EXAMPLE
   .\tests\Invoke-KitSelfTest.ps1
@@ -139,15 +140,20 @@ try {
 	Assert ((St '_retail_' 'RetailOnly') -eq 'Relinked' -and (Test-WowSamePath (Get-WowLinkTarget "$rAdd\RetailOnly") "$src\RetailOnly") -and (Test-Path $elsewhere)) 'stale link re-pointed, old target kept'
 	$bak = @(Get-ChildItem (Join-Path $wow '_classic_beta_\Interface\AddOns.backup') -Directory -Filter 'Both-*' -ErrorAction SilentlyContinue)
 	Assert ((Test-WowLink "$fAdd\Both") -and $bak.Count -eq 1 -and (Test-Path (Join-Path $bak[0].FullName 'marker.txt'))) 'real folder moved to AddOns.backup, then linked'
+	Assert ((St '_classic_beta_' '!WowKitErrors') -eq 'Linked' -and (St '_retail_' '!WowKitErrors') -eq 'Linked' -and (Test-Path "$fAdd\!WowKitErrors\!WowKitErrors.toc")) 'kit error recorder linked along with the addons'
 
 	$res = @(& $link -Path $src -Root $wow -PassThru 6>$null)
-	Assert (@($res | Where-Object Status -eq 'AlreadyLinked').Count -eq 4 -and @($res | Where-Object Status -eq 'Skipped').Count -eq 2) 'second run leaves correct links alone'
+	Assert (@($res | Where-Object Status -eq 'AlreadyLinked').Count -eq 6 -and @($res | Where-Object Status -eq 'Skipped').Count -eq 2) 'second run leaves correct links alone'
 
 	$res = @(& $link -Path "$src\Both" -Root $wow -Remove -PassThru 6>$null)
-	Assert ($res.Count -eq 2 -and @($res | Where-Object Status -eq 'Unlinked').Count -eq 2 -and (Test-Path "$fAdd\ForeverOnly")) '-Path <one addon> touches only that addon'
+	Assert ($res.Count -eq 2 -and @($res | Where-Object Status -eq 'Unlinked').Count -eq 2 -and (Test-Path "$fAdd\ForeverOnly") -and (Test-WowLink "$fAdd\!WowKitErrors")) '-Path <one addon> touches only that addon'
+
+	$res = @(& $link -Path $src -Root $wow -Remove -NoDevAddons -PassThru 6>$null)
+	Assert (@($res | Where-Object Status -eq 'Unlinked').Count -eq 2 -and -not (Test-Path "$fAdd\ForeverOnly") -and -not (Test-Path "$fAdd\Both") -and (Test-Path "$src\Both\Both.toc")) '-Remove unlinks, sources intact'
+	Assert (Test-WowLink "$fAdd\!WowKitErrors") '-NoDevAddons leaves the error recorder alone'
 
 	$res = @(& $link -Path $src -Root $wow -Remove -PassThru 6>$null)
-	Assert (@($res | Where-Object Status -eq 'Unlinked').Count -eq 2 -and -not (Test-Path "$fAdd\ForeverOnly") -and -not (Test-Path "$fAdd\Both") -and (Test-Path "$src\Both\Both.toc")) '-Remove unlinks, sources intact'
+	Assert (@($res | Where-Object Status -eq 'Unlinked').Count -eq 2 -and -not (Test-Path "$fAdd\!WowKitErrors") -and -not (Test-Path "$rAdd\!WowKitErrors") -and (Test-Path "$root\devaddons\!WowKitErrors\!WowKitErrors.toc")) '-Remove of the folder unlinks the error recorder too, its source intact'
 } finally {
 	# Unlink before deleting: Remove-Item -Recurse in 5.1 would follow a junction into its target.
 	foreach ($a in $fAdd, $rAdd) { Get-ChildItem -LiteralPath $a -Force -ErrorAction SilentlyContinue | Where-Object { Test-WowLink $_.FullName } | ForEach-Object { Remove-WowLink $_.FullName } }

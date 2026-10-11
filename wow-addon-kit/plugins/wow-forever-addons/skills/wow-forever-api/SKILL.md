@@ -7,6 +7,10 @@ description: Facts and rules for writing World of Warcraft addon Lua that works 
 
 WoW: Forever runs on the **modern (Mainline) client** with the **same addon API and restrictions as Retail Midnight (12.x)**, no lighter version. Code written for Classic Era's old API will not work there unchanged.
 
+## Something broke in game? Read the evidence first
+
+For a Lua error, "action blocked", "only available to the Blizzard UI" or odd behaviour, read what the game recorded **before** the code. Start with the recorded addon errors (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.ps1 -Addon <name>`). If nothing was recorded, read the taint log (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1 -Addon <name>`). Then read the code. The full steps are in step 0 of the **wow-addon-test** skill (`${CLAUDE_PLUGIN_ROOT}/skills/wow-addon-test/SKILL.md`). Follow them.
+
 ## Rule zero: look it up, don't recall it
 
 Your training data predates Forever, and APIs move every patch. Before you use or recommend any API, check it against the local index built from Blizzard's own client source:
@@ -22,7 +26,7 @@ If the index is missing or older than a patch, rebuild it (about one minute): `s
 For behaviour details, read Blizzard's own code. A local copy of the `forever` branch lives in the plugin at `data/ui-source/forever/Interface/` (every .lua, .xml and .toc). Look a name up in `data/ui-source/forever/INDEX.tsv` first (`name<TAB>kind<TAB>path:line`; kinds: function, method, template, frame), then read that file at that line:
 
 ```powershell
-Select-String -Path "C:/Users/David/Documents/daves-wow-addons/wow-addon-kit/plugins/wow-forever-addons/data/ui-source/forever/INDEX.tsv" -Pattern "^ContainerFrameItemButton_OnClick`t"
+Select-String -Path "${CLAUDE_PLUGIN_ROOT}/data/ui-source/forever/INDEX.tsv" -Pattern "^ContainerFrameItemButton_OnClick`t"
 ```
 
 On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Vanilla`/`TBC`/`Wrath`/`Cata`/`Mists` copies don't (the addon's TOC decides). If the folder is missing or older than the installed build (`SOURCE.txt` has the commit and date), run `scripts/Update-WowUiSource.ps1` (about a minute). Also see the API pages on https://warcraft.wiki.gg. See [sources.md](sources.md) for what each source is good for.

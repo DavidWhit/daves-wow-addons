@@ -87,7 +87,7 @@ Once the feature code is written, run the **wow-addon-test** skill on the addon,
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Link-WowAddons.ps1" -Path "<addon folder>"
 ```
 
-This links the addon into every installed client its TOC targets (so a Forever + Retail addon lands in both): a junction in each client's `Interface\AddOns`, so later edits are live after `/reload`. A real folder of the same name is moved to `AddOns.backup` first. For one client only, use `Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever` instead (it refuses to replace a real folder without `-Force`). On a Mac, run the same script with `pwsh`, or `bash .../scripts/link-wow-addons.sh "<addon folder>"`. If the user answered "No" to linking, skip this and tell them the command. If linking was never asked, **ask first**, since it writes into the game folder.
+This links the addon into every installed client its TOC targets (so a Forever + Retail addon lands in both): a junction in each client's `Interface\AddOns`, so later edits are live after `/reload`. A real folder of the same name is moved to `AddOns.backup` first. It also links the kit's error recorder (`devaddons/!WowKitErrors`), so the addon's in-game errors are recorded for **wow-addon-test** from the first run. For one client only, use `Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever` instead (it refuses to replace a real folder without `-Force`). On a Mac, run the same script with `pwsh`, or `bash .../scripts/link-wow-addons.sh "<addon folder>"`. If the user answered "No" to linking, skip this and tell them the command. If linking was never asked, **ask first**, since it writes into the game folder.
 
 ## 5. Tell the user
 

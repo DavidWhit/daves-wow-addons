@@ -10,9 +10,15 @@ Arguments: `$ARGUMENTS` (addon folder and optional flavors, e.g. `C:\dev\CampTra
 
 ## 0. Bug reports: start from the game's own evidence
 
-When the user reports something going wrong in game ("action blocked", "only available to the Blizzard UI", an error, odd behaviour, "it doesn't work"), read what the client recorded **before** reading addon code or forming a theory. Run both, in this order:
+This is the kit's one full statement of the debugging order. The other skills, the reviewer agent and the repo's CLAUDE.md only point here.
 
-**a. Script errors first.**
+When the user reports something going wrong in game ("action blocked", "only available to the Blizzard UI", an error, odd behaviour, "it doesn't work"), read what the game recorded **before** reading addon code or forming a theory:
+
+1. **The recorded addon errors** (a, below). A Lua error's stack leads straight to the line in the code.
+2. **The taint log** (b), if nothing was recorded (no recorder file yet, or no entries for this addon), or the entry is `blocked` / `forbidden`.
+3. **Then the code.**
+
+**a. Recorded addon errors first.**
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.ps1" -Addon <addon folder name>
@@ -23,10 +29,10 @@ The client only shows Lua errors in a pop-up (`/console scriptErrors 1`) and kee
 - **Error:** the first stack line inside the addon is where it failed. Read that file:line before anything else, and explain the failure from the message and the stack.
 - **Repeats** (`x7`) usually mean an OnUpdate or an event handler.
 - **`blocked` / `forbidden`:** go on to the taint log for the cause.
-- **"Not installed":** link it once with the command the script prints (`Link-WowAddons.ps1 -Path <kit>/devaddons/!WowKitErrors`). Then ask the user to restart the client fully, reproduce, and `/reload`.
+- **"Was not installed ... Linking it now":** the script has just linked the recorder (the kit's `Link-WowAddons.ps1` and `Deploy-WowAddon.ps1` link it too, every run). Ask the user to restart the client fully, reproduce, and `/reload`, then run the script again. If it says the link failed, run the command it prints and fix what that reports.
 - **No entries:** the session shown is the newest with entries. Check its start time against when the user reproduced the problem. `-Session 0` shows all sessions.
 
-**b. Then the taint log:**
+**b. Then the taint log** (nothing recorded, or `blocked` / `forbidden`):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1" -Addon <addon folder name>
@@ -93,7 +99,7 @@ Fixing the validator's own errors in step 1 doesn't need to wait. Design changes
 
 1. **First load / TOC or new-file changes:** fully restart the client. Otherwise `/reload`.
 2. At character select, open **AddOns**: the addon should be listed and not marked "out of date".
-3. In game, turn on errors: `/console scriptErrors 1`. The kit's `!WowKitErrors` (linked from `devaddons/`) records them too. After reproducing, `/reload`, then run `Get-WowScriptErrors.ps1 -Addon <name>`.
+3. In game, turn on errors: `/console scriptErrors 1`. The kit's `!WowKitErrors` records them too: every kit link installs it, and it must be enabled in the AddOns list. After reproducing, `/reload`, then run `Get-WowScriptErrors.ps1 -Addon <name>`.
 4. Exercise every feature, then repeat **in combat and in an instance**. For an Edit Mode addon, open Edit Mode and click each of its frames, plus one of Blizzard's: only one settings dialog should be open at a time, none should cover its frame or Edit Mode's window, every number should sit inside the dialog at its widest value, and Escape should close it. With Snap ticked, drag each frame slowly past grid lines, the screen centre and a Blizzard frame. It should move freely and pull on only within a few pixels, the same as Blizzard's own frames. For a cast bar, check a channel (e.g. Blizzard) ending normally in combat: it must not show as interrupted. Secret values and addon-comms lockdown only show up there.
 5. Taint: `/console taintLog 1`, reproduce, `/reload`, then read `Logs\taint.log` in the client folder (e.g. `_classic_beta_\Logs`). Lines naming the addon mean it touched secure code.
 6. Useful commands: `/dump <expr>` prints a value, `/fstack` identifies the frame under the mouse, `/etrace` shows live events, `/run <lua>` runs a line.

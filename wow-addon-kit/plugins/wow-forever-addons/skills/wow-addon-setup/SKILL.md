@@ -38,7 +38,7 @@ The Forever beta installs as `_classic_beta_`. The launch folder name isn't conf
 
 ## 3. Link every addon after cloning or pulling (`link-all`)
 
-Use this on a fresh clone of the addons repo, and after a pull that added addons. `Link-WowAddons.ps1` links every folder in the repo's `wowaddons/` that holds a `<Folder>.toc` (or `<Folder>_<Flavor>.toc`) into each installed client whose game the TOC's `## Interface` lists: a junction on Windows, a symlink on a Mac. Run `-WhatIf` first and show the user the table.
+Use this on a fresh clone of the addons repo, and after a pull that added addons. `Link-WowAddons.ps1` links every folder in the repo's `wowaddons/` that holds a `<Folder>.toc` (or `<Folder>_<Flavor>.toc`) into each installed client whose game the TOC's `## Interface` lists: a junction on Windows, a symlink on a Mac. Run `-WhatIf` first and show the user the table. Every run also links the kit's error recorder `devaddons/!WowKitErrors` into the same clients (shown as "kit error recorder"), so in-game Lua errors and blocked actions are always on file for `Get-WowScriptErrors.ps1`. `-NoDevAddons` leaves it out.
 
 ```powershell
 Link-WowAddons.ps1 -WhatIf                 # what would change
@@ -51,7 +51,7 @@ On a Mac, from the repo root:
 
 ```sh
 pwsh wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.ps1     # with PowerShell 7
-bash wow-addon-kit/plugins/wow-forever-addons/scripts/link-wow-addons.sh     # without; --dry-run, --remove, --wow-root DIR
+bash wow-addon-kit/plugins/wow-forever-addons/scripts/link-wow-addons.sh     # without; --dry-run, --remove, --no-dev-addons, --wow-root DIR
 ```
 
 The shell script doesn't read TOCs: it links every addon into every `_*_` client folder. Both scripts leave a correct link alone, re-point a link that points elsewhere, and move a real folder to `Interface/AddOns.backup/<Name>-<timestamp>` before linking. `-Flavor all` links every addon into every client. When run from `${CLAUDE_PLUGIN_ROOT}` outside the repo, pass `-Path`.
@@ -63,6 +63,8 @@ Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever               # junct
 Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever -Mode Copy    # release-like copy without dev files
 Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever -Remove       # unlink (never deletes your source)
 ```
+
+Linking or copying also links the kit's error recorder (`!WowKitErrors`) into that client.
 
 Safety rules built into both link scripts, which you should keep when doing anything by hand:
 - They never delete a real folder in `AddOns`. They move it to `Interface\AddOns.backup\<Name>-<timestamp>` (Deploy only with `-Force`).

@@ -17,7 +17,8 @@
 
   It also scans the client's Logs\*.log for "Lua Error" lines, in case the client wrote any itself.
 
-  If the addon isn't installed yet, it says how: link it once, restart the client fully, reproduce, /reload.
+  If the recorder isn't installed in the client yet, it links it (Link-WowAddons.ps1 does the same with every link),
+  then says what's left: restart the client fully, reproduce, /reload.
 
 .EXAMPLE
   .\Get-WowScriptErrors.ps1                       # Forever client, the last 15 entries
@@ -131,7 +132,19 @@ public static class LuaData {
 # ---------------------------------------------------------------------------------------------------------------------
 # 1. !WowKitErrors's SavedVariables (the newest across accounts)
 # ---------------------------------------------------------------------------------------------------------------------
-$linked = Test-Path -LiteralPath (Join-Path $clientDir 'Interface\AddOns\!WowKitErrors\!WowKitErrors.toc')
+$devToc = Join-Path $clientDir 'Interface\AddOns\!WowKitErrors\!WowKitErrors.toc'
+if (-not $File -and -not (Test-Path -LiteralPath $devToc)) {
+	# Not in this client yet: put it in now, so the next session is recorded.
+	Write-Host 'The kit''s error recorder (!WowKitErrors) was not installed in this client. Linking it now:'
+	try { & (Join-Path $PSScriptRoot 'Link-WowAddons.ps1') -Path $devAddon -Flavor $Flavor -Root $Root 6>$null | Out-Null } catch { Write-Host "  $($_.Exception.Message)" }
+	if (Test-Path -LiteralPath $devToc) {
+		Write-Host "  linked into $($client.Folder)\Interface\AddOns\!WowKitErrors" -ForegroundColor Green
+		Write-Host '  Fully restart the client (a new addon), reproduce the problem, then /reload so it is written.'
+	} else {
+		Write-Host '  the link failed. Run it by hand to see why:' -ForegroundColor Red
+		Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\Link-WowAddons.ps1`" -Path `"$devAddon`" -Flavor $Flavor"
+	}
+}
 $files = if ($File) { @(Get-Item -LiteralPath $File) } else {
 	@(Get-ChildItem -LiteralPath (Join-Path $clientDir 'WTF\Account') -Recurse -Filter '!WowKitErrors.lua' -ErrorAction SilentlyContinue |
 		Where-Object { $_.DirectoryName -like '*SavedVariables' } | Sort-Object LastWriteTime -Descending)
@@ -139,13 +152,7 @@ $files = if ($File) { @(Get-Item -LiteralPath $File) } else {
 $entries = @()
 if ($files.Count -eq 0) {
 	Write-Host 'No recorded script errors yet.' -ForegroundColor Yellow
-	if (-not $linked) {
-		Write-Host 'The kit''s error recorder (!WowKitErrors) is not installed in this client. Link it once:'
-		Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\Link-WowAddons.ps1`" -Path `"$devAddon`" -Flavor $Flavor"
-		Write-Host 'then fully restart the client (a new addon), reproduce the problem, and /reload so it is written.'
-	} else {
-		Write-Host '!WowKitErrors is installed. In game: make sure it is enabled in the AddOns list, reproduce the problem, then /reload (or log out) so its file is written.'
-	}
+	Write-Host 'In game: make sure WowKit Error Log is enabled in the AddOns list, reproduce the problem, then /reload (or log out) so its file is written.'
 } else {
 	$svFile = $files[0]
 	Write-Host ("Script errors: {0} (written {1})" -f $svFile.FullName, $svFile.LastWriteTime.ToString('yyyy-MM-dd HH:mm'))
