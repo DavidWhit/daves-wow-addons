@@ -249,7 +249,7 @@ end
 ---------------------------------------------------------------------------
 -- Scanning
 ---------------------------------------------------------------------------
-local function ScanBag(bag)
+local function SlotList(bag)
 	local list = buttons[bag]
 	if not list then
 		local h = CreateFrame("Frame", nil, content)
@@ -258,11 +258,31 @@ local function ScanBag(bag)
 		list = { n = 0 }
 		buttons[bag] = list
 	end
-	local n = GetNumSlots(bag) or 0
+	return list
+end
+
+-- Item buttons are made ahead, outside combat, for every slot of every bag we show (BetterBags does the same): a
+-- ContainerFrameItemButtonTemplate button created during combat runs its clicks tainted, and using an item from it in
+-- combat is blocked ("daves_sack tried to call UseContainerItem()"). That happened when the first opening after a
+-- /reload was in combat. So scanning never creates one in combat; a slot without a button waits for combat to end.
+local missedInCombat = false
+local function MakeButtons(bag)
+	if InCombatLockdown() then return end
+	local list = SlotList(bag)
+	for slot = 1, GetNumSlots(bag) or 0 do
+		if not list[slot] then list[slot] = NewButton(bag, slot) end
+	end
+end
+
+local function ScanBag(bag)
+	local list = SlotList(bag)
+	MakeButtons(bag)
+	-- Buttons are made in slot order, so any missing (combat) are the last ones: show the ones that exist.
+	local n = math.min(GetNumSlots(bag) or 0, #list)
+	if n < (GetNumSlots(bag) or 0) then missedInCombat = true end
 	if n ~= list.n then layoutDirty = true end
 	for slot = 1, n do
 		local b = list[slot]
-		if not b then b = NewButton(bag, slot); list[slot] = b end
 		local rec = b.fbRec
 		if ReadSlot(bag, slot, rec) or rec.recat then
 			rec.recat = nil
@@ -1544,10 +1564,7 @@ local handlers = {
 	BAG_UPDATE_COOLDOWN = function() cdDirty = true; Schedule() end,
 	PLAYER_MONEY = function() if frame:IsShown() then UpdateMoney() end end,
 	CURRENCY_DISPLAY_UPDATE = function() ns.MarkCurrencies() end,
-	BAG_CONTAINER_UPDATE = function() dirtyAll = true; Schedule() end,
-	PLAYER_ENTERING_WORLD = function() dirtyAll = true; Schedule() end,
 }
-handlers.BAG_SLOT_FLAGS_UPDATED = handlers.BAG_CONTAINER_UPDATE
 
 -- Item info arrived for something we had to file as Misc: re-check it.
 handlers.GET_ITEM_INFO_RECEIVED = function(itemID)
@@ -1571,9 +1588,32 @@ local function RescaleSoon()
 end
 handlers.UI_SCALE_CHANGED = RescaleSoon
 handlers.DISPLAY_SIZE_CHANGED = RescaleSoon
--- the secure close button leaves the window for combat, so the window can still be shown and hidden (see Build)
-handlers.PLAYER_REGEN_DISABLED = function() if ns.CloseButtonForCombat then ns.CloseButtonForCombat(true) end end
-handlers.PLAYER_REGEN_ENABLED = function() if ns.CloseButtonForCombat then ns.CloseButtonForCombat(false) end end
+-- Outside combat: a button for every slot of every bag we show, so none is made in combat (see MakeButtons).
+-- resync re-reads which bags we show first (they changed); a scan that met a slot without a button rescans.
+local function PrepareButtons(resync)
+	if InCombatLockdown() then return end
+	if resync then SyncBagList() end
+	for bag in pairs(inList) do MakeButtons(bag) end
+	if missedInCombat then
+		missedInCombat = false
+		for bag in pairs(inList) do dirty[bag] = true end
+		Schedule()
+	end
+end
+handlers.BAG_CONTAINER_UPDATE = function() dirtyAll = true; PrepareButtons(true); Schedule() end
+handlers.BAG_SLOT_FLAGS_UPDATED = handlers.BAG_CONTAINER_UPDATE
+handlers.PLAYER_ENTERING_WORLD = handlers.BAG_CONTAINER_UPDATE   -- bag sizes are known by now
+
+-- Combat: the secure close button leaves the window, so the window can still be shown and hidden (see Build), and
+-- every item button is made beforehand (PLAYER_REGEN_DISABLED comes just before lockdown).
+handlers.PLAYER_REGEN_DISABLED = function()
+	if ns.CloseButtonForCombat then ns.CloseButtonForCombat(true) end
+	PrepareButtons()
+end
+handlers.PLAYER_REGEN_ENABLED = function()
+	if ns.CloseButtonForCombat then ns.CloseButtonForCombat(false) end
+	PrepareButtons()
+end
 
 events:SetScript("OnEvent", function(_, event, ...) handlers[event](...) end)
 
@@ -1583,6 +1623,7 @@ function ns.OnLoad()
 	ns.ApplyScale()
 	ns.db.viewHeight = ns.ClampViewHeight(ns.db.viewHeight)   -- saved sizes obey the limits too
 	SyncBagList()
+	PrepareButtons()
 	TakeOverBlizzardBags()
 
 	-- Split stacks: once you pick the amount, the new stack goes straight into
