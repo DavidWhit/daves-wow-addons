@@ -42,7 +42,7 @@
 <script>
 window.onerror = (m, src, line) => { document.getElementById('errors').textContent += `${m} (${(src || '').split('/').pop()}:${line})\n`; };
 const CONCEPTS = [];
-// The look being designed now; ?only=fa-b,fa-c shows a selection. A look built into the add-on leaves this page:
+// The look being designed now (none at the moment); ?only=a-b,a-c shows a selection. A look built into the add-on leaves this page:
 // compare new looks with the add-on's code, not with old concepts.
 
 // ------------------------------------------------------------------ helpers for concept files
@@ -230,7 +230,6 @@ function start() {
 }
 </script>
 <!--CONCEPTS-->
-<script src="firstaid.js"></script>
 <!--/CONCEPTS-->
 <script>start();</script>
 </body>

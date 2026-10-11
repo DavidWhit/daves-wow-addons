@@ -10,9 +10,9 @@ local RGB, PlaceIn, clamp = I.RGB, I.PlaceIn, I.clamp
 local content, cfg, W, H, clock = nil, nil, 300, 26, 0   -- the core's state, copied in by sync
 
 ---------------------------------------------------------------------------
--- First Aid (the approved concept, tools/concepts/firstaid.js: C for casts, D for channels). The wound is the content's
--- layers: crimson running down the bar (fa_wound scrolling) under a wet shine that holds still (fa_gloss), pulsing
--- brighter on a heartbeat. Broad bandage turns, about one and a half bar heights wide, wrap round it at the cast edge
+-- First Aid (built from its approved concept, C for casts and D for channels; the concept is in git history). The
+-- wound is the content's layers: crimson running down the bar (fa_wound scrolling) under a wet shine that holds still
+-- (fa_gloss), pulsing brighter on a heartbeat. Broad bandage turns wrap round it at the cast edge
 -- (the content is the whole bar, wholeBar: the turns lean across the fill edge, so they show the progress themselves).
 -- Every cast takes a random wrap (spiral, figure-eight, reverse spiral with a fold in each turn, spica, circular), never
 -- the last one, a random lean and a random way round; the bandage is always the same. The band is a seventh of the bar's

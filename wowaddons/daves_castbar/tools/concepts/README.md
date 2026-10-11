@@ -9,14 +9,13 @@ code is the reference for it: compare a new look with the other bars' code (`Ele
 
 | Page | What it is |
 | --- | --- |
-| `index.html` | The concept harness. It shows every concept here; `?only=fa-b,fa-c` a selection, `&hold=60` freezes the bars at 60 %, `&h=36&w=420` sets the size, `&sim=2` pre-runs two seconds (for screenshots). `&style=borderless` (or the Style switch) shows the bars without their frame |
-| `shot.ps1` | Headless Chrome screenshot of `index.html` with any JS errors reported: `shot.ps1 -Only fa -Hold 60 -H 56 -W 560 -Out x.png -Extra "wrap=spica"` |
+| `index.html` | The concept harness. It shows every concept here; `?only=key-b,key-c` a selection, `&hold=60` freezes the bars at 60 %, `&h=36&w=420` sets the size, `&sim=2` pre-runs two seconds (for screenshots). `&style=borderless` (or the Style switch) shows the bars without their frame |
+| `shot.ps1` | Headless Chrome screenshot of `index.html` with any JS errors reported: `shot.ps1 -Only key -Hold 60 -H 56 -W 560 -Out x.png -Extra "style=borderless"` |
 
 ## In progress
 
-| Look | Variants | What it shows |
-| --- | --- | --- |
-| First Aid (`firstaid.js`): built into the add-on (0.5.0) as C for casts and D for channels, with a random wrap each cast, one bandage (linen) and the band a seventh of the bar's length wide; this concept goes once the add-on's look is approved in game | A wrapped turns, B bandage roll, C soaked through, D applying a bandage (channel) | An open crimson wound bleeding ahead of the cast (running blood, a heartbeat pulse, beads dripping off the bottom); broad bandage turns, about one and a half bar heights wide, wrap round it at the cast edge and blood seeps through each after it is laid. Each cast changes the wrap (spiral, figure-eight, reverse spiral, spica, circular), its lean, which way the turns come round, and the cloth (linen, wool, silk, mageweave, runecloth). The roll is clipped to the bar. Page keys `&wrap=spica`, `&cloth=0..4`. All four variants are kept for now |
+None. First Aid, the last look designed here, was built into the add-on in 0.5.0 and its concept removed (it is in
+git history).
 
 ## Rules for a concept
 

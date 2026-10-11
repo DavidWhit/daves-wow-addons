@@ -2965,7 +2965,7 @@ public static class CastbarArt
 	// edge_h: a left-to-right fade over the texture's width, used as a soft gradient (skinning's shade ahead
 	// of the roll, blacksmithing's hot edge, lightning's leading glow). No ragged edge masks: bars are framed.
 	// ================================================================ FIRST AID: the wound, the gauze, blood soaked through, the fold, the roll, drops
-	// Painted from the approved concept (tools/concepts/firstaid.js); Effects_FirstAid.lua places them.
+	// Painted from First Aid's approved concept (in git history); Effects_FirstAid.lua places them.
 	static readonly double[] FA_CRIM = { 150/255.0, 8/255.0, 24/255.0 }, FA_CRIM_D = { 74/255.0, 2/255.0, 10/255.0 }, FA_CRIM_L = { 214/255.0, 30/255.0, 44/255.0 };
 	// the bandage, as Effects_FirstAid.lua CLOTH: base, shade, how strong the weave reads, sheen (linen)
 	static readonly double[][] FA_CLOTH = {
