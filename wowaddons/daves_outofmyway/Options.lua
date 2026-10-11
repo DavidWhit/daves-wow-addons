@@ -26,7 +26,7 @@ function ns:InitOptions()
 
 	local buffs = Settings.RegisterAddOnSetting(category, ADDON .. "_showAllBuffs", "showAllBuffs", ns.db,
 		Settings.VarType.Boolean, "Show all buffs (never collapse)", true)
-	Settings.CreateCheckbox(category, buffs, "Every buff shows (up to 32) and the buff frame never collapses: turns off buff consolidation and the collapse arrow, two settings Forever's options don't show. Asks for one reload to finish. Off puts back what you had. Edit Mode's Icon Limit only sets how many buffs per row.")
+	Settings.CreateCheckbox(category, buffs, "Every buff shows (up to 32) and the buff frame never collapses: turns off buff consolidation and the collapse arrow, two settings Forever's options don't show. Takes effect at the next reload or login. Off puts back what you had. Edit Mode's Icon Limit only sets how many buffs per row.")
 	buffs:SetValueChangedCallback(function() ns.RetryBuffs() end)
 
 	-- Settings write straight into ns.db; react to changes here.

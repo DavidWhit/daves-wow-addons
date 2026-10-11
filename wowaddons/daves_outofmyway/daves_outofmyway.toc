@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: |cffd4a94eDave's|r Out Of My Way
-## Notes: Out of your way: move Blizzard's loot roll frames in Edit Mode, and show every buff with the buff frame never collapsed. (The flight-path dismount button moves in Blizzard's own Edit Mode.)
+## Notes: Out of your way: move Blizzard's loot roll frames in Edit Mode, and show every buff with the buff frame never collapsed.
 ## Author: davidwhit5
-## Version: 0.1.2
+## Version: 0.1.3
 ## SavedVariables: daves_outofmywayDB
 ## IconTexture: Interface\Icons\Ability_Rogue_Sprint
 ## AddonCompartmentFunc: daves_outofmyway_OnAddonCompartmentClick
