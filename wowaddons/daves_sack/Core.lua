@@ -71,8 +71,8 @@ end
 ---------------------------------------------------------------------------
 -- Categories (display order)
 ---------------------------------------------------------------------------
-local EQUIP, CONSUME, PROF, CAMP, REAGENT, QUEST, MISC, JUNK = 1, 2, 3, 4, 5, 6, 7, 8
-ns.CATEGORY_NAMES = { "Equipment", "Consumables", "Professions", "Camping", "Reagents", "Quest", "Miscellaneous", "Junk" }
+local EQUIP, CONSUME, PROF, CAMP, REAGENT, QUEST, KEYS, MISC, JUNK = 1, 2, 3, 4, 5, 6, 7, 8, 9
+ns.CATEGORY_NAMES = { "Equipment", "Consumables", "Professions", "Camping", "Reagents", "Quest", "Keys", "Miscellaneous", "Junk" }
 ns.NUM_CATEGORIES = #ns.CATEGORY_NAMES
 
 -- Enum.ItemClass values have been stable since vanilla.
@@ -249,6 +249,9 @@ end
 function ns.Categorize(bag, slot, rec)
 	local id = rec.id
 	if not id then return nil end
+	-- Keys shows the keyring only. A key in an ordinary bag is sorted like anything else there (Quest, Junk…):
+	-- the section is a view of the keyring, never a reason to move an item into or out of it.
+	if bag == KEYRING_CONTAINER then return KEYS end
 	if rec.quality == 0 then return JUNK end
 	if ns.GetQuestInfo then
 		local q = ns.GetQuestInfo(bag, slot)
@@ -286,7 +289,7 @@ end
 ---------------------------------------------------------------------------
 -- Saved settings
 ---------------------------------------------------------------------------
-local CATEGORY_VERSION = 3   -- bump when category numbering changes
+local CATEGORY_VERSION = 4  -- bump when category numbering changes
 local DEFAULTS = {
 	columns = 10, scale = 1, collapsed = {}, startFolded = {}, offGroups = {},   -- startFolded = "Start collapsed"
 	splitReagents = true, splitConsumables = true,

@@ -1162,7 +1162,10 @@ local function Build()
 	local park = CreateFrame("Frame"); park:Hide()
 	local function MakeSecureClose()
 		close = MakeClose("SecureActionButtonTemplate")
-		close:RegisterForClicks("AnyDown", "AnyUp")   -- the secure template acts on whichever the client's cvar says
+		-- On release, whatever the key-down cvar says (SecureActionButton_ShouldUseOnKeyDown reads this attribute
+		-- first): acting on mouse-down hid the window before the mouse-up came, and the X stayed pushed (1.7.13).
+		close:RegisterForClicks("AnyUp")
+		close:SetAttribute("useOnKeyDown", false)
 		close:SetAttribute("type", "click")
 		close:SetAttribute("clickbutton", MainMenuBarBackpackButton)
 		close:SetScript("PreClick", function(self)
@@ -1187,11 +1190,18 @@ local function Build()
 			close:ClearAllPoints(); close:SetParent(park)
 		else
 			PinClose(close)
+			close:SetButtonState("NORMAL")   -- back on a window that may already be open (B in combat): no OnShow
 		end
 		plainClose:SetShown(inCombat)
 	end
 	-- A /reload in combat: the plain button until it ends (PLAYER_REGEN_ENABLED makes the secure one).
 	if not InCombatLockdown() then ns.CloseButtonForCombat(false) end
+	-- Guard: a button whose window hides mid-click never gets its mouse-up and would stay "pushed" (its pushed
+	-- art sits a pixel or two off). Unpush on every show.
+	local function UnpushClose()
+		plainClose:SetButtonState("NORMAL")
+		if close and not InCombatLockdown() then close:SetButtonState("NORMAL") end
+	end
 
 	-- Sort (Blizzard's standard red panel button), then the search box.
 	local searchRight = -PAD
@@ -1400,6 +1410,7 @@ local function Build()
 
 	frame:SetScript("OnShow", function()
 		ns.BagSound("IG_BACKPACK_OPEN")
+		UnpushClose()
 		-- Categories ticked under "Start collapsed" in Settings open collapsed each time.
 		local collapsed, startFolded = ns.db.collapsed, ns.db.startFolded
 		for cat = 1, FREE_CAT do

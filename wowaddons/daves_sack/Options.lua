@@ -342,7 +342,7 @@ local function Build()
 	end
 	y = y - 26
 
-	-- Full width: Start collapsed (3 x 3) -------------------------------------
+	-- Full width: Start collapsed (3 columns) ---------------------------------
 	local foldY = math.min(-360, y) - 20          -- below whichever column is longer
 	Header("Start collapsed", LEFT_X, foldY, FULL_W)
 	local names = {}
