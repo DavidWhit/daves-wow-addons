@@ -93,6 +93,24 @@ Helpers (global, documented): `issecretvalue`, `canaccessvalue`, `issecrettable`
 
 **Event payloads are secret too.** `UNIT_SPELLCAST_*` events are `SecretWhenUnitSpellCastRestricted`, so in combat `interruptedBy` on `UNIT_SPELLCAST_CHANNEL_STOP` / `EMPOWER_STOP` can't be read. Don't treat "secret" as a yes. daves_castbar once showed every combat channel (Blizzard) as interrupted that way. When the deciding value is secret, decide from something you can read: here, whether the cast stopped before its scheduled end (`UnitChannelInfo` end time).
 
+### Unit frame toolbox: showing secrets without touching them (verified 2026-10-20)
+
+Looked up for daves_frames (a target frame) in `Blizzard_APIDocumentationGenerated` on the forever branch. "Tainted OK" = `SecretArguments = "AllowedWhenTainted"`: an addon may pass a secret. "Untainted only" = only Blizzard's own code may pass a secret.
+
+| Need | Use | Notes |
+| --- | --- | --- |
+| Health, power bars | `bar:SetMinMaxValues(0, UnitHealthMax(u))`, `bar:SetValue(UnitHealth(u), Enum.StatusBarInterpolation.ExponentialEaseOut)` | Interpolation enum: `Immediate`, `ExponentialEaseOut` |
+| Heal / absorb segments after the health | `UnitGetIncomingHeals(u)`, `UnitGetTotalAbsorbs(u)` (always secret) into their own bars, anchored to the health bar's fill texture edge | No maths needed; a clipping frame (`SetClipsChildren(true)`) hides overflow. `CreateUnitHealPredictionCalculator()` exists for clamped/overflow values |
+| Percent text | `UnitHealthPercent(u, false, CurveConstants.ScaleTo100)` / `UnitPowerPercent(u, type, false, CurveConstants.ScaleTo100)` → `fs:SetFormattedText("%.0f%%", pct)` | Secret result; `CurveConstants` is in `Blizzard_SharedXMLBase/CurveConstants.lua` |
+| Short numbers | `AbbreviateNumbers(UnitHealth(u))` → `fs:SetText(...)` | Tainted OK |
+| Colour or show/hide from a secret boolean | `tex:SetVertexColorFromBoolean(b, colorIfTrue, colorIfFalse)`, `region:SetAlphaFromBoolean(b, a1, a0)`, `C_CurveUtil.EvaluateColorFromBoolean` | Tainted OK. Use for `notInterruptible` from `UnitCastingInfo` |
+| Enemy cast progress | `UnitCastingInfo(u)` start/end ms (secret when restricted) straight into `SetMinMaxValues(startMs, endMs)`, then `SetValue(GetTime() * 1000)` each frame | Never subtract them. `UnitCastingDuration` returns a **secret** duration object and `StatusBar:SetTimerDuration` is untainted only, so don't rely on that pair |
+| Aura list | `C_UnitAuras.GetUnitAuraInstanceIDs(u, "HARMFUL|PLAYER")` then `GetAuraDataByAuraInstanceID(u, id)` (secret when restricted) | Icon into `tex:SetTexture(...)` (tainted OK) |
+| Aura time left | `C_UnitAuras.GetAuraDuration(u, id)` is **not** secret → `C_DurationUtil.CreateDurationTextBinding()`: `:SetFontString(fs)`, `:SetDuration(d)`, `:SetEnabled(not d:IsZero())` | Blizzard's pattern: `Blizzard_AuraContainer/Blizzard_CustomAuraButton.lua`. `Cooldown:SetCooldownFromDurationObject` is a **protected** function: avoid in addon code |
+| Aura stacks | `C_UnitAuras.GetAuraApplicationDisplayCount(u, id, 2, 99)` → string ("" below 2) into `SetText` | |
+| Dispel colour | `C_UnitAuras.GetAuraDispelTypeColor(u, id, colorCurve)` with a `C_CurveUtil.CreateColorCurve()` keyed by dispel type ID | Untainted-only arguments; read `auraData.dispelName` when it isn't secret instead |
+| Player movement | `IsPlayerMoving()`, `GetPlayerFacing()` (nil in instances) | |
+
 ## Other Midnight/Forever restrictions
 
 - **Combat log is gone for addons.** Registering `COMBAT_LOG_EVENT_UNFILTERED` or `COMBAT_LOG_EVENT` **errors**. Don't build damage meters or interrupt trackers on it.

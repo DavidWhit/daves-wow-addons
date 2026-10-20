@@ -1,0 +1,18 @@
+## Interface: 16001
+## Title: |cffd4a94eDave's|r Frames
+## Notes: Dragon target frame: portrait ring with health and resource emptying toward it, aura boards on chains.
+## Author: David
+## Version: 0.1.24
+## SavedVariables: daves_framesDB
+## IconTexture: Interface\Icons\INV_Misc_Head_Dragon_01
+## AddonCompartmentFunc: daves_frames_OnAddonCompartmentClick
+
+Core.lua
+EditModeDialog.lua
+Layout.lua
+Frame.lua
+Unit.lua
+Cast.lua
+Auras.lua
+EditMode.lua
+Options.lua

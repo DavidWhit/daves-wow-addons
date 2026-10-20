@@ -25,6 +25,7 @@
 --   d:AddCheckbox({ label = "Show text", tooltip = "...", get = ..., set = ... })
 --   d:AddColor({ label = "Colour", get = ..., set = ..., saved = ... })
 --   d:AddButtonGrid({ label = "Preview", buttons = { { key = "a", text = "A" } }, onClick = ..., isActive = ... })
+--                               -- isShown = function(key) ... end hides buttons that don't apply
 --   d:AddNote({ text = function() return "..." end })
 --   d:AddButton({ text = "Reset position", onClick = ... })
 --   ns.EditMode.Attach(frame, { label = "My Frame", dialog = d, onMoved = ..., onReset = ... })
@@ -204,8 +205,18 @@ local function Place(dialog, target)
 		if not bestScore or score < bestScore then bestX, bestY, bestScore = x, y, score end
 		if score == 0 then break end
 	end
+	-- Anchored by its top, so it grows and shrinks downward (see Dialog:Layout).
 	dialog:ClearAllPoints()
-	dialog:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", bestX, bestY)
+	dialog:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", bestX, bestY + h)
+end
+
+-- Anchors the dialog by its top-left corner where it is now, so a change of size grows or shrinks it
+-- downward. Dialogs are never scaled (parented to UIParent at its scale), so GetLeft/GetTop are the offsets.
+local function PinTop(dialog)
+	local left, top = dialog:GetLeft(), dialog:GetTop()
+	if not (left and top) then return end
+	dialog:ClearAllPoints()
+	dialog:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
 end
 
 -- After a setting moves or resizes the frame (Scale, Reset position...), step aside again if the
@@ -496,7 +507,8 @@ function Dialog.AddColor(dialog, o)
 	return row
 end
 
--- o.buttons = { { key = ..., text = ... }, ... }; o.onClick(key); o.isActive(key) lights one up.
+-- o.buttons = { { key = ..., text = ... }, ... }; o.onClick(key); o.isActive(key) lights one up;
+-- o.isShown(key), optional, hides a button that doesn't apply right now (the rest close up).
 function Dialog.AddButtonGrid(dialog, o)
 	local row = NewRow(dialog)
 	local header = row:CreateFontString(nil, "ARTWORK", "GameFontNormal")
@@ -513,23 +525,35 @@ function Dialog.AddButtonGrid(dialog, o)
 	end
 
 	function row:Measure()
-		local widest = 0
-		for _, b in ipairs(self.buttons) do widest = math.max(widest, TextWidth(b:GetFontString())) end
+		local widest, count = 0, 0
+		for _, b in ipairs(self.buttons) do
+			b.shown = (not o.isShown) or (o.isShown(b.key) and true or false)
+			b:SetShown(b.shown)
+			if b.shown then
+				count = count + 1
+				widest = math.max(widest, TextWidth(b:GetFontString()))
+			end
+		end
 		self.buttonWidth = math.max(64, math.ceil(widest) + 24)
-		local cols = math.min(o.columns or 4, #self.buttons)
+		self.shownCount = math.max(1, count)
+		local cols = math.min(o.columns or 4, self.shownCount)
 		return 0, cols * self.buttonWidth + (cols - 1) * 4
 	end
 	function row:Place(width)
-		local cols = math.max(1, math.min(o.columns or 4, math.floor((width + 4) / (self.buttonWidth + 4))))
+		local cols = math.max(1, math.min(o.columns or 4, o.isShown and self.shownCount or 99, math.floor((width + 4) / (self.buttonWidth + 4))))
 		local bw = (width - (cols - 1) * 4) / cols
 		local top = o.label and 20 or 0
-		for i, b in ipairs(self.buttons) do
-			local col, line = (i - 1) % cols, math.floor((i - 1) / cols)
-			b:SetWidth(bw)
-			b:ClearAllPoints()
-			b:SetPoint("TOPLEFT", col * (bw + 4), -top - line * 24)
+		local i = 0
+		for _, b in ipairs(self.buttons) do
+			if b.shown ~= false then
+				i = i + 1
+				local col, line = (i - 1) % cols, math.floor((i - 1) / cols)
+				b:SetWidth(bw)
+				b:ClearAllPoints()
+				b:SetPoint("TOPLEFT", col * (bw + 4), -top - line * 24)
+			end
 		end
-		return top + math.ceil(#self.buttons / cols) * 24
+		return top + math.ceil(math.max(1, i) / cols) * 24
 	end
 	function row:Refresh()
 		for _, b in ipairs(self.buttons) do
@@ -607,6 +631,9 @@ function Dialog:Layout()
 	else
 		self.Divider:Hide()
 	end
+	-- Keep the top edge where it is (also after the user has dragged the dialog), so the rows under the
+	-- mouse never jump when the dialog grows or shrinks, e.g. a note appearing while a slider is dragged.
+	if self:IsShown() and not self.dragging then PinTop(self) end
 	self:SetSize(content + 2 * PAD, -y + PAD)
 end
 
@@ -655,13 +682,17 @@ function EM.CreateDialog(name, title)
 	d:SetMovable(true)
 	d:SetClampedToScreen(true)
 	d:RegisterForDrag("LeftButton")
-	d:SetScript("OnDragStart", d.StartMoving)
+	d:SetScript("OnDragStart", function(self) self.dragging = true; self:StartMoving() end)
 	d:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
+		self.dragging = nil
+		PinTop(self)   -- pinned by its top again, wherever the drag left its anchor
 		self.userPlaced = true
 	end)
 	d:SetScript("OnUpdate", FollowWhenMouseLeaves)
 	d:SetScript("OnHide", function(self)
+		-- Hidden mid-drag (Escape with the button held): end the drag, so it is pinned by its top again.
+		if self.dragging then self:StopMovingOrSizing(); self.dragging = nil; PinTop(self) end
 		if self.target then SetSelected(self.target.editSelection, false) end
 	end)
 	d:Hide()
