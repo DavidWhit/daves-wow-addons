@@ -1,8 +1,8 @@
 ## Interface: 16001, 120100, 120005, 120001, 120000, 11509
 ## Title: |cff33ff99WowKit|r Error Log
-## Notes: Development aid for the wow-forever-addons kit: records Lua errors, blocked actions and Lua warnings to SavedVariables so Get-WowScriptErrors.ps1 can read them. Blizzard's error pop-up still shows.
+## Notes: Development aid for the wow-forever-addons kit: records Lua errors, blocked actions (with a taint probe: what an addon wrote where the action read) and Lua warnings to SavedVariables so Get-WowScriptErrors.ps1 can read them. Blizzard's error pop-up still shows.
 ## Author: davidwhit5
-## Version: 1.0.0
+## Version: 1.1.0
 ## SavedVariables: WowKitErrorsDB
 ## IconTexture: Interface\Icons\INV_Misc_Note_01
 

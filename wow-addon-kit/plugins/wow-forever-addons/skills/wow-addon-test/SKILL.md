@@ -28,7 +28,7 @@ The client only shows Lua errors in a pop-up (`/console scriptErrors 1`) and kee
 
 - **Error:** the first stack line inside the addon is where it failed. Read that file:line before anything else, and explain the failure from the message and the stack.
 - **Repeats** (`x7`) usually mean an OnUpdate or an event handler.
-- **`blocked` / `forbidden`:** go on to the taint log for the cause.
+- **`blocked` / `forbidden`:** read its **taint probe** lines first (the first entry of each kind per session carries one): every value an addon had written on the frames under the mouse, on Blizzard's global tables and frames, and Blizzard globals an addon replaced, each with the addon to blame. A line on a field Blizzard's failing code reads is the cause; fix the write. If the probe names nothing that code reads, go on to the taint log. `/wkprobe` in game runs the probe by hand (hover the frame first, then `/reload`).
 - **"Was not installed ... Linking it now":** the script has just linked the recorder (the kit's `Link-WowAddons.ps1` and `Deploy-WowAddon.ps1` link it too, every run). Ask the user to restart the client fully, reproduce, and `/reload`, then run the script again. If it says the link failed, run the command it prints and fix what that reports.
 - **No entries:** the session shown is the newest with entries. Check its start time against when the user reproduced the problem. `-Session 0` shows all sessions.
 

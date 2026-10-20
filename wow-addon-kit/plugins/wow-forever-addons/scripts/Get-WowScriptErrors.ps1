@@ -13,7 +13,11 @@
     blocked    ADDON_ACTION_BLOCKED: an addon called a protected function from tainted code (see the taint log)
     forbidden  ADDON_ACTION_FORBIDDEN: an addon called a function addons may never call
     warning    LUA_WARNING: a warning the client raised (deprecated use, bad arguments, ...)
+    probe      a taint probe run by hand in game (/wkprobe)
   Each entry carries its session (one per login or /reload) and how often it repeated in that session.
+  The first blocked or forbidden entry of each kind per session (and every probe) also carries a taint probe: the
+  values an addon had written, as issecurevariable reports them, on the frames under the mouse and their parents, on
+  Blizzard's global tables and frames, and Blizzard globals an addon replaced. Read it before the taint log.
 
   It also scans the client's Logs\*.log for "Lua Error" lines, in case the client wrote any itself.
 
@@ -163,12 +167,13 @@ if ($files.Count -eq 0) {
 			[pscustomobject]@{
 				Kind = [string]$e['kind']; Message = [string]$e['message']; Stack = [string]$e['stack']
 				Count = [int]$e['count']; Time = [string]$e['time']; Last = [string]$e['last']; Session = [int]$e['session']
+				Taint = [string]$e['taint']
 			}
 		})
 	}
 	if ($Addon) {
 		$pat = '(AddOns[\\/]' + [regex]::Escape($Addon) + '[\\/])|(^|\W)' + [regex]::Escape($Addon) + '\W'
-		$entries = @($entries | Where-Object { $_.Message -match $pat -or $_.Stack -match $pat })
+		$entries = @($entries | Where-Object { $_.Message -match $pat -or $_.Stack -match $pat -or $_.Taint -match $pat })
 	}
 	$sessions = @($entries | ForEach-Object Session | Sort-Object -Unique)
 	if ($Session -eq -1 -and $sessions.Count) { $Session = $sessions[-1] }
@@ -190,6 +195,10 @@ if ($files.Count -eq 0) {
 			Write-Host ("    {0}" -f ($e.Message -replace "`n", "`n    "))
 			$lines = @($e.Stack -split "`n" | Where-Object { $_.Trim() } | Select-Object -First 8)
 			foreach ($l in $lines) { Write-Host "      $l" -ForegroundColor DarkGray }
+			if ($e.Taint) {
+				Write-Host '    Taint probe (values an addon wrote where the action read):' -ForegroundColor Cyan
+				foreach ($l in @($e.Taint -split "`n" | Where-Object { $_.Trim() })) { Write-Host "      $l" -ForegroundColor Cyan }
+			}
 			Write-Host ''
 		}
 		if ($sessions.Count -gt 1 -and $Session -gt 0) { Write-Host "Older sessions with entries: $(($sessions | Where-Object { $_ -ne $Session }) -join ', ') (use -Session <n> or -Session 0)." }
@@ -207,4 +216,4 @@ if ($logHits.Count) {
 	$logHits | Select-Object -Last 10 | ForEach-Object { Write-Host ("  {0}:{1}  {2}" -f $_.Filename, $_.LineNumber, $_.Line.Trim()) }
 }
 Write-Host ''
-Write-Host 'Next: for "blocked" or "forbidden" entries, read the taint log (Get-WowTaintLog.ps1 -Addon <name>). For errors, open the first stack line that is in the addon.'
+Write-Host 'Next: for "blocked" or "forbidden" entries, start from the taint probe lines; if they name nothing, read the taint log (Get-WowTaintLog.ps1 -Addon <name>). For errors, open the first stack line that is in the addon.'

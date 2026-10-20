@@ -48,7 +48,11 @@ Write-Host "Taint log: $log (written $($item.LastWriteTime.ToString('yyyy-MM-dd 
 # Split into events: a header line ("M/D HH:MM:SS.mmm  text") followed by indented stack lines.
 $events = New-Object System.Collections.Generic.List[object]
 $cur = $null
-foreach ($line in [IO.File]::ReadAllLines($log)) {
+# The running client keeps taint.log open for writing: open it shared, or the read fails while the game is up.
+$stream = [IO.File]::Open($log, 'Open', 'Read', 'ReadWrite')
+$reader = New-Object IO.StreamReader($stream)
+try { $lines = $reader.ReadToEnd() -split "`r?`n" } finally { $reader.Dispose() }
+foreach ($line in $lines) {
 	if ($line -match '^(\S+ \S+)  (\S.*)$') {
 		$cur = [pscustomobject]@{ Time = $Matches[1]; Text = $Matches[2]; Stack = New-Object System.Collections.Generic.List[string] }
 		$events.Add($cur)
