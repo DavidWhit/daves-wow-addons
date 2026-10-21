@@ -297,7 +297,7 @@ local NAMES = {
 
 -- Words in a name, checked in this order (so "Flash of Light" is holy, not fire's "flash").
 local WORDS = {
-	{ "bandage", "firstaid" },                    -- a bandage the profession check missed
+	{ "bandage", "tailoring" },                   -- a bandage the profession check missed: the loom
 	{ "lightning", "lightning" }, { "thunder", "lightning" }, { "storm", "lightning" },   -- before "light" (holy)
 	{ "frost", "frost" }, { "ice ", "frost" }, { "icy", "frost" }, { "blizzard", "frost" }, { "cone of cold", "frost" },
 	{ "glacial", "frost" }, { "freez", "frost" }, { "chill", "frost" }, { "snow", "frost" },
@@ -354,7 +354,7 @@ local CRAFTS = Enum and Enum.Profession and {
 	[Enum.Profession.Enchanting] = "enchanting",
 } or {}
 if Enum and Enum.Profession and Enum.Profession.FirstAid then   -- bandages (ProfessionConstantsDocumentation.lua: FirstAid = 0)
-	CRAFTS[Enum.Profession.FirstAid] = "firstaid"
+	CRAFTS[Enum.Profession.FirstAid] = "tailoring"   -- making a bandage gets the loom
 end
 
 -- the readable profession in a ProfessionInfo table, or nil
