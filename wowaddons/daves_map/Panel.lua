@@ -440,8 +440,8 @@ function ns.InitPanel()
 		{ "trackMyZone", "Track only my zone's quests", "The quest tracker follows the quests in your log for the zone you're in; the rest are untracked (they stay in your log). It changes as you enter a new zone; on a flight it waits until you land. The map's markers are not affected." },
 		{ "hideCompleted", "Hide completed quests", "Completed quests are dimmed; tick to hide them. (Matched to the game's quest IDs through pfQuest.)" },
 		{ "otherClasses", "Other classes' quests", "Show quests only other classes can take." },
-		{ "hideHighLevel", "Hide quests above my level", "Hide quests whose required level is above yours." },
-		{ "hideLowLevel", ns.LowLevelLabel(), "Hide quests whose required level is this many levels or more below yours. Set how many (1 to 5) in /dmap options." },
+		{ "hideHighLevel", "Hide quests >5 levels above me", "Hide quests whose required level is more than 5 above yours. Quests up to 5 levels above you still show." },
+		{ "hideLowLevel", ns.LowLevelLabel(), "Hide quests whose required level is more than this many levels below yours. Set how many (1 to 5) in /dmap options." },
 	}
 	for n, def in ipairs(CHECKS) do
 		local btn, t = TickLine(panel, def[2], nil, nil, nil, function()

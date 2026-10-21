@@ -9,7 +9,7 @@ local ADDON, ns = ...
 
 function ns.LowLevelLabel()
 	local n = ns.db.lowLevelGap
-	return ("Hide quests %d+ level%s below me"):format(n, n == 1 and "" or "s")
+	return ("Hide quests >%d level%s below me"):format(n, n == 1 and "" or "s")
 end
 
 function ns:InitOptions()
@@ -41,9 +41,9 @@ function ns:InitOptions()
 		Settings.VarType.Number, "Levels below me", 5)
 	local gapOptions = Settings.CreateSliderOptions(1, 5, 1)
 	gapOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
-		return ("%d+"):format(value)
+		return (">%d"):format(value)
 	end)
-	Settings.CreateSlider(category, lowLevelGap, gapOptions, "Hide quests this many levels or more below yours: 1 hides everything under your level, 5 only the far lower ones.")
+	Settings.CreateSlider(category, lowLevelGap, gapOptions, "Hide quests more than this many levels below yours: 1 hides everything 2 or more under your level, 5 only the far lower ones.")
 
 	-- Settings write straight into ns.db; react to changes here.
 	enabled:SetValueChangedCallback(function() if ns.Refresh then ns.Refresh() end end)

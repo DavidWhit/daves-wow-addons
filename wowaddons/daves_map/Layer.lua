@@ -103,8 +103,8 @@ local function Passes(i)
 	if cls ~= 0 and mine and not db.otherClasses and bit.band(cls, mine) == 0 then return false end
 	if db.hideHighLevel or db.hideLowLevel then
 		local lvl, me = D.lvl[i], UnitLevel("player") or 0
-		if db.hideHighLevel and lvl > me then return false end
-		if db.hideLowLevel and lvl ~= 0 and lvl <= me - db.lowLevelGap then return false end   -- 0: level unknown, kept
+		if db.hideHighLevel and lvl > me + 5 then return false end   -- more than 5 above you: up to 5 above is still doable
+		if db.hideLowLevel and lvl ~= 0 and lvl < me - db.lowLevelGap then return false end   -- more than the gap below; 0: level unknown, kept
 	end
 	local q = D.qid[i]
 	if q ~= 0 and db.hideCompleted and IsDone(q) then return false end
@@ -512,6 +512,34 @@ function ns.Focus(i)
 end
 function ns.FocusedPin() return lockedPin end
 
+-- A quest's pin in the map data (where it's picked up), by quest ID; nil when the data doesn't have it.
+local pinOfQuest
+function ns.QuestPin(q)
+	if not pinOfQuest then
+		pinOfQuest = {}
+		for i = 1, #D.qid do local id = D.qid[i]; if id ~= 0 and not pinOfQuest[id] then pinOfQuest[id] = i end end
+	end
+	return pinOfQuest[q]
+end
+
+-- Many of Forever's classic quests have no map location in the game (GetQuestUiMapID is 0), so opening one leaves
+-- the map where it was with nothing marked. Then the map data stands in: the quest's chain is selected (its pin, its
+-- turn-in and the steps around it) and the map turns to where you go next: the turn-in when it's ready, else where
+-- it was picked up. Not in combat (ns.ShowPinMap).
+function ns.ShowQuestOnMap(q)
+	if not (D and ns.Calibrate()) then return end
+	local i = ns.QuestPin(q)
+	if not i then return end
+	local e = D.endp[i]
+	local ready = C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(q)
+	if lockedPin ~= i then ns.Focus(i) end
+	ns.ShowPinMap((ready and e ~= 0) and e or i)
+end
+
+local function OnQuestDetails(q)
+	if type(q) == "number" and GetQuestUiMapID and GetQuestUiMapID(q) == 0 then ns.ShowQuestOnMap(q) end
+end
+
 ---------------------------------------------------------------------------
 -- Tooltip
 ---------------------------------------------------------------------------
@@ -650,6 +678,8 @@ local function Init()
 
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
+	-- opening a quest (the tracker, the quest log, our Ready to Turn In section): stand in for a missing map location
+	if QuestMapFrame_ShowQuestDetails then hooksecurefunc("QuestMapFrame_ShowQuestDetails", OnQuestDetails) end
 end
 
 function ns:QUEST_TURNED_IN(questID)
