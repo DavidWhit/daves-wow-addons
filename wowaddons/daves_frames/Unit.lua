@@ -67,6 +67,7 @@ end
 function ns:Refresh()
 	local f = ns.frame
 	if not f then return end
+	ns:UpdatePortraitButton()
 	local unit = ns:CurrentUnit()
 	-- A new unit (or none): nothing from the last one carries over.
 	ns.token = (ns.token or 0) + 1   -- stale delayed updates (the damage trail) check this
@@ -139,9 +140,9 @@ function ns:UpdatePower(snap)
 
 	if token ~= ns.powerToken then
 		ns.powerToken = token
+		-- Blizzard's power colour, as its target frame (PowerBarColor: mana blue, rage red, energy yellow, ...)
 		local c = (PowerBarColor and (PowerBarColor[token] or PowerBarColor[ptype]))
 		local shades = c and ns.ShadesOf(c.r, c.g, c.b) or ns.COLORS.mana
-		if token == "MANA" then shades = ns.COLORS.mana end
 		ns.Paint(f.power:GetStatusBarTexture(), shades)
 		ns.PaintTrough(f.clipR.trough, shades)
 		ns.powerShades = shades
@@ -159,20 +160,13 @@ function ns:UpdatePower(snap)
 	if HAS_PPCT then f.numPowerPct:SetFormattedText("%.0f%%", pct) end
 end
 
--- Health colour: class colour for players you can't attack, else reaction; grey when tapped by others.
+-- Health colour: what Blizzard's target frame shows (UnitFrameHealthBar_Update, Blizzard_UnitFrame/Mainline/
+-- UnitFrame.lua): green for everyone, grey while disconnected.
+local HEALTH = ns.ShadesOf(0, 1, 0)
 local function HealthShades(unit)
-	if UnitIsPlayer(unit) and not UnitCanAttack("player", unit) then
-		local _, class = UnitClass(unit)
-		if not Secret(class) and class ~= nil and RAID_CLASS_COLORS then
-			local c = RAID_CLASS_COLORS[class]
-			if c then return ns.ShadesOf(c.r, c.g, c.b) end
-		end
-	end
-	if UnitIsTapDenied(unit) then return ns.COLORS.tapped end
-	local reaction = UnitReaction(unit, "player")
-	if reaction == nil or Secret(reaction) then return ns.COLORS.hostile end
-	if reaction <= 3 then return ns.COLORS.hostile elseif reaction == 4 then return ns.COLORS.neutral end
-	return ns.COLORS.friendly
+	local online = UnitIsConnected(unit)
+	if not Secret(online) and online == false then return ns.COLORS.tapped end
+	return HEALTH
 end
 
 function ns:UpdateIdentity()
@@ -183,7 +177,7 @@ function ns:UpdateIdentity()
 	ns.Paint(f.health:GetStatusBarTexture(), shades)
 	ns.PaintTrough(f.clipL.trough, shades)
 
-	f.name:SetText(UnitName(unit))
+	ns.SetNameText(f.name, UnitName(unit))
 	if ns.Stacked() then f.name:SetTextColor(unpack(shades[1])) else f.name:SetTextColor(1, 1, 1) end
 
 	local level = UnitLevel(unit)
@@ -206,7 +200,7 @@ function ns:UpdateTargetOfTarget()
 	local f, unit = ns.frame, ns.unit
 	if not unit then return end
 	local tt = unit .. "target"
-	if UnitExists(tt) then f.tot:SetFormattedText("on %s", UnitName(tt)) else f.tot:SetText("") end
+	if UnitExists(tt) then ns.SetNameText(f.tot, UnitName(tt), "on %s") else ns.SetNameText(f.tot, "") end
 end
 
 -- Dead: grey art and portrait, health reads Dead, boards fade (Auras.lua checks ns.isDead).
@@ -219,4 +213,5 @@ function ns:SetDead(dead)
 	f.dead:SetShown(dead)
 	f.pnHealth:SetAlpha(dead and 0 or 1); f.pnPower:SetAlpha(dead and 0 or 1)
 	f.numHealthValue:SetAlpha(dead and 0 or 1); f.numHealthPct:SetAlpha(dead and 0 or 1)
+	f.numPowerValue:SetAlpha(dead and 0 or 1); f.numPowerPct:SetAlpha(dead and 0 or 1)
 end

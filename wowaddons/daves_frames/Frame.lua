@@ -79,6 +79,32 @@ function ns.StyleFont(fs, _, size)
 	size = math.max(1, math.floor(size / px + 0.5)) * px
 	fs:SetFont(file, size, flags)
 	fs:SetShadowColor(0, 0, 0, 0)
+	fs.styled = { file = file, size = size, flags = flags }   -- ns.SetNameText picks another font at this size
+	if fs.nameSet then ns.SetNameText(fs, fs.nameValue, fs.nameFmt) end   -- a name keeps its alphabet's font
+end
+
+-- Names in another alphabet: Friz Quadrata has no Chinese, Korean or Cyrillic letters, so they showed as boxes.
+-- The name's letters pick Blizzard's font for that alphabet (Blizzard_Fonts_Shared/Mainline/Fonts.xml), at the
+-- same size (Chinese a third larger, as Blizzard has it). UTF-8 lead bytes: Cyrillic D0-D3, kana and CJK E3-E9,
+-- Hangul EA-ED. A secret name can't be read, so it keeps the frame's font.
+local SCRIPTS = {
+	{ "[\234-\237]", "Fonts\\2002.TTF", 1 },          -- Korean
+	{ "[\227-\233]", "Fonts\\ARKai_T.ttf", 1.3 },      -- Chinese (and Japanese kana)
+	{ "[\208-\211]", "Fonts\\FRIZQT___CYR.TTF", 1 },   -- Russian
+}
+function ns.SetNameText(fs, name, fmt)
+	local s = fs.styled
+	if s then
+		local file, size = s.file, s.size
+		if type(name) == "string" and not (issecretvalue and issecretvalue(name)) then
+			for _, script in ipairs(SCRIPTS) do
+				if name:find(script[1]) then file, size = script[2], s.size * script[3]; break end
+			end
+		end
+		fs:SetFont(file, size, s.flags)
+	end
+	if fmt then fs:SetFormattedText(fmt, name) else fs:SetText(name) end
+	fs.nameSet, fs.nameValue, fs.nameFmt = true, name, fmt
 end
 
 local NAME_FONT = "Fonts\\FRIZQT__.TTF"
@@ -322,18 +348,20 @@ function ns:ApplyLayout()
 
 	-- Name, from the outer end of the health window.
 	local nameMid = stacked and stripMid or (L.winT + L.winB) / 2
-	f.name:ClearAllPoints()
 	local nameSize = stacked and Size(1, strip - 6) or Size(1, 34)
+	f.name:ClearAllPoints()
 	f.name:SetPoint("LEFT", f, "TOPLEFT", L.winL + 16, Y(nameMid, nameSize))
 	f.name:SetPoint("RIGHT", f, "TOPLEFT", L.cx - L.hidden - 60, Y(nameMid, nameSize))
 	ns.StyleFont(f.name, ns.NAME_FONT, nameSize)
 
 	local barMid = stacked and stackBarMid or (L.winT + L.winB) / 2
+	-- Dead: in the right bar at its outer end, the mirror of the name in the left one (over the power numbers,
+	-- which hide while it shows: ns:SetDead).
+	ns.StyleFont(f.dead, ns.NAME_FONT, nameSize)
+	f.dead:ClearAllPoints(); f.dead:SetPoint("RIGHT", f, "TOPLEFT", L.winR - 16, Y(barMid, nameSize))
 	local numSize = Size(1, barH - 6)
 	ns.barTextPx = numSize / px   -- ApplyNumbers moves the numbers to the portrait when this is too small
 	local barY = Y(barMid, numSize)
-	ns.StyleFont(f.dead, ns.NAME_FONT, numSize)
-	f.dead:ClearAllPoints(); f.dead:SetPoint("RIGHT", f, "TOPLEFT", L.cx - L.hidden - 12, barY)
 	for _, fs in ipairs({ f.numHealthValue, f.numHealthPct, f.numPowerPct, f.numPowerValue }) do
 		ns.StyleFont(fs, ns.NUM_FONT, numSize)
 	end
@@ -396,4 +424,68 @@ function ns:ApplyNumbers()
 	f.numHealthValue:SetShown(inBars and showValue); f.numPowerValue:SetShown(inBars and showValue)
 	f.numHealthPct:SetShown(inBars and showPct); f.numPowerPct:SetShown(inBars and showPct)
 	f.portrait:SetAlpha(db.portraitAlpha)
+end
+
+-- The portrait clicks like Blizzard's target frame: right-click opens the unit's menu, left-click targets it.
+-- It's a secure button (SecureUnitButtonTemplate, "togglemenu": Blizzard_FrameXML/SecureTemplates.lua), so it
+-- can't be a child of the frame, which shows and hides in combat: it sits on UIParent, the game shows it while
+-- you have a target (RegisterUnitWatch), and it follows the portrait out of combat (ns:SyncPortraitButton).
+function ns:BuildPortraitButton()
+	local f = ns.frame
+	local b = CreateFrame("Button", "DavesFramesTargetPortrait", UIParent, "SecureUnitButtonTemplate")
+	b:SetFrameStrata(f:GetFrameStrata())
+	b:SetFrameLevel(f:GetFrameLevel() + 20)
+	b:RegisterForClicks("AnyUp")
+	b:SetAttribute("unit", "target")
+	b:SetAttribute("*type1", "target")
+	b:SetAttribute("*type2", "togglemenu")
+	b:Hide()
+	f.portraitButton = b
+	ns:SyncPortraitButton()
+	ns:UpdatePortraitButton()
+end
+
+-- Sits the button on the portrait. Called every frame (the frame can be dragged, scaled or laid out);
+-- only moves it when the portrait moved.
+local lastX, lastY, lastSize
+function ns:SyncPortraitButton()
+	local f = ns.frame
+	local b = f and f.portraitButton
+	if not b or InCombatLockdown() then return end
+	local x, y = f.portraitBack:GetCenter()
+	if not x then return end
+	local k = f:GetEffectiveScale() / UIParent:GetEffectiveScale()
+	x, y = x * k, y * k
+	local size = f.portraitBack:GetWidth() * k
+	if x == lastX and y == lastY and size == lastSize then return end
+	lastX, lastY, lastSize = x, y, size
+	b:ClearAllPoints()
+	b:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x, y)
+	b:SetSize(size, size)
+end
+
+-- On while the frame is on (the game shows it with the target); off in Edit Mode, so clicks there reach the
+-- frame. Out of combat only: a change made in combat waits for PLAYER_REGEN_ENABLED.
+local watching
+function ns:UpdatePortraitButton()
+	local b = ns.frame and ns.frame.portraitButton
+	if not b then return end
+	local want = ns.db.enabled and not ns.editing
+	if want == watching then return end
+	if InCombatLockdown() then
+		ns.events:RegisterEvent("PLAYER_REGEN_ENABLED")
+		return
+	end
+	watching = want
+	if want then
+		RegisterUnitWatch(b)
+	else
+		UnregisterUnitWatch(b)
+		b:Hide()
+	end
+end
+
+function ns:PLAYER_REGEN_ENABLED()
+	ns.events:UnregisterEvent("PLAYER_REGEN_ENABLED")
+	ns:UpdatePortraitButton()
 end

@@ -87,6 +87,7 @@ function ns:ADDON_LOADED(name)
 	local f = ns:BuildFrame(ns.db.variant)
 	f:SetScale(ns.FrameScale())
 	ns:BuildBoards()
+	ns:BuildPortraitButton()
 
 	-- Per-frame work runs on its own child frame: Edit Mode's drag owns the frame's OnUpdate.
 	local ticker = CreateFrame("Frame", nil, f)
@@ -94,6 +95,7 @@ function ns:ADDON_LOADED(name)
 		if ns.aurasDirty then ns.aurasDirty = nil; ns:RefreshAuras() end
 		ns:TickCast()
 		ns:TickBoards(dt)
+		ns:SyncPortraitButton()
 	end)
 
 	ns:InitEditMode(f)

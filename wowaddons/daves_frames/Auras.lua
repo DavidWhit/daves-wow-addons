@@ -78,6 +78,9 @@ local function Formatter()
 			f:SetMinInterval(Enum.SecondsFormatterInterval.Seconds)
 			f:SetMaxIntervalCurve(curve)
 			f:SetDesiredUnitCount(1)
+			if Enum.SecondsFormatterIntervalWhitespace and f.SetStripIntervalWhitespace then
+				f:SetStripIntervalWhitespace(Enum.SecondsFormatterIntervalWhitespace.Strip)   -- "12m", not "12 m"
+			end
 			return f
 		end)
 		if ok and fmt then formatter = fmt end
