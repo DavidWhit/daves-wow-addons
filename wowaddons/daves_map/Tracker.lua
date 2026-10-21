@@ -258,7 +258,7 @@ local function Row(n)
 	r:SetHeight(ROW_H * 2)
 	r.title = r:CreateFontString(nil, "OVERLAY")
 	r.title:SetFontObject(FontObject("ObjectiveTrackerLineFont", GameFontHighlight))
-	r.title:SetPoint("TOPLEFT", 12, 0)
+	r.title:SetPoint("TOPLEFT", 20, 0)   -- in line with the tracker's quest titles (its blockOffsetX)
 	r.title:SetPoint("RIGHT", -4, 0)
 	r.title:SetJustifyH("LEFT")
 	r.title:SetWordWrap(false)
@@ -328,49 +328,55 @@ local function Place(force)
 	section:SetScale(tracker:GetEffectiveScale() / UIParent:GetEffectiveScale())   -- the tracker's size of text
 	section:ClearAllPoints()
 	if alone then   -- where the tracker's own header would be
-		section:SetPoint("TOPLEFT", tracker, "TOPLEFT", 0, 0)
-		section:SetPoint("RIGHT", tracker, "RIGHT")
+		section:SetPoint("TOPLEFT", tracker.Header or tracker, "TOPLEFT")   -- its header keeps its place while hidden
 	else
 		section:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -(tracker.moduleSpacing or 10) - GAP)
-		section:SetPoint("RIGHT", last, "RIGHT")
 	end
 end
 
+local HEADER_W = 260   -- Blizzard's header frames are this wide, their art centred on them
 local function Build()
 	if section or not ObjectiveTrackerFrame then return end
 	section = CreateFrame("Frame", "DavesMapReadyToTurnIn", UIParent)
 	section:SetFrameStrata(ObjectiveTrackerFrame:GetFrameStrata())
-	section:SetHeight(TITLE_H)
+	section:SetSize(HEADER_W, TITLE_H)
 	section:Hide()
 
-	-- "All Objectives", only while the section is alone (as ObjectiveTrackerContainerHeaderTemplate)
+	-- "All Objectives", only while the section is alone: ObjectiveTrackerContainerHeaderTemplate's measurements
+	-- (Blizzard_ObjectiveTrackerContainer.xml): 260 by 32, art centred, text 7 in, the minimize button 1 in from the right
 	local all = CreateFrame("Frame", nil, section)
-	all:SetHeight(ALL_H)
+	all:SetSize(HEADER_W, ALL_H)
 	all:SetPoint("TOPLEFT")
-	all:SetPoint("RIGHT")
 	local allBg = all:CreateTexture(nil, "BACKGROUND")
 	allBg:SetAtlas("ui-questtracker-primary-objective-header", true)
-	allBg:SetPoint("LEFT", -8, 0)
+	allBg:SetPoint("CENTER")
 	local allText = all:CreateFontString(nil, "ARTWORK")
 	allText:SetFontObject(FontObject("ObjectiveTrackerHeaderFont", GameFontNormalMed2 or GameFontNormal))
 	allText:SetPoint("LEFT", 7, 0)
 	allText:SetText(TRACKER_ALL_OBJECTIVES or "All Objectives")
+	local allBtn = CreateFrame("Button", nil, all)
+	allBtn:SetSize(18, 19)
+	allBtn:SetPoint("RIGHT", -1, 0)
+	allBtn:SetNormalAtlas("ui-questtrackerbutton-collapse-all")
+	allBtn:SetPushedAtlas("ui-questtrackerbutton-collapse-all-pressed")
+	allBtn:SetHighlightAtlas("ui-questtrackerbutton-red-highlight", "ADD")
+	allBtn:SetScript("OnClick", function() readyCollapsed = not readyCollapsed; ns.UpdateReady() end)
 	section.all = all
 
-	-- "Ready to Turn In (n)", as the tracker draws its sections (Blizzard_ObjectiveTrackerModule.xml)
+	-- "Ready to Turn In (n)": ObjectiveTrackerModuleHeaderTemplate's (Blizzard_ObjectiveTrackerModule.xml): 260 by 26,
+	-- art centred, text 7 in, a 16 by 16 minimize button 1 past the right edge
 	local head = CreateFrame("Frame", nil, section)
-	head:SetHeight(TITLE_H)
-	head:SetPoint("RIGHT")
+	head:SetSize(HEADER_W, TITLE_H)
 	local bg = head:CreateTexture(nil, "BACKGROUND")
 	bg:SetAtlas("UI-QuestTracker-Secondary-Objective-Header", true)
-	bg:SetPoint("TOPLEFT", -20, 6)
-	local text = head:CreateFontString(nil, "OVERLAY")
+	bg:SetPoint("CENTER")
+	local text = head:CreateFontString(nil, "ARTWORK")
 	text:SetFontObject(FontObject("ObjectiveTrackerHeaderFont", GameFontNormalMed2 or GameFontNormal))
-	text:SetPoint("LEFT", 4, 0)
+	text:SetPoint("LEFT", 7, 0)
 	section.text = text
 	local btn = CreateFrame("Button", nil, head)
 	btn:SetSize(16, 16)
-	btn:SetPoint("RIGHT", 0, 0)
+	btn:SetPoint("RIGHT", 1, 0)
 	btn:SetHighlightAtlas("ui-questtrackerbutton-yellow-highlight", "ADD")
 	btn:SetScript("OnClick", function() readyCollapsed = not readyCollapsed; ns.UpdateReady() end)
 	section.collapse = btn
@@ -410,7 +416,7 @@ function ns.UpdateReady()
 	section.text:SetText(("Ready to Turn In (%d)"):format(#ready))
 	local atlas = collapsed and "ui-questtrackerbutton-secondary-expand" or "ui-questtrackerbutton-secondary-collapse"
 	if C_Texture.GetAtlasInfo(atlas) then section.collapse:SetNormalAtlas(atlas); section.collapse:SetPushedAtlas(atlas .. "-pressed") end
-	local y = -top - TITLE_H
+	local y = -top - TITLE_H - 6   -- a little room under the header before the first quest, as the tracker has
 	for n, q in ipairs(collapsed and {} or ready) do
 		local r = Row(n)
 		r.questID, r.turnIn = q, TurnInPin(q)
