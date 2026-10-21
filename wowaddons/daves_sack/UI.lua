@@ -973,6 +973,73 @@ local function FormatCount(n)
 	return s
 end
 
+local function TokenTooltip(owner, index)
+	GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+	if GameTooltip.SetBackpackToken then GameTooltip:SetBackpackToken(index) end
+	if TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION then
+		GameTooltip:AddLine(" ")
+		GameTooltip:AddLine(TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION, 0.1, 1, 0.1, true)
+	end
+	GameTooltip:Show()
+end
+
+-- Item on the cursor, link, untrack: same as Blizzard's backpack tokens. A plain click opens the Character
+-- window, but never from here (below).
+local function TokenClick(b)
+	if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
+	local C = C_CurrencyInfo
+	if IsModifiedClick and b.currencyID and C then
+		if IsModifiedClick("CHATLINK") and C.GetCurrencyLink and HandleModifiedItemClick then
+			if HandleModifiedItemClick(C.GetCurrencyLink(b.currencyID, b.quantity)) then return end
+		end
+		if IsModifiedClick("TOKENWATCHTOGGLE") and C.SetCurrencyBackpackByID then
+			C.SetCurrencyBackpackByID(b.currencyID, false)   -- our hook refreshes the row
+		end
+	end
+end
+
+-- Opening the Character window from addon code (ToggleCharacter, CharacterFrame:ToggleTokenFrame; 1.0-1.7.13 did)
+-- runs Blizzard's panel code tainted and leaves its state ours. So a plain click goes through one secure button:
+-- a SecureActionButtonTemplate "click" on Blizzard's CharacterMicroButton, which opens the Character window as
+-- Blizzard code, on the paper doll (the Currency tab is one click further). A protected button makes the window
+-- protected too (see the X below), so it covers the hovered currency only outside combat and is parked on
+-- PLAYER_REGEN_DISABLED. In combat a plain click does nothing, as before; links and untracking still work.
+local currencyOpen
+local currencyPark = CreateFrame("Frame"); currencyPark:Hide()
+function ns.ParkCurrencyOpen()
+	if currencyOpen and not InCombatLockdown() then
+		currencyOpen:ClearAllPoints(); currencyOpen:SetParent(currencyPark); currencyOpen.token = nil
+	end
+end
+
+local function MakeCurrencyOpen()
+	local b = CreateFrame("Button", nil, currencyPark, "SecureActionButtonTemplate")
+	b:RegisterForClicks("LeftButtonUp")
+	b:SetAttribute("useOnKeyDown", false)
+	b:SetAttribute("clickbutton", CharacterMicroButton)
+	b:SetScript("PreClick", function(self)
+		if InCombatLockdown() then return end   -- attributes are locked in combat (it is parked then anyway)
+		local held = CursorHasItem and CursorHasItem()
+		local modified = IsModifiedClick and (IsModifiedClick("CHATLINK") or IsModifiedClick("TOKENWATCHTOGGLE"))
+		self:SetAttribute("type", not (held or modified) and "click" or nil)
+	end)
+	b:SetScript("PostClick", function(self)
+		if self.token and not self:GetAttribute("type") then TokenClick(self.token) end
+	end)
+	b:SetScript("OnEnter", function(self) if self.token then TokenTooltip(self, self.token.index) end end)
+	b:SetScript("OnLeave", function() GameTooltip:Hide(); ns.ParkCurrencyOpen() end)
+	b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+	currencyOpen = b
+end
+
+local function CoverToken(token)
+	if InCombatLockdown() or not CharacterMicroButton then return end
+	if not currencyOpen then MakeCurrencyOpen() end
+	currencyOpen.token = token
+	currencyOpen:SetParent(frame); currencyOpen:ClearAllPoints(); currencyOpen:SetAllPoints(token)
+	currencyOpen:SetFrameLevel(token:GetFrameLevel() + 1)
+end
+
 local function TokenButton(i)
 	local b = tokenButtons[i]
 	if b then return b end
@@ -982,36 +1049,10 @@ local function TokenButton(i)
 	b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(14, 14); b.icon:SetPoint("RIGHT")
 	b.count = b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	b.count:SetPoint("RIGHT", b.icon, "LEFT", -3, 0)
-	b:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		if GameTooltip.SetBackpackToken then GameTooltip:SetBackpackToken(self.index) end
-		if TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION then
-			GameTooltip:AddLine(" ")
-			GameTooltip:AddLine(TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION, 0.1, 1, 0.1, true)
-		end
-		GameTooltip:Show()
-	end)
+	b:SetScript("OnEnter", function(self) TokenTooltip(self, self.index); CoverToken(self) end)
 	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
-	b:SetScript("OnClick", function(self)               -- same as Blizzard's backpack tokens
-		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
-		local C = C_CurrencyInfo
-		if IsModifiedClick and self.currencyID and C then
-			if IsModifiedClick("CHATLINK") and C.GetCurrencyLink and HandleModifiedItemClick then
-				if HandleModifiedItemClick(C.GetCurrencyLink(self.currencyID, self.quantity)) then return end
-			end
-			if IsModifiedClick("TOKENWATCHTOGGLE") and C.SetCurrencyBackpackByID then
-				C.SetCurrencyBackpackByID(self.currencyID, false)   -- our hook refreshes the row
-				return
-			end
-		end
-		if InCombatLockdown() then return end                -- the Character frame can't open in combat
-		if CharacterFrame and CharacterFrame.ToggleTokenFrame then
-			pcall(CharacterFrame.ToggleTokenFrame, CharacterFrame)
-		elseif ToggleCharacter then
-			pcall(ToggleCharacter, "TokenFrame")
-		end
-	end)
+	b:SetScript("OnClick", TokenClick)
 	tokenButtons[i] = b
 	return b
 end
@@ -1125,7 +1166,7 @@ local function Build()
 
 	-- Two close buttons in one spot. Outside combat the secure one: a SecureActionButtonTemplate "click" on
 	-- Blizzard's backpack button, so Blizzard's ToggleAllBags runs as Blizzard code, untainted, its bag state stays
-	-- in step with our window (the hooks below follow it) and its own close sound plays. Calling CloseAllBags from
+	-- in step with our window (the hooks below follow it; our window plays the close sound). Calling CloseAllBags from
 	-- here would taint that state (1.7.7). If Blizzard's bags are already closed (/sack opened ours) the click just
 	-- hides us.
 	-- A protected button makes the window protected too, as a child and even when only anchored to it (1.7.10 had
@@ -1427,6 +1468,7 @@ local function Build()
 	-- there is blocked ("only available to the Blizzard UI", UseContainerItem).
 	frame:SetScript("OnHide", function()
 		search:ClearFocus()
+		ns.ParkCurrencyOpen()
 		ns.BagSound("IG_BACKPACK_CLOSE")
 	end)
 end
@@ -1450,72 +1492,47 @@ function ns.BlizzardBagsOpen()
 	return false
 end
 
--- The bag open/close sounds. Blizzard's container frames play them from their own OnShow/OnHide, which still run
--- while a frame is parked on the hidden parent (below). When our window opens or closes in the same frame tick as
--- one of theirs (the hooks below follow them), theirs has just sounded and we stay quiet; when ours moves on its
--- own (/sack) we play it. Escape is Blizzard's path too: its CloseAllWindows calls CloseAllBags before it reaches
--- our UISpecialFrames entry (Blizzard_UIParentPanelManager).
-local blizzSoundAt
-local function NoteBlizzardSound() blizzSoundAt = GetTime() end
-function ns.BagSound(kit)
-	if blizzSoundAt ~= GetTime() then Sound(kit) end
-end
+-- The bag open/close sounds: our window always plays its own. Blizzard's container frames play theirs from
+-- OnShow/OnHide, which never run while a frame is parked on the hidden parent (below): it never becomes visible.
+-- 1.7.10-1.7.13 hooked their OnShow/OnHide (HookScript) to tell; those hooks ran inside Blizzard's bag opening
+-- and are gone. The bank taint itself came from the event muting below.
+function ns.BagSound(kit) Sound(kit) end
 
 local hidden = CreateFrame("Frame"); hidden:Hide()
 
--- Blizzard's container frames keep handling bag events even when you can't see
--- them. While one is showing *your* bags we park it on a hidden parent and
--- switch its events off, so every bag event is only processed once (by us).
--- Bank bags reuse the same frames, so everything is restored for them.
-local BLIZZ_EVENTS = {
-	"BAG_UPDATE", "BAG_UPDATE_DELAYED", "BAG_CLOSED", "BAG_OPEN", "ITEM_LOCK_CHANGED",
-	"BAG_UPDATE_COOLDOWN", "INVENTORY_SEARCH_UPDATE", "BAG_NEW_ITEMS_UPDATED", "BAG_SLOT_FLAGS_UPDATED",
-	"BAG_CONTAINER_UPDATE", "QUEST_ACCEPTED", "UNIT_QUEST_LOG_CHANGED", "UNIT_INVENTORY_CHANGED",
-	"PLAYER_SPECIALIZATION_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_MONEY", "CURRENCY_DISPLAY_UPDATE",
-	"ITEM_DATA_LOAD_RESULT", "EQUIPMENT_SETS_CHANGED", "PLAYERBANKSLOTS_CHANGED",
-}
-local origParent, mutedEvents, soundHooked = {}, {}, {}
+-- While one of Blizzard's container frames is showing *your* bags we park it on a hidden parent, so only our
+-- window is seen. On Classic clients bank bags reuse the same frames, so they get their parent back (Forever's
+-- bank has no container frames). A parked frame never runs its OnShow, where Blizzard registers its bag-update
+-- events, so it only keeps the few it registers at load (bag opened/closed, quest log, bag slots changed).
+-- Never switch those off from here (1.1-1.7.13 did): together with our
+-- window following Blizzard's bag calls (Follow, below), that tainted every window that opens the bags - the
+-- bank and the mailbox - for the rest of the session. The bank's free first tab was blocked
+-- ("PurchaseBankTab()"), and so was every item used from the bags in combat afterwards: Blizzard's item click
+-- reads BankPanel.bankType even with the bank closed ("UseContainerItem()"). Found by switching each piece off
+-- in game, 1.7.14.
+local origParent = {}
 
-local function Silence(f)
+local function Park(f)
 	if f:GetParent() ~= hidden then origParent[f] = f:GetParent() end
 	f:SetParent(hidden)
-	if not soundHooked[f] then   -- note when Blizzard's own open/close sound plays (ns.BagSound)
-		soundHooked[f] = true
-		f:HookScript("OnShow", NoteBlizzardSound); f:HookScript("OnHide", NoteBlizzardSound)
-	end
-	if not f.IsEventRegistered then return end
-	local saved = mutedEvents[f] or {}
-	for _, e in ipairs(BLIZZ_EVENTS) do
-		if f:IsEventRegistered(e) then saved[e] = true; f:UnregisterEvent(e) end
-	end
-	mutedEvents[f] = saved
 end
 
-local function Release(f)
+local function Unpark(f)
 	if f:GetParent() == hidden then f:SetParent(origParent[f] or UIParent) end
-	local saved = mutedEvents[f]
-	if saved then
-		for e in pairs(saved) do if not f:IsEventRegistered(e) then f:RegisterEvent(e) end end
-		mutedEvents[f] = nil
-	end
 end
 
 local function Claim(f)
 	if not (f and f.GetID) then return end
-	if inList[f:GetID()] then Silence(f) else Release(f) end
+	if inList[f:GetID()] then Park(f) else Unpark(f) end
 end
 
 local function TakeOverBlizzardBags()
 	-- Park every container frame now, before Blizzard first shows one: shown under UIParent first and parked
 	-- after, a frame would play its open sound and then its close sound in the same instant. Bank bags get
-	-- theirs back through Claim.
-	for i = 1, 20 do local f = _G["ContainerFrame" .. i]; if f then Silence(f) end end
+	-- theirs back through Claim, after ContainerFrame_GenerateFrame (which shows every container frame).
+	for i = 1, 20 do local f = _G["ContainerFrame" .. i]; if f then Park(f) end end
 	if ContainerFrame_GenerateFrame then hooksecurefunc("ContainerFrame_GenerateFrame", Claim) end
-	local combined = ContainerFrameCombinedBags
-	if combined then
-		Silence(combined)
-		combined:HookScript("OnShow", Silence)
-	end
+	if ContainerFrameCombinedBags then Park(ContainerFrameCombinedBags) end
 
 	-- After any of Blizzard's bag calls, our window follows Blizzard's own open/closed state (read only) instead
 	-- of toggling by itself: the two can't drift apart (a drift made Blizzard's frames, and their sounds, run
@@ -1619,6 +1636,7 @@ handlers.PLAYER_ENTERING_WORLD = handlers.BAG_CONTAINER_UPDATE   -- bag sizes ar
 -- every item button is made beforehand (PLAYER_REGEN_DISABLED comes just before lockdown).
 handlers.PLAYER_REGEN_DISABLED = function()
 	if ns.CloseButtonForCombat then ns.CloseButtonForCombat(true) end
+	ns.ParkCurrencyOpen()   -- off the window before lockdown, like the secure X
 	PrepareButtons()
 end
 handlers.PLAYER_REGEN_ENABLED = function()

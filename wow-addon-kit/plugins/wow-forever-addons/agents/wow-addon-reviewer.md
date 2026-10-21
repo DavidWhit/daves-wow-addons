@@ -11,8 +11,8 @@ You review WoW addon code for players on **WoW: Forever** (modern client, game t
 
 Ground every claim in a source, never in memory:
 - When you're asked about something that went wrong in game, read what the game recorded before the code, following step 0 of `${CLAUDE_PLUGIN_ROOT}/skills/wow-addon-test/SKILL.md`, the one full statement of the order. In short:
-  1. Start with the recorded addon errors (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.ps1 -Addon <name>`).
-  2. If nothing was recorded, read the taint log (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1 -Addon <name>`).
+  1. Start with the recorded addon errors (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.ps1 -Addon <name>`). For a `blocked` / `forbidden` entry, its taint probe lines come next. Fields Blizzard itself writes in the failing call are the damage, not the cause; step 0 says how to bisect in game.
+  2. If nothing was recorded, or the probe names nothing the failing code reads, read the taint log (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1 -Addon <name>`).
   3. Then read the code.
 
   Lead the report with what the evidence shows: the failing line, or the chain from the taint log's root cause.

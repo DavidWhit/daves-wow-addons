@@ -15,7 +15,7 @@ This is the kit's one full statement of the debugging order. The other skills, t
 When the user reports something going wrong in game ("action blocked", "only available to the Blizzard UI", an error, odd behaviour, "it doesn't work"), read what the game recorded **before** reading addon code or forming a theory:
 
 1. **The recorded addon errors** (a, below). A Lua error's stack leads straight to the line in the code.
-2. **The taint log** (b), if nothing was recorded (no recorder file yet, or no entries for this addon), or the entry is `blocked` / `forbidden`.
+2. **The taint log** (b), only if nothing was recorded (no recorder file yet, or no entries for this addon), or a `blocked` / `forbidden` entry's taint probe names nothing the failing code reads. The recorder exists because taint.log is unreliable: the client empties it at every login, and `/console taintLog 1` often leaves it empty. When the probe names the cause, work from the probe; don't ask the user to reproduce for the taint log.
 3. **Then the code.**
 
 **a. Recorded addon errors first.**
@@ -29,10 +29,12 @@ The client only shows Lua errors in a pop-up (`/console scriptErrors 1`) and kee
 - **Error:** the first stack line inside the addon is where it failed. Read that file:line before anything else, and explain the failure from the message and the stack.
 - **Repeats** (`x7`) usually mean an OnUpdate or an event handler.
 - **`blocked` / `forbidden`:** read its **taint probe** lines first (the first entry of each kind per session carries one): every value an addon had written on the frames under the mouse, on Blizzard's global tables and frames, and Blizzard globals an addon replaced, each with the addon to blame. A line on a field Blizzard's failing code reads is the cause; fix the write. If the probe names nothing that code reads, go on to the taint log. `/wkprobe` in game runs the probe by hand (hover the frame first, then `/reload`).
+  - **Probe lines can be the damage, not the cause.** Once execution is tainted, every field Blizzard writes in that same call is tagged with the addon too. If Blizzard's own code in the failing stack writes the field (daves_sack's bank block listed `BankPanel.bankType` and `ContainerFrameCombinedBags.size`, both written during the bank's own OnShow), it doesn't say where the taint came in. And a run without a block doesn't prove the taint is gone: the same taint can be harmless in one path and block another one (daves_sack's bank taint later blocked every bandage used from the bags).
+  - **Then bisect in game.** Put temporary switches read at load (`if not ns.db.debugNoX then ... end`, marked TEMP) around each piece the addon runs in that path: hooks, `SetParent`/event changes on Blizzard frames, `HookScript`. Have the user flip one switch per `/reload`, repeat the action (open the bank, say), then `/wkprobe` and `/reload`. The test: does the probe still list the field the blocked code read (`BankPanel.bankType`) as the addon's? That works on any character, even after a one-time action such as the bank's free tab is done. The recorder keeps one probe per session, so the user can run every switch in one sitting; give each `/run` line as its own code block, each resetting all the switches. A clean run can need two pieces together (daves_sack: either switch alone cleared it). Remove every switch afterwards.
 - **"Was not installed ... Linking it now":** the script has just linked the recorder (the kit's `Link-WowAddons.ps1` and `Deploy-WowAddon.ps1` link it too, every run). Ask the user to restart the client fully, reproduce, and `/reload`, then run the script again. If it says the link failed, run the command it prints and fix what that reports.
 - **No entries:** the session shown is the newest with entries. Check its start time against when the user reproduced the problem. `-Session 0` shows all sessions.
 
-**b. Then the taint log** (nothing recorded, or `blocked` / `forbidden`):
+**b. Then the taint log** (nothing recorded, or the probe of a `blocked` / `forbidden` entry names nothing the failing code reads):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1" -Addon <addon folder name>

@@ -196,6 +196,7 @@ To change the look or behaviour, edit the kit's file, then copy it into every ad
 ## Habits that keep addons working across patches
 
 - Keep everything `local` and share state through the addon namespace (`local ADDON, ns = ...`). Accidental globals cause taint and name clashes.
+- Bag replacements: hide Blizzard's container frames (`ContainerFrameN`, `ContainerFrameCombinedBags`) by parking them on a hidden parent, and **leave their events alone** (verified in game 2026-10-21, daves_sack 1.7.14). daves_sack also `UnregisterEvent`ed them from addon code, while showing its own window from `hooksecurefunc` hooks on the bag functions. Together those two tainted every window whose OnShow calls `OpenAllBags`, which means the bank and the mailbox. The bank's free first tab was blocked (`C_Bank.PurchaseBankTab`). Every item used from the bags in combat after a bank visit was blocked too (`UseContainerItem`), because Blizzard's item click reads `BankPanel.bankType` even with the bank closed (Forever's `BankPanel` never hides). Either piece alone left no taint.
 - Use plain color textures or your own `.tga` files for art. Blizzard texture paths move between clients.
 - Initialise SavedVariables in your own `ADDON_LOADED` (when `name == ADDON`).
 - Run the **wow-addon-test** skill after every change to addon code. It validates, then has the **wow-addon-reviewer** agent review the code in advisor mode. Show the user its findings and wait for their go-ahead before applying any.
