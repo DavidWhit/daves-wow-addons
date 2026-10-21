@@ -32,8 +32,6 @@ local done = {}              -- [questID] = true/false, this session
 local lastCX, lastCY
 local searchSet              -- [pin] = true while a search is active (ns.SetSearch)
 local BASE = 15              -- pin size in screen pixels at pinScale 1
-local playerZone             -- the zone you're in, for "Only my zone's quests" (UpdatePlayerZone)
-local QUEST_ICONS = { quest = true, repeatable = true }   -- the categories that filter applies to
 
 ---------------------------------------------------------------------------
 -- Styles: Blizzard's own icons where the client has them, else our dot in the category's colour
@@ -110,40 +108,9 @@ local function Passes(i)
 	end
 	local q = D.qid[i]
 	if q ~= 0 and db.hideCompleted and IsDone(q) then return false end
-	if db.myZoneOnly and not searchSet and playerZone and QUEST_ICONS[D.cats[D.cat[i]].icon] and P.zone[i] ~= playerZone then
-		return false
-	end
 	return true
 end
 ns.Passes = Passes
-
--- "Only my zone's quests": the zone you're in, as a zone-level map (P.zone is too: Calibrate.lua). Event driven, no
--- polling: entering a new zone (ZONE_CHANGED_NEW_AREA) and the loading screen. On a flight the zones go by
--- underneath, so it waits for the landing (PLAYER_CONTROL_GAINED) and changes once. In an instance or anywhere
--- without a zone above it, the last zone stays.
-local function ZoneOf(mapID)
-	local guard = 0
-	while mapID and mapID ~= 0 and guard < 12 do
-		local info = C_Map.GetMapInfo(mapID)
-		if not info then return nil end
-		if info.mapType == Enum.UIMapType.Zone then return mapID end
-		if info.mapType < Enum.UIMapType.Zone then return nil end   -- continent or wider: not in a zone
-		mapID = info.parentMapID
-		guard = guard + 1
-	end
-end
-
-local function UpdatePlayerZone()
-	if UnitOnTaxi("player") then return end
-	local zone = ZoneOf(C_Map.GetBestMapForUnit("player"))
-	if zone and zone ~= playerZone then
-		playerZone = zone
-		if ns.db.myZoneOnly then ns.Refresh() end
-	end
-end
-ns.ZONE_CHANGED_NEW_AREA = UpdatePlayerZone
-ns.PLAYER_ENTERING_WORLD = UpdatePlayerZone
-ns.PLAYER_CONTROL_GAINED = UpdatePlayerZone
 
 ---------------------------------------------------------------------------
 -- Drawing
@@ -683,10 +650,6 @@ local function Init()
 
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
-	ns.events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-	ns.events:RegisterEvent("PLAYER_ENTERING_WORLD")
-	ns.events:RegisterEvent("PLAYER_CONTROL_GAINED")
-	UpdatePlayerZone()   -- the map can load after you're in the world
 end
 
 function ns:QUEST_TURNED_IN(questID)

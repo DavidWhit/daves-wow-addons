@@ -437,7 +437,7 @@ function ns.InitPanel()
 	-- quest filters
 	checks = {}
 	local CHECKS = {
-		{ "myZoneOnly", "Only my zone's quests", "Show quests only in the zone you're in. It follows you as you enter a new zone; on a flight it waits until you land. A search still finds quests everywhere." },
+		{ "trackMyZone", "Track only my zone's quests", "The quest tracker follows the quests in your log for the zone you're in; the rest are untracked (they stay in your log). It changes as you enter a new zone; on a flight it waits until you land. The map's markers are not affected." },
 		{ "hideCompleted", "Hide completed quests", "Completed quests are dimmed; tick to hide them. (Matched to the game's quest IDs through pfQuest.)" },
 		{ "otherClasses", "Other classes' quests", "Show quests only other classes can take." },
 		{ "hideHighLevel", "Hide quests above my level", "Hide quests whose required level is above yours." },
@@ -447,6 +447,7 @@ function ns.InitPanel()
 		local btn, t = TickLine(panel, def[2], nil, nil, nil, function()
 			ns.db[def[1]] = not ns.db[def[1]]
 			RefreshControls(); ns.Refresh()
+			if def[1] == "trackMyZone" then ns.TrackZoneQuests() end   -- ticked on: follow this zone now
 		end, def[3])
 		btn:SetPoint("TOPLEFT", PAD, -80 - (n - 1) * 20)
 		checks[def[1]] = t

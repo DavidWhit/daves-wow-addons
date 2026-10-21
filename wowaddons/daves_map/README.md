@@ -8,8 +8,9 @@ Targets: Forever (`## Interface: 16001`).
 
 - Open the world map. The pins are on by default.
 - **The panel** is dressed like the map: the same metal frame and background, with the quest log's list headers, tick boxes and parchment. It docks beside the windowed map, on the left if there's room, otherwise on the right. When the map is maximized it sits inside it. It opens with the map the way you left it: its X, the map icon, `/dmap panel` and the option all remember the choice. The map icon at the map's bottom left toggles it.
+- **Track only my zone's quests** (on by default, a tick in the panel): the quest tracker follows the quests in your log for the zone you're in, and the rest are untracked (still in your log). It changes as you enter a new zone, and on a flight it waits until you land. The map's markers aren't affected. `/dmap zone` shows what it sees.
 - **Search** matches titles, NPCs, descriptions, categories and zones. While you search, the map shows only the matches, and the list shows them with the ones on this map first. Click a result to select it and open its map, or shift-click to set a waypoint.
-- **Filters:** factions (yours and Neutral to start with), only quests in the zone you're in (on by default; it follows you into each new zone, and on a flight it waits until you land), hide completed quests (dimmed otherwise), other classes' quests, quests above your level, quests 1 to 5 or more levels below it (set how many in `/dmap options`), and every group and category with its count on this map. Click a group's header to show or hide all of it.
+- **Filters:** factions (yours and Neutral to start with), hide completed quests (dimmed otherwise), other classes' quests, quests above your level, quests 1 to 5 or more levels below it (set how many in `/dmap options`), and every group and category with its count on this map. Click a group's header to show or hide all of it.
 - **Hover a pin** to draw its links. They reach into other zones too: a pin off this map is held at the map's edge in the direction it lies.
   - Gold lines lead to where a quest is turned in.
   - Blue lines lead to the quests it requires.
@@ -21,7 +22,7 @@ Targets: Forever (`## Interface: 16001`).
   - Lines join the steps, each in the colour of the step it leads to, and thin gold lines show each step's turn-in. The panel's step numbers are in the same colours, so a line on the map matches its step in the list.
   - Steps in other zones sit at the map's edge with their zone name.
   - The panel lists the steps in order. Click a step in another zone to open that map; click one on this map (or shift-click any) to set a waypoint to it.
-- `/dmap` (or `/davesmap`) toggles the layer. Also `/dmap panel`, `/dmap options`, `/dmap calib` (how well the pins lined up; the lining-up itself is automatic) and `/dmap version` (the data's date).
+- `/dmap` (or `/davesmap`) toggles the layer. Also `/dmap panel`, `/dmap options`, `/dmap calib` (how well the pins lined up; the lining-up itself is automatic), `/dmap zone` (what "Track only my zone's quests" sees) and `/dmap version` (the data's date).
 
 ## Where the data comes from
 

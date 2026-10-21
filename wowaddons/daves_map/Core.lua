@@ -23,7 +23,7 @@ local DEFAULTS = {
 	pinScale = 1.0,         -- pin size
 	hideCompleted = false,  -- completed quests are dimmed; hidden when this is on
 	otherClasses = false,   -- show quests only other classes can take
-	myZoneOnly = true,      -- quests only in the zone you are in (updated on entering a zone; on a flight, on landing)
+	trackMyZone = true,     -- the quest tracker follows only your log's quests for the zone you're in (see below)
 	hideHighLevel = false,  -- hide quests above your level
 	hideLowLevel = false,   -- hide quests well below your level
 	lowLevelGap = 5,        -- ...this many levels or more below it (1-5)
@@ -59,6 +59,7 @@ function ns:ADDON_LOADED(name)
 		if daves_mapDB[k] == nil then daves_mapDB[k] = v end
 	end
 	if type(daves_mapDB.hidden) ~= "table" then daves_mapDB.hidden = {} end   -- [Map Genie category id] = true: off
+	daves_mapDB.myZoneOnly = nil   -- 0.3.3's map filter, replaced by trackMyZone in 0.3.4
 	ns.db = daves_mapDB
 
 	-- The map data lives in the companion addon daves_map_data (generated on this machine, not in git). It is our
@@ -78,6 +79,9 @@ function ns:PLAYER_LOGIN()
 	end
 	local _, class = UnitClass("player")
 	if class and not issecretvalue(class) then ns.playerClass = class end
+	for _, e in ipairs({ "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "PLAYER_CONTROL_GAINED", "QUEST_ACCEPTED" }) do
+		events:RegisterEvent(e)
+	end
 	local D = ns.DATA
 	if D then
 		ns.Print(("v%s loaded: %d map pins from %s (%s). /dmap for commands."):format(ns.VERSION, #D.x, D.source.map, D.source.fetched))
@@ -97,6 +101,94 @@ function ns:PLAYER_LOGIN()
 end
 
 ---------------------------------------------------------------------------
+-- Track only my zone's quests: the quest tracker shows the quests in your log for the zone you're in, and the rest
+-- are untracked (they stay in the log, and the map's markers are unchanged). A quest is this zone's when the quest log
+-- files it under this zone's header, or the game puts it on this zone's map (C_QuestLog.IsOnMap).
+-- Event driven, no polling: entering a zone, the loading screen, accepting a quest. On a flight the zones go by
+-- underneath, so it waits for the landing (PLAYER_CONTROL_GAINED) and changes once.
+---------------------------------------------------------------------------
+local function ZoneOf(mapID)   -- the zone-level map holding mapID (a city or a cave is inside one)
+	local guard = 0
+	while mapID and mapID ~= 0 and guard < 12 do
+		local info = C_Map.GetMapInfo(mapID)
+		if not info then return nil end
+		if info.mapType == Enum.UIMapType.Zone then return mapID end
+		if info.mapType < Enum.UIMapType.Zone then return nil end   -- continent or wider
+		mapID = info.parentMapID
+		guard = guard + 1
+	end
+end
+
+-- the names this zone goes by in the quest log's headers: the game's zone text, your map and its zone
+local function ZoneNames()
+	local names = {}
+	local real = GetRealZoneText and GetRealZoneText()
+	if type(real) == "string" and real ~= "" then names[real] = true end
+	local best = C_Map.GetBestMapForUnit("player")
+	for _, id in ipairs({ best or 0, ZoneOf(best) or 0 }) do
+		local info = id ~= 0 and C_Map.GetMapInfo(id)
+		if info and info.name then names[info.name] = true end
+	end
+	return names
+end
+
+-- the quests in your log: all of them, and the set that is this zone's
+local function LogQuests()
+	local names, all, here = ZoneNames(), {}, {}
+	local header
+	for idx = 1, C_QuestLog.GetNumQuestLogEntries() do
+		local info = C_QuestLog.GetInfo(idx)
+		if info then
+			if info.isHeader then
+				header = info.title
+			elseif not info.isHidden and info.questID and info.questID ~= 0 then
+				local q = info.questID
+				all[#all + 1] = q
+				if (header and names[header]) or C_QuestLog.IsOnMap(q) then here[q] = true end
+			end
+		end
+	end
+	return all, here, names
+end
+
+local function TrackZoneQuests()
+	if not ns.db.trackMyZone then return end
+	if UnitOnTaxi("player") then return end   -- the landing (PLAYER_CONTROL_GAINED) comes back here
+	if not next(ZoneNames()) then return end  -- nowhere the game names (a loading screen): leave the tracker alone
+	local all, here = LogQuests()
+	for _, q in ipairs(all) do
+		local watched = C_QuestLog.GetQuestWatchType(q) ~= nil
+		if here[q] and not watched then C_QuestLog.AddQuestWatch(q)
+		elseif not here[q] and watched then C_QuestLog.RemoveQuestWatch(q) end
+	end
+end
+ns.TrackZoneQuests = TrackZoneQuests
+
+-- the quest log can lag the event by a moment (a new quest, a fresh login): run once, shortly after
+local trackQueued
+local function QueueTrack()
+	if trackQueued then return end
+	trackQueued = true
+	C_Timer.After(1, function() trackQueued = nil; TrackZoneQuests() end)
+end
+ns.ZONE_CHANGED_NEW_AREA = QueueTrack
+ns.PLAYER_ENTERING_WORLD = QueueTrack
+ns.PLAYER_CONTROL_GAINED = QueueTrack
+ns.QUEST_ACCEPTED = QueueTrack
+
+-- /dmap zone: what the tracking sees, to check it in game
+function ns.ReportZone()
+	local all, here, names = LogQuests()
+	local list = {}
+	for n in pairs(names) do list[#list + 1] = n end
+	ns.Print(("track only my zone's quests: %s; on a flight: %s"):format(ns.db.trackMyZone and "on" or "off", UnitOnTaxi("player") and "yes" or "no"))
+	ns.Print("this zone goes by: " .. (#list > 0 and table.concat(list, ", ") or "(nothing)"))
+	local mine = {}
+	for _, q in ipairs(all) do if here[q] then mine[#mine + 1] = C_QuestLog.GetTitleForQuestID(q) or tostring(q) end end
+	ns.Print(("your log: %d quests, %d for this zone%s"):format(#all, #mine, #mine > 0 and (": " .. table.concat(mine, ", ")) or ""))
+end
+
+---------------------------------------------------------------------------
 -- Slash command and Addon Compartment (minimap addon menu)
 ---------------------------------------------------------------------------
 SLASH_DAVES_MAP1 = "/davesmap"
@@ -112,13 +204,15 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 	elseif msg == "panel" then
 		ns.db.panelOpen = not ns.db.panelOpen
 		if ns.UpdatePanel then ns.UpdatePanel() end
+	elseif msg == "zone" then
+		ns.ReportZone()
 	elseif msg == "calib" then
 		if ns.ReportCalibration then ns.ReportCalibration() end
 	elseif msg == "version" then
 		local D = ns.DATA
 		ns.Print(ns.VERSION .. (D and (" - data: %s, %s, %s"):format(D.source.map, D.source.fetched, D.source.questDb or "no quest db") or " - no data"))
 	else
-		ns.Print("commands: /dmap [toggle | panel | options | calib | version]")
+		ns.Print("commands: /dmap [toggle | panel | options | calib | zone | version]")
 	end
 end
 
