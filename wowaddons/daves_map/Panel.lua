@@ -6,8 +6,10 @@
 -- log uses (ListHeaderVisualTemplate).
 --
 -- The list shows one of three things:
---   the selected quest chain: its steps numbered in order, as on the map (click a step for a waypoint)
---   search results: matches on this map first (click to select it and draw its chain, shift-click for a waypoint)
+--   the selected quest chain: its steps numbered in order, as on the map (click a step on another map to open that
+--   map, one on this map for a waypoint)
+--   search results: matches on this map first (click to select it, draw its chain and open its map, shift-click for a
+--   waypoint)
 --   the categories: groups and categories with a tick and how many of their pins are on this map
 -- Parented to WorldMapFrame (it shows and hides with it) but never registered with it: nothing of Blizzard's map is
 -- written. Windowed it docks beside the map (left if there's room, else right, else inside); maximized it sits inside.
@@ -135,7 +137,9 @@ local function RenderRow(row, item)
 		local i = item.i
 		local x = 6
 		if item.kind == "step" then
-			row.num:SetText(item.n .. ".")
+			-- in the step's colour, the colour of its badge and the line into it on the map
+			local chain = ns.Chain()
+			row.num:SetText(("|c%s%d.|r"):format(ns.StepHex(item.n, chain and #chain.steps or 1), item.n))
 			x = 30
 		end
 		row.icon:ClearAllPoints(); row.icon:SetPoint("LEFT", x, 0)
@@ -169,10 +173,10 @@ local function OnRowClick(row)
 		ns.Refresh()
 	elseif item.kind == "chainhead" then
 		ns.Focus(ns.FocusedPin())   -- toggles it off
-	elseif item.kind == "step" then
-		ns.SetWaypoint(item.i)
-	else   -- a search result: select it (its chain is drawn and listed); shift-click for a waypoint
-		if IsShiftKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i) end
+	elseif item.kind == "step" then   -- a step on another map opens that map; on this one, or shift-click: a waypoint
+		if IsShiftKeyDown() or not ns.ShowPinMap(item.i) then ns.SetWaypoint(item.i) end
+	else   -- a search result: select it (its chain is drawn and listed) and open its map; shift-click for a waypoint
+		if IsShiftKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i); ns.ShowPinMap(item.i) end
 	end
 	RefreshIfMapHidden()   -- Refresh / Focus already update the list while the map is open
 end
@@ -433,6 +437,7 @@ function ns.InitPanel()
 	-- quest filters
 	checks = {}
 	local CHECKS = {
+		{ "myZoneOnly", "Only my zone's quests", "Show quests only in the zone you're in. It follows you as you enter a new zone; on a flight it waits until you land. A search still finds quests everywhere." },
 		{ "hideCompleted", "Hide completed quests", "Completed quests are dimmed; tick to hide them. (Matched to the game's quest IDs through pfQuest.)" },
 		{ "otherClasses", "Other classes' quests", "Show quests only other classes can take." },
 		{ "hideHighLevel", "Hide quests above my level", "Hide quests whose required level is above yours." },
@@ -450,15 +455,15 @@ function ns.InitPanel()
 	-- the quest log's divider, then the list on its parchment
 	local divider = panel:CreateTexture(nil, "ARTWORK")
 	divider:SetAtlas("QuestLog-frame-devider")
-	divider:SetPoint("TOPLEFT", 4, -162)
-	divider:SetPoint("TOPRIGHT", -4, -162)
+	divider:SetPoint("TOPLEFT", 4, -182)
+	divider:SetPoint("TOPRIGHT", -4, -182)
 	divider:SetHeight(8)
 	status = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	status:SetPoint("BOTTOMLEFT", PAD, PAD)
 	status:SetPoint("BOTTOMRIGHT", -PAD, PAD)
 	status:SetJustifyH("LEFT")
 	list = CreateFrame("Frame", nil, panel)
-	list:SetPoint("TOPLEFT", 6, -170)
+	list:SetPoint("TOPLEFT", 6, -190)
 	list:SetPoint("BOTTOMRIGHT", -6, PAD + 34)
 	list:EnableMouseWheel(true)
 	list:SetScript("OnMouseWheel", function(_, delta) offset = offset - delta * 3; Render() end)

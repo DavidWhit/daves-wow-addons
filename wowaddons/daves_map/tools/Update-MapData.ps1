@@ -14,6 +14,18 @@
   small literal reader written here (no Lua or JavaScript from the web is ever run), and the folder is deleted at
   the end unless -KeepRaw.
 
+  Security checks, before anything is downloaded and before anything downloaded is read (each failure stops the build,
+  nothing is written):
+  - Sources: -Url must be https on mapgenie.io; -QuestDbRef a plain branch, tag or commit name. Only two hosts are
+    ever fetched from, mapgenie.io and raw.githubusercontent.com (pfQuest), always over https with TLS 1.2 and the
+    system's certificate checks.
+  - Each download: where it really came from (after any redirect) must be one of those hosts over https, and it must
+    be under 64 MB. Its size and SHA-256 are printed, so a build can be compared with the last.
+  - Parsing: JSON through .NET's parser; pfQuest's Lua tables through the data-only reader below, nesting capped.
+  - Output: every downloaded string is written into Data.lua as an escaped Lua string (quotes, backslashes and every
+    control character), and every number is cast to a number first, so nothing downloaded can become Lua code.
+  A summary of the checks is printed at the end.
+
   What is NOT copied from Map Genie: links (URLs in descriptions are dropped; links to other pins on the same map
   become pin-to-pin links), media, icons, and anything behind a login. Data.lua stays out of git (.gitignore):
   Map Genie's data is theirs, and the repo is public.
@@ -29,6 +41,18 @@ param(
 	[switch]$KeepRaw
 )
 $ErrorActionPreference = 'Stop'
+# Security: where data may come from, checked before anything is downloaded.
+$ALLOWED_HOSTS = @('mapgenie.io', 'raw.githubusercontent.com')
+$MAX_BYTES = 64MB
+$security = New-Object System.Collections.ArrayList   # what was checked, for the summary at the end
+$u0 = $null
+if (-not [Uri]::TryCreate($Url, [UriKind]::Absolute, [ref]$u0) -or $u0.Scheme -ne 'https' -or $u0.Host -ne 'mapgenie.io' -or $Url -match '[\s"]') {
+	throw "Refusing -Url '$Url': it must be an https://mapgenie.io/... address."
+}
+if ($QuestDbRef -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$' -or $QuestDbRef -match '\.\.') {
+	throw "Refusing -QuestDbRef '$QuestDbRef': a branch, tag or commit name only (letters, digits, '.', '_', '-')."
+}
+[void]$security.Add("sources: $Url (https, mapgenie.io); pfQuest ref '$QuestDbRef'")
 # The data goes into its own addon, daves_map_data, next to daves_map. daves_map lists it in ## OptionalDeps, so a
 # copy without it (a fresh clone) loads with no error and says how to get it. The path is fixed on purpose: the repo
 # root's .gitignore covers exactly wowaddons/daves_map_data/, and Map Genie's data must never land anywhere git sees.
@@ -59,6 +83,7 @@ public static class LuaLiteral {
 		int eq = text.IndexOf('=');
 		int pos = text.IndexOf('{', eq < 0 ? 0 : eq);
 		if (pos < 0) throw new FormatException("no table literal");
+		depth = 0;
 		return (Dictionary<object, object>)Value(text, ref pos);
 	}
 	static void Skip(string s, ref int p) {
@@ -83,13 +108,16 @@ public static class LuaLiteral {
 		if (string.CompareOrdinal(s, p, "nil", 0, 3) == 0) { p += 3; return null; }
 		throw new FormatException("unexpected '" + c + "' at " + p);
 	}
+	const int MAX_DEPTH = 64;   // security: pfQuest nests a few levels; deeper is not data we expect
+	[ThreadStatic] static int depth;
 	static Dictionary<object, object> Table(string s, ref int p) {
 		var t = new Dictionary<object, object>();
 		p++;   // {
+		if (++depth > MAX_DEPTH) throw new FormatException("tables nested deeper than " + MAX_DEPTH + " at " + p);
 		long n = 1;
 		while (true) {
 			Skip(s, ref p);
-			if (s[p] == '}') { p++; return t; }
+			if (s[p] == '}') { p++; depth--; return t; }
 			object key = null;
 			if (s[p] == '[') {
 				p++; key = Value(s, ref p); Skip(s, ref p);
@@ -152,9 +180,26 @@ public static class LuaLiteral {
 '@
 }
 
+# Downloads one file into the fresh folder, then checks it before it is read: requested and final address (after any
+# redirect) https on an allowed host, size under MAX_BYTES. Records its size and SHA-256 for the summary.
 function Fetch([string]$u, [string]$path, [hashtable]$headers = @{}) {
+	$req = [Uri]$u
+	if ($req.Scheme -ne 'https' -or $ALLOWED_HOSTS -notcontains $req.Host) { throw "Refusing to download $u (not https on $($ALLOWED_HOSTS -join ' / '))." }
 	$h = @{ 'User-Agent' = $UA } + $headers
-	Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $path -Headers $h -TimeoutSec 120 | Out-Null
+	$r = Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile $path -Headers $h -TimeoutSec 120 -MaximumRedirection 3 -PassThru
+	$final = $r.BaseResponse.ResponseUri
+	if ($final -and ($final.Scheme -ne 'https' -or $ALLOWED_HOSTS -notcontains $final.Host)) {
+		Remove-Item -LiteralPath $path -Force
+		throw "Download of $u was redirected to $final (not https on an allowed host); stopped before reading it."
+	}
+	$len = (Get-Item -LiteralPath $path).Length
+	if ($len -gt $MAX_BYTES) {
+		Remove-Item -LiteralPath $path -Force
+		throw ("Download of {0} is {1:N0} MB, over the {2:N0} MB limit; stopped before reading it." -f $u, ($len / 1MB), ($MAX_BYTES / 1MB))
+	}
+	if ($len -eq 0) { throw "Download of $u is empty." }
+	$sha = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+	[void]$security.Add(("download: {0} ({1:N0} KB, sha256 {2})" -f $u, ($len / 1KB), $sha))
 	return [IO.File]::ReadAllText($path, [Text.Encoding]::UTF8)
 }
 $json = New-Object Web.Script.Serialization.JavaScriptSerializer
@@ -376,11 +421,20 @@ Write-Host "Links: $($links.endp) quest turn-ins, $($links.pre) prerequisites, $
 # ---------------------------------------------------------------------------------------------------------------------
 # 5. Data.lua
 # ---------------------------------------------------------------------------------------------------------------------
+# Security: downloaded text only ever goes into Data.lua through here, as one quoted Lua string: backslashes and quotes
+# escaped, newlines as \n, every other control character (CR, NUL, ...) dropped, so it can't end the string early.
 function LuaStr([string]$s) {
-	$s = $s -replace '\\', '\\' -replace '"', '\"' -replace "`n", '\n' -replace "`t", ' '
+	$s = $s -replace '\\', '\\' -replace '"', '\"' -replace "`n", '\n' -replace "`t", ' ' -replace '[\x00-\x1f\x7f]', ''
 	return '"' + $s + '"'
 }
-function NumList($list) { return '{' + (($list | % { [string]$_ }) -join ',') + '}' }
+# and numbers only as numbers: anything else stops the build
+function LuaNum($v) {
+	$d = 0.0
+	if (-not [double]::TryParse([string]$v, [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture, [ref]$d) -or
+		[double]::IsNaN($d) -or [double]::IsInfinity($d)) { throw "Not a number for Data.lua: '$v'" }
+	return $d.ToString([Globalization.CultureInfo]::InvariantCulture)
+}
+function NumList($list) { return '{' + (($list | % { LuaNum $_ }) -join ',') + '}' }
 $inv = [Globalization.CultureInfo]::InvariantCulture
 $sb = New-Object Text.StringBuilder
 $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm', $inv) + ' UTC'
@@ -388,24 +442,24 @@ $stamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm', $inv) + ' UTC
 [void]$sb.AppendLine("-- Source: $Url  ($stamp)")
 [void]$sb.AppendLine('-- One global, read once by daves_map at its ADDON_LOADED (this addon is its ## OptionalDeps, so it loads first).')
 [void]$sb.AppendLine('DAVES_MAP_DATA = {')
-[void]$sb.AppendLine("source = { url = $(LuaStr $Url), map = $(LuaStr $mapTitle), mapId = $mapId, fetched = $(LuaStr $stamp), questDb = $(if ($pfUsed) { LuaStr ('pfQuest@' + $pfUsed) } else { 'false' }) },")
+[void]$sb.AppendLine("source = { url = $(LuaStr $Url), map = $(LuaStr $mapTitle), mapId = $(LuaNum $mapId), fetched = $(LuaStr $stamp), questDb = $(if ($pfUsed) { LuaStr ('pfQuest@' + $pfUsed) } else { 'false' }) },")
 [void]$sb.AppendLine('groups = {')
-foreach ($g in $groupOut) { [void]$sb.AppendLine("  { id = $($g.id), title = $(LuaStr $g.title), cats = $(NumList $g.cats) },") }
+foreach ($g in $groupOut) { [void]$sb.AppendLine("  { id = $(LuaNum $g.id), title = $(LuaStr $g.title), cats = $(NumList $g.cats) },") }
 [void]$sb.AppendLine('},')
 [void]$sb.AppendLine('cats = {')
-foreach ($c in $cats) { [void]$sb.AppendLine("  { id = $($c.id), title = $(LuaStr $c.title), icon = $(LuaStr $c.icon), color = $(LuaStr $c.color), group = $($c.group), info = $(LuaStr (CleanText $c.info)) },") }
+foreach ($c in $cats) { [void]$sb.AppendLine("  { id = $(LuaNum $c.id), title = $(LuaStr $c.title), icon = $(LuaStr $c.icon), color = $(LuaStr $c.color), group = $(LuaNum $c.group), info = $(LuaStr (CleanText $c.info)) },") }
 [void]$sb.AppendLine('},')
 # columnar pin arrays: one Lua constant list each keeps the file small and quick to load
 function Column([string]$name, $values) { [void]$sb.Append("$name = {"); [void]$sb.Append(($values -join ',')); [void]$sb.AppendLine('},') }
-Column 'x' ($pins | % { $_.x.ToString($inv) })
-Column 'y' ($pins | % { $_.y.ToString($inv) })
-Column 'cat' ($pins | % { $_.cat })
-Column 'fac' ($pins | % { $_.fac })
-Column 'lvl' ($pins | % { $_.lvl })
-Column 'cls' ($pins | % { $_.cls })
-Column 'qid' ($pins | % { $_.qid })
-Column 'endp' ($pins | % { $_.endp })
-Column 'dest' ($pins | % { $_.dest })
+Column 'x' ($pins | % { LuaNum $_.x })
+Column 'y' ($pins | % { LuaNum $_.y })
+Column 'cat' ($pins | % { LuaNum $_.cat })
+Column 'fac' ($pins | % { LuaNum $_.fac })
+Column 'lvl' ($pins | % { LuaNum $_.lvl })
+Column 'cls' ($pins | % { LuaNum $_.cls })
+Column 'qid' ($pins | % { LuaNum $_.qid })
+Column 'endp' ($pins | % { LuaNum $_.endp })
+Column 'dest' ($pins | % { LuaNum $_.dest })
 [void]$sb.AppendLine('title = {'); foreach ($p in $pins) { [void]$sb.AppendLine((LuaStr $p.title) + ',') }; [void]$sb.AppendLine('},')
 [void]$sb.AppendLine('text = {'); foreach ($p in $pins) { [void]$sb.AppendLine((LuaStr $p.text) + ',') }; [void]$sb.AppendLine('},')
 [void]$sb.AppendLine('pre = {')
@@ -464,3 +518,9 @@ if ($prev -and $prev -match '(?m)^cat = \{([^}]*)\}') {
 	if ($changes) { Write-Host 'Changed since the last build:'; $changes | % { Write-Host $_ } } else { Write-Host 'No change in pin counts since the last build.' }
 }
 if ($KeepRaw) { Write-Host "Raw downloads kept in $raw" } else { Remove-Item -LiteralPath $raw -Recurse -Force }
+# the security summary (every check below passed, or the build would have stopped before writing anything)
+Write-Host ''
+Write-Host 'Security checks passed:'
+$security | % { Write-Host "  $_" }
+Write-Host ("  each download: https on {0} after redirects, under {1:N0} MB, read as data only (JSON / Lua literals, nesting <= 64)" -f ($ALLOWED_HOSTS -join ' / '), ($MAX_BYTES / 1MB))
+Write-Host '  Data.lua: downloaded text written only as escaped Lua strings, numbers checked as numbers'

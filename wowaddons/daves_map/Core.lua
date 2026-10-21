@@ -23,6 +23,7 @@ local DEFAULTS = {
 	pinScale = 1.0,         -- pin size
 	hideCompleted = false,  -- completed quests are dimmed; hidden when this is on
 	otherClasses = false,   -- show quests only other classes can take
+	myZoneOnly = true,      -- quests only in the zone you are in (updated on entering a zone; on a flight, on landing)
 	hideHighLevel = false,  -- hide quests above your level
 	hideLowLevel = false,   -- hide quests well below your level
 	lowLevelGap = 5,        -- ...this many levels or more below it (1-5)

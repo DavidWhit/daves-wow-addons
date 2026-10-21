@@ -32,6 +32,8 @@ local done = {}              -- [questID] = true/false, this session
 local lastCX, lastCY
 local searchSet              -- [pin] = true while a search is active (ns.SetSearch)
 local BASE = 15              -- pin size in screen pixels at pinScale 1
+local playerZone             -- the zone you're in, for "Only my zone's quests" (UpdatePlayerZone)
+local QUEST_ICONS = { quest = true, repeatable = true }   -- the categories that filter applies to
 
 ---------------------------------------------------------------------------
 -- Styles: Blizzard's own icons where the client has them, else our dot in the category's colour
@@ -108,9 +110,40 @@ local function Passes(i)
 	end
 	local q = D.qid[i]
 	if q ~= 0 and db.hideCompleted and IsDone(q) then return false end
+	if db.myZoneOnly and not searchSet and playerZone and QUEST_ICONS[D.cats[D.cat[i]].icon] and P.zone[i] ~= playerZone then
+		return false
+	end
 	return true
 end
 ns.Passes = Passes
+
+-- "Only my zone's quests": the zone you're in, as a zone-level map (P.zone is too: Calibrate.lua). Event driven, no
+-- polling: entering a new zone (ZONE_CHANGED_NEW_AREA) and the loading screen. On a flight the zones go by
+-- underneath, so it waits for the landing (PLAYER_CONTROL_GAINED) and changes once. In an instance or anywhere
+-- without a zone above it, the last zone stays.
+local function ZoneOf(mapID)
+	local guard = 0
+	while mapID and mapID ~= 0 and guard < 12 do
+		local info = C_Map.GetMapInfo(mapID)
+		if not info then return nil end
+		if info.mapType == Enum.UIMapType.Zone then return mapID end
+		if info.mapType < Enum.UIMapType.Zone then return nil end   -- continent or wider: not in a zone
+		mapID = info.parentMapID
+		guard = guard + 1
+	end
+end
+
+local function UpdatePlayerZone()
+	if UnitOnTaxi("player") then return end
+	local zone = ZoneOf(C_Map.GetBestMapForUnit("player"))
+	if zone and zone ~= playerZone then
+		playerZone = zone
+		if ns.db.myZoneOnly then ns.Refresh() end
+	end
+end
+ns.ZONE_CHANGED_NEW_AREA = UpdatePlayerZone
+ns.PLAYER_ENTERING_WORLD = UpdatePlayerZone
+ns.PLAYER_CONTROL_GAINED = UpdatePlayerZone
 
 ---------------------------------------------------------------------------
 -- Drawing
@@ -262,14 +295,34 @@ local function Badge(n)   -- a step number on a pin: a frame of its own so it ca
 	return b
 end
 
-local function DrawLine(i, j, kind, alpha, thickPx)
+-- A chain step's colour: each step has its own, shared by its badge, the line leading into it and its number in the
+-- panel, so a line on the map can be found in the list. They run round the colour wheel in order, green first.
+local function HSV(h, s, v)
+	local i = math.floor(h * 6) % 6
+	local f = h * 6 - math.floor(h * 6)
+	local p, q, t = v * (1 - s), v * (1 - f * s), v * (1 - (1 - f) * s)
+	if i == 0 then return v, t, p elseif i == 1 then return q, v, p elseif i == 2 then return p, v, t
+	elseif i == 3 then return p, q, v elseif i == 4 then return t, p, v end
+	return v, p, q
+end
+function ns.StepColor(n, total)
+	local k = total > 1 and (n - 1) / total or 0
+	return HSV((1 / 3 + k) % 1, .7, 1)
+end
+local function StepHex(n, total)
+	local r, g, b = ns.StepColor(n, total)
+	return ("ff%02x%02x%02x"):format(math.floor(r * 255 + .5), math.floor(g * 255 + .5), math.floor(b * 255 + .5))
+end
+ns.StepHex = StepHex
+
+local function DrawLine(i, j, kind, alpha, thickPx, color)
 	local x1, y1, on1 = Pos(i)
 	local x2, y2, on2 = Pos(j)
 	if not (x1 and x2) or (x1 == x2 and y1 == y2) then return end
 	if not (on1 or on2) then return end   -- both ends off this map: it would only run along the border
 	nLines = nLines + 1
 	local ln = Line(nLines)
-	local c = LINK_COLORS[kind]
+	local c = color or LINK_COLORS[kind]
 	ln:SetStartPoint("TOPLEFT", overlay, x1 * curW, -y1 * curH)
 	ln:SetEndPoint("TOPLEFT", overlay, x2 * curW, -y2 * curH)
 	ln:SetThickness(thickPx / (curScale or 1))
@@ -278,14 +331,16 @@ local function DrawLine(i, j, kind, alpha, thickPx)
 end
 
 -- a ring round a pin and its icon above the others, also when the filters hide it (only where it really is)
-local function Mark(i, focus)
+local function Mark(i, focus, color)   -- color: a chain step's ring takes its step colour
 	local x, y, on = Pos(i)
 	if not (x and on) then return end
 	local size = PinSize(i)
 	nRings = nRings + 1
 	local r = Ring(nRings)
 	Place(r, x, y, size * 1.9)
-	if focus then r:SetVertexColor(1, .9, .3) else r:SetVertexColor(.9, .9, .9) end
+	if focus then r:SetVertexColor(1, .9, .3)
+	elseif color then r:SetVertexColor(color[1], color[2], color[3])
+	else r:SetVertexColor(.9, .9, .9) end
 	r:Show()
 	nLinked = nLinked + 1
 	local t = LinkedIcon(nLinked)
@@ -301,7 +356,14 @@ local function FitBadge(b)
 	b:SetWidth(math.max(18, b.text:GetStringWidth() + 10))
 end
 
-local function DrawStep(i, n, isRoot)
+-- a step's number in its colour, for the shared edge badges ("3, 4, 7", each in its own colour)
+local function StepNums(nums, total)
+	local out = {}
+	for k, n in ipairs(nums) do out[k] = ("|c%s%d|r"):format(StepHex(n, total), n) end
+	return table.concat(out, ", ")
+end
+
+local function DrawStep(i, n, isRoot, total)
 	local x, y, on = Pos(i)
 	if not x then return end
 	if not on then
@@ -309,9 +371,10 @@ local function DrawStep(i, n, isRoot)
 		local shared = edgeBadges[zone]
 		if shared then
 			shared.nums[#shared.nums + 1] = n
-			shared.text:SetText(table.concat(shared.nums, ", "))
+			shared.bg:SetVertexColor(.12, .1, .06)   -- several steps: a dark badge, each number in its colour
+			shared.text:SetTextColor(1, 1, 1)
+			shared.text:SetText(StepNums(shared.nums, total))
 			FitBadge(shared)
-			if isRoot then shared.bg:SetVertexColor(.95, .72, .15); shared.text:SetTextColor(0, 0, 0) end
 			return
 		end
 	end
@@ -324,11 +387,9 @@ local function DrawStep(i, n, isRoot)
 	b:ClearAllPoints()
 	b:SetPoint("CENTER", overlay, "TOPLEFT", px + lift, py + lift)
 	b.text:SetText(n)
-	if isRoot then
-		b.bg:SetVertexColor(.95, .72, .15); b.text:SetTextColor(0, 0, 0)
-	else
-		b.bg:SetVertexColor(.12, .1, .06); b.text:SetTextColor(1, .82, .2)
-	end
+	-- the step's colour; the selected quest's number is white (its ring is gold: Mark)
+	b.bg:SetVertexColor(ns.StepColor(n, total))
+	if isRoot then b.text:SetTextColor(1, 1, 1) else b.text:SetTextColor(0, 0, 0) end
 	b.zone:SetText(on and "" or (ns.ZoneName(i) or ""))
 	b:SetAlpha(on and 1 or .85)
 	b.nums = { n }
@@ -344,17 +405,21 @@ local function DrawLinks()
 		if lockedPin then
 			if not chain or chain.root ~= lockedPin then chain = BuildChain(lockedPin) end
 			-- step to step along the chain, each step's turn-in, then the numbers on top
+			-- (each line into a step, and its ring, in that step's colour)
+			local total = #chain.steps
+			local colors = {}
+			for n, i in ipairs(chain.steps) do colors[i] = total > 1 and { ns.StepColor(n, total) } or nil end
 			for _, i in ipairs(chain.steps) do
-				for _, p in ipairs(D.pre[i] or {}) do if chain.set[p] then DrawLine(p, i, "chain", .9, 3) end end
+				for _, p in ipairs(D.pre[i] or {}) do if chain.set[p] then DrawLine(p, i, "chain", .9, 3, colors[i]) end end
 				if D.endp[i] ~= 0 then DrawLine(i, D.endp[i], "endp", .7, 1.5) end
 				if D.dest[i] ~= 0 then DrawLine(i, D.dest[i], "dest", .8, 2) end
 			end
 			for _, i in ipairs(chain.steps) do
-				Mark(i, i == lockedPin)
+				Mark(i, i == lockedPin, colors[i])
 				if D.endp[i] ~= 0 and not chain.set[D.endp[i]] then Mark(D.endp[i], false) end
 			end
-			if #chain.steps > 1 then
-				for n, i in ipairs(chain.steps) do DrawStep(i, n, i == lockedPin) end
+			if total > 1 then
+				for n, i in ipairs(chain.steps) do DrawStep(i, n, i == lockedPin, total) end
 			end
 		elseif hoverPin then
 			local i = hoverPin
@@ -455,6 +520,20 @@ function ns.SetWaypoint(i)
 	C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(zone, x, y))
 	C_SuperTrack.SetSuperTrackedUserWaypoint(true)
 	ns.Print(("waypoint: %s (%s %.1f, %.1f)."):format(D.title[i], ns.ZoneName(i) or "?", x * 100, y * 100))
+end
+
+-- Opens the map a pin is on, when the world map shows another (a click in the panel). SetMapID from addon code
+-- taints the map's refresh, and its pins' SetPassThroughButtons is blocked in combat (see the top of this file), so
+-- not in combat. True when it switched.
+function ns.ShowPinMap(i)
+	local zone = P.zone[i]
+	if not zone or zone == curMap or not WorldMapFrame:IsShown() then return false end
+	if InCombatLockdown() then
+		ns.Print("can't change the map in combat.")
+		return false
+	end
+	WorldMapFrame:SetMapID(zone)
+	return true
 end
 
 -- lock a pin's chain on the map (a search result, or a click); nil clears it
@@ -604,6 +683,10 @@ local function Init()
 
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
+	ns.events:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+	ns.events:RegisterEvent("PLAYER_ENTERING_WORLD")
+	ns.events:RegisterEvent("PLAYER_CONTROL_GAINED")
+	UpdatePlayerZone()   -- the map can load after you're in the world
 end
 
 function ns:QUEST_TURNED_IN(questID)
