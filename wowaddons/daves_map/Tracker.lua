@@ -152,6 +152,11 @@ local function PinButton(n)
 	b:SetScript("OnClick", function(self)
 		ns.db.pinned[self.questID] = not ns.db.pinned[self.questID] or nil
 		PaintPin(self); PinTooltip(self)
+		-- unpinned: the zone check runs now, so a quest from another zone leaves the tracker straight away
+		if not ns.db.pinned[self.questID] then
+			GameTooltip:Hide()
+			ns.TrackZoneQuests()
+		end
 	end)
 	b:SetScript("OnEnter", function(self) PaintPin(self); PinTooltip(self) end)
 	b:SetScript("OnLeave", function(self) PaintPin(self); if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
@@ -237,6 +242,7 @@ local function OnRowClick(row)
 		if ns.Calibrate() and ns.SetWaypoint then ns.SetWaypoint(row.turnIn) end
 		return
 	end
+	if SOUNDKIT and SOUNDKIT.IG_QUEST_LIST_SELECT then PlaySound(SOUNDKIT.IG_QUEST_LIST_SELECT) end   -- as the quest log; silent when the map was open
 	C_SuperTrack.SetSuperTrackedQuestID(q)
 	if InCombatLockdown() then
 		ns.Print("tracking it; can't open the map in combat, click it again after.")
@@ -446,8 +452,14 @@ local function Queue(zone, delay)
 		ns.UpdateReady()
 	end)
 end
-events.ZONE_CHANGED_NEW_AREA = function() Queue(true) end
-events.PLAYER_ENTERING_WORLD = function() Queue(true) end
+events.ZONE_CHANGED_NEW_AREA = function() ns.TrackZoneQuests(); Queue(true) end   -- at once too (see below)
+-- The loading screen: the rules apply at once, in this event, before the tracker draws (its updates run on the next
+-- frame: DirtiableMixin), so it never shows the quests it is about to drop; then again a second later in case the
+-- quest log was still filling in.
+events.PLAYER_ENTERING_WORLD = function()
+	if C_QuestLog.GetNumQuestLogEntries() > 0 then ns.TrackZoneQuests() end
+	Queue(true)
+end
 events.PLAYER_CONTROL_GAINED = function() Queue(true) end
 events.QUEST_ACCEPTED = function(_, q)
 	if q then accepted[q] = true; C_Timer.After(2, function() accepted[q] = nil end) end   -- the game may auto-track it

@@ -475,6 +475,12 @@ local function SetHover(i)
 	DrawLinks()
 end
 
+-- Blizzard's own map sounds for the same actions (Blizzard_WorldMap, Blizzard_SharedMapDataProviders)
+local function Sound(name)
+	local id = SOUNDKIT and SOUNDKIT[name]
+	if id then PlaySound(id) end
+end
+
 function ns.SetWaypoint(i)
 	local zone = P.zone[i]
 	if not zone or not C_Map.CanSetUserWaypointOnMap(zone) then
@@ -486,26 +492,32 @@ function ns.SetWaypoint(i)
 	if not x then return end
 	C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(zone, x, y))
 	C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+	Sound("UI_MAP_WAYPOINT_CLICK_TO_PLACE")
 	ns.Print(("waypoint: %s (%s %.1f, %.1f)."):format(D.title[i], ns.ZoneName(i) or "?", x * 100, y * 100))
 end
 
--- Opens the map a pin is on, when the world map shows another (a click in the panel). SetMapID from addon code
--- taints the map's refresh, and its pins' SetPassThroughButtons is blocked in combat (see the top of this file), so
--- not in combat. True when it switched.
-function ns.ShowPinMap(i)
-	local zone = P.zone[i]
-	if not zone or zone == curMap or not WorldMapFrame:IsShown() then return false end
+-- Turns the open world map to another map. SetMapID from addon code taints the map's refresh, and its pins'
+-- SetPassThroughButtons is blocked in combat (see the top of this file), so not in combat. True when it switched.
+local function ShowMap(mapID)
+	if not mapID or mapID == curMap or not WorldMapFrame:IsShown() then return false end
 	if InCombatLockdown() then
 		ns.Print("can't change the map in combat.")
 		return false
 	end
-	WorldMapFrame:SetMapID(zone)
+	Sound("IG_QUEST_LOG_OPEN")   -- as following a map link on Blizzard's map (MapLinkDataProvider)
+	WorldMapFrame:SetMapID(mapID)
 	return true
+end
+
+-- the map a pin is on (a click in the panel)
+function ns.ShowPinMap(i)
+	return ShowMap(P.zone[i])
 end
 
 -- lock a pin's chain on the map (a search result, or a click); nil clears it
 function ns.Focus(i)
 	lockedPin = (i ~= lockedPin) and i or nil
+	Sound(lockedPin and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")   -- as Blizzard's map pins toggle
 	chain = lockedPin and BuildChain(lockedPin) or nil
 	DrawLinks()
 	if ns.OnLayerChanged then ns.OnLayerChanged() end
@@ -529,15 +541,88 @@ end
 function ns.ShowQuestOnMap(q)
 	if not (D and ns.Calibrate()) then return end
 	local i = ns.QuestPin(q)
-	if not i then return end
+	if not i then return false end
 	local e = D.endp[i]
 	local ready = C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(q)
 	if lockedPin ~= i then ns.Focus(i) end
 	ns.ShowPinMap((ready and e ~= 0) and e or i)
+	return true
 end
 
+-- the zone a quest is filed under in the quest log: the header above it
+local function QuestHeader(q)
+	local idx = C_QuestLog.GetLogIndexForQuestID(q)
+	for k = idx or 0, 1, -1 do
+		local info = C_QuestLog.GetInfo(k)
+		if info and info.isHeader then return info.title end
+	end
+end
+
+-- a game map by its name, from every map under the world and cosmic maps (looked up once)
+local mapByName
+local function MapNamed(name)
+	if not mapByName then
+		mapByName = {}
+		local roots = { C_Map.GetFallbackWorldMapID and C_Map.GetFallbackWorldMapID() or 0, 946 }   -- 946: the cosmic map
+		for _, root in ipairs(roots) do
+			for _, info in ipairs(root ~= 0 and C_Map.GetMapChildrenInfo(root, nil, true) or {}) do
+				if info.name and not mapByName[info.name] then mapByName[info.name] = info.mapID end
+			end
+		end
+	end
+	return mapByName[name]
+end
+
+-- "No map location": a dark veil of our own over the map, so it doesn't look as if the map it was on is the answer.
+-- Blizzard's map can't be blanked, so this covers it. It goes when the map changes (OnUpdate), when the map closes,
+-- or on a click.
+local veil
+local function ShowVeil(title, zone)
+	if not veil then
+		veil = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer)
+		veil:SetAllPoints()
+		veil:SetFrameLevel(WorldMapFrame:GetPinFrameLevelsManager():GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST") + 5)
+		local bg = veil:CreateTexture(nil, "BACKGROUND")
+		bg:SetAllPoints()
+		bg:SetColorTexture(0, 0, 0, .82)
+		veil.title = veil:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+		veil.title:SetPoint("BOTTOM", veil, "CENTER", 0, 14)
+		veil.title:SetWidth(520)
+		veil.text = veil:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+		veil.text:SetPoint("TOP", veil, "CENTER", 0, 0)
+		veil.text:SetWidth(460)
+		veil.hint = veil:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+		veil.hint:SetPoint("TOP", veil.text, "BOTTOM", 0, -12)
+		veil.hint:SetText("Click to close")
+		veil:SetScript("OnClick", function(self) self:Hide() end)
+		veil:SetScript("OnHide", function(self) self:Hide() end)   -- the map closing: don't come back with it
+	end
+	veil.title:SetText(title)
+	veil.text:SetText("No map location: the game has none for this quest, and Map Genie's map doesn't list it"
+		.. (zone and (".\nThe quest log files it under " .. zone .. ", which has no map of its own.") or "."))
+	veil.mapID = WorldMapFrame:GetMapID()   -- the map now (opening the quest log may just have turned it)
+	veil:Show()
+end
+function ns.HideVeilIfMoved()   -- OnUpdate: the map turned elsewhere
+	if veil and veil:IsShown() and veil.mapID ~= curMap then veil:Hide() end
+end
+
+-- With no location in the game or the map data (an instance like the Deeprun Tram, or a quest Map Genie doesn't
+-- list): the game's map of the zone the quest log files it under, even when that map is empty (with a note, once a
+-- session); with no such map, the veil above.
+local toldNoMap = {}
 local function OnQuestDetails(q)
-	if type(q) == "number" and GetQuestUiMapID and GetQuestUiMapID(q) == 0 then ns.ShowQuestOnMap(q) end
+	if type(q) ~= "number" or not GetQuestUiMapID or GetQuestUiMapID(q) ~= 0 then return end
+	if ns.ShowQuestOnMap(q) ~= false then return end
+	local zone = QuestHeader(q)
+	local mapID = zone and MapNamed(zone)
+	local title = C_QuestLog.GetTitleForQuestID(q) or tostring(q)
+	if not mapID then ShowVeil(title, zone) return end
+	ShowMap(mapID)
+	if not toldNoMap[q] then
+		toldNoMap[q] = true
+		ns.Print(("no exact spot for \"%s\": showing its zone, %s."):format(title, zone))
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -601,6 +686,7 @@ local function OnUpdate()
 	if map ~= curMap or w ~= curW or h ~= curH then
 		curMap, curW, curH = map, w, h
 		dirty = true   -- Rebuild clears the hover
+		ns.HideVeilIfMoved()
 	end
 	local scale, zoom = WorldMapFrame:GetCanvasScale(), WorldMapFrame:GetCanvasZoomPercent()
 	if dirty then

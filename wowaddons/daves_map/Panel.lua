@@ -159,6 +159,13 @@ local function Render()
 	list.more:SetShown(offset + n < #items)
 end
 
+-- Every click sounds, as in Blizzard's quest log: a tick for the filters, the quest list's select for a step or a
+-- result (a click that turns the map, or sets a waypoint, adds its own map sound in Layer.lua).
+local function Sound(name)
+	local id = SOUNDKIT and SOUNDKIT[name]
+	if id then PlaySound(id) end
+end
+
 local function OnRowClick(row)
 	local item = row.item
 	if not item then return end
@@ -166,16 +173,20 @@ local function OnRowClick(row)
 	if item.kind == "group" then
 		local _, off = GroupState(item.gi)
 		for _, ci in ipairs(D.groups[item.gi].cats) do hidden[D.cats[ci].id] = (off == 0) or nil end
+		Sound(off == 0 and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON")
 		ns.Refresh()
 	elseif item.kind == "cat" then
 		local id = D.cats[item.ci].id
 		hidden[id] = not hidden[id] or nil
+		Sound(hidden[id] and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON")
 		ns.Refresh()
 	elseif item.kind == "chainhead" then
-		ns.Focus(ns.FocusedPin())   -- toggles it off
+		ns.Focus(ns.FocusedPin())   -- toggles it off (with its own sound)
 	elseif item.kind == "step" then   -- a step on another map opens that map; on this one, or shift-click: a waypoint
+		Sound("IG_QUEST_LIST_SELECT")
 		if IsShiftKeyDown() or not ns.ShowPinMap(item.i) then ns.SetWaypoint(item.i) end
 	else   -- a search result: select it (its chain is drawn and listed) and open its map; shift-click for a waypoint
+		Sound("IG_QUEST_LIST_SELECT")
 		if IsShiftKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i); ns.ShowPinMap(item.i) end
 	end
 	RefreshIfMapHidden()   -- Refresh / Focus already update the list while the map is open
