@@ -766,6 +766,15 @@ local function Init()
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
 	-- opening a quest (the tracker, the quest log, our Ready to Turn In section): stand in for a missing map location
 	if QuestMapFrame_ShowQuestDetails then hooksecurefunc("QuestMapFrame_ShowQuestDetails", OnQuestDetails) end
+	-- a quest opened while the map is already open (the tracker, our Ready to Turn In): Blizzard plays nothing then,
+	-- only the map's opening sound the first time; so the quest list's select sound, as in the quest log
+	local mapShownAt = 0
+	WorldMapFrame:HookScript("OnShow", function() mapShownAt = GetTime() end)
+	if QuestMapFrame_OpenToQuestDetails then
+		hooksecurefunc("QuestMapFrame_OpenToQuestDetails", function()
+			if GetTime() - mapShownAt > .1 then Sound("IG_QUEST_LIST_SELECT") end
+		end)
+	end
 end
 
 function ns:QUEST_TURNED_IN(questID)

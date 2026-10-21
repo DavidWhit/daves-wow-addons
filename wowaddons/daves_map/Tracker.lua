@@ -242,7 +242,6 @@ local function OnRowClick(row)
 		if ns.Calibrate() and ns.SetWaypoint then ns.SetWaypoint(row.turnIn) end
 		return
 	end
-	if SOUNDKIT and SOUNDKIT.IG_QUEST_LIST_SELECT then PlaySound(SOUNDKIT.IG_QUEST_LIST_SELECT) end   -- as the quest log; silent when the map was open
 	C_SuperTrack.SetSuperTrackedQuestID(q)
 	if InCombatLockdown() then
 		ns.Print("tracking it; can't open the map in combat, click it again after.")
