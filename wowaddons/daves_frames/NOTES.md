@@ -21,12 +21,12 @@ One template for every variant, 1200 x 460 layout px (2400 x 920 image px). The 
 | Portrait opening | radius 105 | Transparent in the art; the portrait shows through |
 | Ring (L3) | radius 105 to 131 | 26 px band |
 | Level badge (L5) | centre 600,354, radius 40; number area radius 32 | On the ring's bottom (ring centre + 124), in front of the ring. The size the addon shows Blizzard's level circle at, so a painted badge replaces it exactly |
-| Outer border (L1) | 8,153 to 1192,289, corner radius 14 | The plate. Plus an end cap allowance at each end: 0..64 and 1136..1200, y 138..304 |
+| Outer border (L1) | 8,153 to 1192,289, corner radius 14 | The plate. Plus an end cap allowance at each end: 0..64 and 1136..1200, y 138..304. Its middle is open from 38,179 to 1162,263 (radius 6): 4 px inside L2's outer edge, so L1 runs under L2 and no seam shows |
 | Inner border (L2) | 34,175 to 1166,267, corner radius 10 | The container rim around both bars |
 | Bar windows | 50,191 to 1150,251, corner radius 5 | Transparent. Health is the left half, resource the right; the ring covers the middle |
 | Window keep-out | 44,185 to 1156,257 | The window plus 6 px. No ornament is ever painted here |
 | Ornament zone above | 300,0 to 900,153 | |
-| Ornament zone on the plate | 300,153 to 900,289 | Front ornament (L4 front); never inside the keep-out |
+| Ornament zone on the plate | 300,153 to 900,289 | Front ornament (L4 front), which may also cover the ring and the portrait; never inside the keep-out outside the ring |
 | Ornament zone behind the plate | The whole plate | Back ornament (L4 back) only, hidden by the plate; never inside the keep-out |
 | Ornament zone below | 430,289 to 770,460 | The ring column only, so the aura boards' lanes stay clear |
 
@@ -64,15 +64,30 @@ Five art layers, plus what the addon draws. From the back to the front:
 | 5 | **L1 outer border**: the decorative plate | art | Its middle is empty (L2 sits there) |
 | 6 | **L2 inner border**: the rim around the bars | art | Overlaps the bar ends: bars run 5 px under it at each end and 2 px at the top and bottom |
 | 7 | Inset shadow over each window | addon | See section 4 |
-| 8 | **L4 front**: ornament over the plate (claws, a head, the tail) | art | Never in the window keep-out |
-| 9 | Portrait | addon | Circle-masked, 4 px bigger than the opening so its edge tucks under the ring |
-| 10 | **L3 ring** | art | Always over L4, the portrait and the inner ends of the bars |
-| 10b | **L5 level badge** | art (until a variant has one, the addon shows Blizzard's own level circle, `UI-HUD-UnitFrame-SmallCircle`, at the same size and place) | In front of the ring; the level is written in its centre |
-| 11 | Numbers and text on the portrait | addon | |
+| 8 | Portrait | addon | Circle-masked, 4 px bigger than the opening so its edge tucks under the ring |
+| 9 | **L3 ring** | art | Over L4 back, the plate, the portrait and the inner ends of the bars |
+| 10 | **L4 front**: ornament over the plate, the ring and the portrait (claws gripping the ring, a head, horns, the tail) | art | Never in the window keep-out, except inside the ring, where no bar shows |
+| 10b | **L5 level badge** | art (until a variant has one, the addon shows Blizzard's own level circle, `UI-HUD-UnitFrame-SmallCircle`, at the same size and place) | In front of the ring and L4 front; the level is written in its centre |
+| 11 | Numbers and text on the portrait | addon | Over everything, the ornament included |
 | 12 | Aura boards (right under the bar) | addon | Over the art |
 
-L4 is one ornament split into two files, so it can pass in front of the plate in some places and behind it in
-others. The ring is always in front of all of it. Nothing ever covers a bar.
+L4 is one ornament split into two files, so it can pass behind the plate and the ring in some places and in
+front of them in others. Only the level badge and the text are in front of L4 front. Nothing ever covers a bar.
+
+**Stitching.** Where two layers meet, the lower one runs on under the upper one, so their soft edges never sit
+side by side (two half-transparent edges let the background through as a hairline):
+
+| Joint | Overlap |
+| --- | --- |
+| L1 / L2 | L1's open middle is 4 px inside L2's outer edge (section 1) |
+| Bars / L2 | Bars run 5 px under the rim at each end, 2 px at the top and bottom (`ns.STD.sideX`, `sideY`) |
+| Portrait / L3 | The portrait is 4 px bigger than the opening |
+| L1, L2 / L3 | L1 and L2 carry on under the ring to radius 104 |
+| L4 back / L4 front | L4 front is cut out of the L4 back painting with a mask, never repainted, and L4 back keeps the whole ornament, so the two are the same pixels where they meet |
+
+`tools\Preview-Layers.ps1` checks it: stacked with no background, the plate and the ring must be solid, and every
+see-through pixel there is reported and drawn red. The bare template passes (shapes from
+`Make-LayerGuides.ps1 -Plain`), so a seam is always in the painting.
 
 A variant may leave out L4 entirely (normal and rare frames have no ornament), and L5 (the addon then shows
 Blizzard's level circle). L1, L2 and L3 are always present.
@@ -249,9 +264,9 @@ All are PNG with straight alpha, on the template, at the same position, so they 
 Every file must pass:
 
 1. **Clean edges:** no magenta or blue fringe, no ragged or frayed edges, no stray half-transparent pixels.
-2. **Keep-out:** zero alpha inside the window keep-out in L4 front, L4 back and L3, and zero alpha in the windows
-   in L1 and L2. A script can count the pixels.
-3. **Opening:** zero alpha inside radius 104 in every layer.
+2. **Keep-out:** zero alpha inside the window keep-out in L4 back and L3, in L4 front outside the ring
+   (radius 131), and zero alpha in the windows in L1 and L2. A script can count the pixels.
+3. **Opening:** zero alpha inside radius 104 in every layer except L4 front, which may cover the portrait.
 4. **Ring:** L3's band fills radius 105 to 131 with no gaps.
 5. **Zones:** L4 only inside its zones; nothing outside the canvas.
 6. **Same metal:** L1, L2 and L3 share one material. The ornament may differ (a gold dragon on a gold frame, a
