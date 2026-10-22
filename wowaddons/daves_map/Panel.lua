@@ -161,10 +161,7 @@ end
 
 -- Every click sounds, as in Blizzard's quest log: a tick for the filters, the quest list's select for a step or a
 -- result (a click that turns the map, or sets a waypoint, adds its own map sound in Layer.lua).
-local function Sound(name)
-	local id = SOUNDKIT and SOUNDKIT[name]
-	if id then PlaySound(id) end
-end
+local function Sound(name) ns.Sound(name) end   -- (Layer.lua: one sound a click)
 
 local function OnRowClick(row)
 	local item = row.item
@@ -182,9 +179,9 @@ local function OnRowClick(row)
 		ns.Refresh()
 	elseif item.kind == "chainhead" then
 		ns.Focus(ns.FocusedPin())   -- toggles it off (with its own sound)
-	elseif item.kind == "step" then   -- a step on another map opens that map; on this one, or shift-click: a waypoint
-		Sound("IG_QUEST_LIST_SELECT")
-		if IsShiftKeyDown() or not ns.ShowPinMap(item.i) then ns.SetWaypoint(item.i) end
+	elseif item.kind == "step" then   -- the seamless map flies there, zoomed in on it; shift-click: a waypoint
+		Sound("IG_QUEST_LIST_SELECT")   -- (without the seamless map: a step on another map opens that map; on this one, a waypoint)
+		if IsShiftKeyDown() or not ns.ShowPinMap(item.i, true) then ns.SetWaypoint(item.i) end
 	else   -- a search result: select it (its chain is drawn and listed) and open its map; shift-click for a waypoint
 		Sound("IG_QUEST_LIST_SELECT")
 		if IsShiftKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i); ns.ShowPinMap(item.i) end
@@ -308,6 +305,10 @@ function ns.OnLayerChanged()
 		s = "|cffff6060Couldn't place the pins: no flight points matched. /dmap calib|r"
 	elseif lastMode == "chain" then
 		s = ("Quest chain: %d steps, numbered on the map."):format(#chain.steps)
+	elseif not found and ns.Focused and ns.Focused() then   -- (a search still shows its matches)
+		s = ("Focused quest: %d of its pins shown. Click it again to see all."):format(ns.ShownCount())
+	elseif ns.IsSeamless and ns.IsSeamless() then   -- the seamless map: the pins round the view, whatever their zone
+		s = found and ("%d matches, %d in view."):format(#found, ns.ShownCount()) or ("%d pins in view."):format(ns.ShownCount())
 	elseif found then
 		s = ("%d matches, %d on this map."):format(#found, ns.ShownCount())
 	else

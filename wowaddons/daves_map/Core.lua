@@ -24,6 +24,7 @@ local DEFAULTS = {
 	hideCompleted = false,  -- completed quests are dimmed; hidden when this is on
 	otherClasses = false,   -- show quests only other classes can take
 	trackMyZone = true,     -- the quest tracker follows only your log's quests for the zone you're in (Tracker.lua)
+	focusQuest = true,      -- a click on a tracked quest focuses it (again: unfocuses); the map then shows only its pins
 	hideHighLevel = false,  -- hide quests more than 5 levels above yours
 	hideLowLevel = false,   -- hide quests well below your level
 	lowLevelGap = 5,        -- ...more than this many levels below it (1-5)
@@ -64,6 +65,8 @@ function ns:ADDON_LOADED(name)
 	daves_mapDB.readyCollapsed = nil   -- the ready section opens expanded every session (Tracker.lua)
 	daves_mapDB.readySection = nil     -- 0.3.4's tick: the ready section is always on now
 	ns.db = daves_mapDB
+	daves_mapCharDB = type(daves_mapCharDB) == "table" and daves_mapCharDB or {}
+	if ns.InitStitch then ns.InitStitch(daves_mapDB, daves_mapCharDB) end   -- the seamless map's settings (Stitch\Base.lua)
 
 	-- The map data lives in the companion addon daves_map_data (generated on this machine, not in git). It is our
 	-- ## OptionalDeps, so when it's installed and enabled it has loaded by now and left one global behind.
@@ -83,6 +86,7 @@ function ns:PLAYER_LOGIN()
 	local _, class = UnitClass("player")
 	if class and not issecretvalue(class) then ns.playerClass = class end
 	ns.InitTracker()
+	if ns.StartStitch then ns.StartStitch() end   -- the seamless map, with daves_map_textures (Stitch\Base.lua)
 	local D = ns.DATA
 	if D then
 		ns.Print(("v%s loaded: %d map pins from %s (%s). /dmap for commands."):format(ns.VERSION, #D.x, D.source.map, D.source.fetched))
@@ -122,10 +126,22 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 	elseif msg == "calib" then
 		if ns.ReportCalibration then ns.ReportCalibration() end
 	elseif msg == "version" then
-		local D = ns.DATA
-		ns.Print(ns.VERSION .. (D and (" - data: %s, %s, %s"):format(D.source.map, D.source.fetched, D.source.questDb or "no quest db") or " - no data"))
+		local D, OM = ns.DATA, ns.OM
+		ns.Print(ns.VERSION .. (D and (" - data: %s, %s, %s"):format(D.source.map, D.source.fetched, D.source.questDb or "no quest db") or " - no data")
+			.. (OM and (" - textures: OpenMap %s, %s"):format(OM.openMapVersion, OM.built) or " - no textures"))
+	elseif msg == "seamless" then
+		local mod = ns.OM and ns.OM:GetModule("worldmap")
+		if not mod then
+			ns.Print("no seamless map: daves_map_textures isn't loaded (tools\\Update-MapTextures.ps1 builds it).")
+		elseif mod.padWaits then
+			ns.Print(mod.PadOffText())
+		elseif not mod.enabled then
+			ns.Print("the seamless map is off (Options, or OpenMap is on).")
+		else
+			mod:Diag()
+		end
 	else
-		ns.Print("commands: /dmap [toggle | panel | options | calib | zone | version]")
+		ns.Print("commands: /dmap [toggle | panel | options | calib | zone | seamless | version]")
 	end
 end
 

@@ -7,6 +7,7 @@ Targets: Forever (`## Interface: 16001`).
 ## Use
 
 - Open the world map. The pins are on by default.
+- **The seamless map** (with the drop-in `daves_map_textures`, below): every zone stitched into one map, OpenMap's. The wheel zooms at the cursor from the whole world down to street level, out of one zone into the next; drag pans across the whole world; left-click zooms into the place under the cursor, right-click out a level. Once the view settles, the zone you're looking at loads underneath (its quest areas, coordinates and name; out of combat). The pins sit where they are on it, the neighbouring zones' too, and clicking a chain step, a search result or a quest glides the view there instead of switching maps (also in combat). Options: "Seamless world map" (takes a `/reload`) and "Load the zone in view". If OpenMap itself is enabled, daves_map's copy stays off. `/dmap seamless` shows what it's doing.
 - **The panel** is dressed like the map: the same metal frame and background, with the quest log's list headers, tick boxes and parchment. It docks beside the windowed map, on the left if there's room, otherwise on the right. When the map is maximized it sits inside it. It opens with the map the way you left it: its X, the map icon, `/dmap panel` and the option all remember the choice. The map icon at the map's bottom left toggles it.
 - **Ready to Turn In** (always on): quests whose objectives are done leave the quest tracker and are listed in a collapsible section of their own just under it, with where each is turned in. Click one for a waypoint to its turn-in. With nothing else tracked, the section takes the tracker's place with an "All Objectives" header of its own. (It's our own section, not part of Blizzard's tracker: adding to that from an addon would get its quest item buttons blocked in combat.)
 - **Track only my zone's quests** (on by default, a tick in the panel): the quest tracker follows the quests in your log for the zone you're in, and the rest are untracked (still in your log). It changes as you enter a new zone, and on a flight it waits until you land. The map's markers aren't affected, and quests ready to turn in are left alone. **Pins:** while it's on, a small pin sits to the left of each quest in the tracker; click it to keep that quest tracked whatever zone you're in (click again to unpin; untracking it yourself unpins it too). A quest you track yourself is pinned for you; quests ready to turn in can't be pinned. `/dmap zone` shows what it sees.
@@ -21,7 +22,7 @@ Targets: Forever (`## Interface: 16001`).
   - The chain runs from its prerequisites back to the first quest, and through its follow-ups on to the last.
   - Each step is numbered in order on the map, each in its own colour (green first, round the colour wheel); the selected quest has a gold ring and a white number.
   - Lines join the steps, each in the colour of the step it leads to, and thin gold lines show each step's turn-in. The panel's step numbers are in the same colours, so a line on the map matches its step in the list.
-  - Steps in other zones sit at the map's edge with their zone name.
+  - Steps in other zones sit at the map's edge with their zone name (on the seamless map they're simply where they are).
   - The panel lists the steps in order. Click a step in another zone to open that map; click one on this map (or shift-click any) to set a waypoint to it.
 - `/dmap` (or `/davesmap`) toggles the layer. Also `/dmap panel`, `/dmap options`, `/dmap calib` (how well the pins lined up; the lining-up itself is automatic), `/dmap zone` (what "Track only my zone's quests" sees) and `/dmap version` (the data's date).
 
@@ -47,6 +48,19 @@ The `daves-map-refresh` skill (in `.claude/skills/`) runs it, checks the result 
 
 Everything downloaded is read as data, never run. The script saves downloads into a new temporary folder, parses them with a JSON parser and its own small Lua-literal reader, and then deletes them.
 
+### The seamless map's art: daves_map_textures
+
+The stitched map is [OpenMap](https://www.curseforge.com/wow/addons/openmap)'s (MIT licence). Its code is copied into `Stitch\` (`Stitch\LICENSE-OpenMap.txt`); its art and data tables are a drop-in addon of their own, **`wowaddons/daves_map_textures`**, built from an OpenMap release for WoW Forever. It is **not in git** (Blizzard's map art, about 125 MB). Without it daves_map uses Blizzard's map as before.
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File wowaddons\daves_map\tools\Update-MapTextures.ps1 -Source <OpenMap folder or zip>
+powershell -NoProfile -ExecutionPolicy Bypass -File wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.ps1 -Path wowaddons\daves_map_textures
+```
+
+`-Source` defaults to `OpenMap\` at the repo root (gitignored). `-Zip` also writes `daves_map_textures.zip` for a tester. Left out on purpose: Santiago Reyes' paintings, which he lets OpenMap use, not us (the sea chart, the hand-painted gaps between zones and the baked zone tiles that carry them, Forever's own dungeon maps). The gaps show plain map paper, as OpenMap's own "Filled gaps" off does.
+
+Taking in a new OpenMap release: rebuild the drop-in, then compare `Stitch\Stitch.lua`, `WorldMap.lua`, `Close.lua` and `Combat.lua` with its `Map\` files. daves_map's changes to them are few: the namespace line at the top, the frame level names, a few defaults, the removed option tables.
+
 ### How positions line up
 
 Map Genie's positions are pixels on their own picture of Azeroth. `Calibrate.lua` matches Map Genie's flight master pins to the game's flight points by name, using `C_TaxiMap.GetTaxiNodesForMap`, which also returns undiscovered nodes. It then fits an affine transform per continent. Each pin gets its continent position, its zone and its world position, and from those its position on any map. This runs by itself the first time the map opens each session; `/dmap calib` only prints the anchors used and the error.
@@ -60,6 +74,7 @@ The pins are plain textures on a frame of ours on the map canvas. One small butt
 | Task | Command |
 | --- | --- |
 | Rebuild the data | `tools\Update-MapData.ps1` (`-KeepRaw` keeps the downloads, `-NoQuestDb` skips pfQuest) |
+| Rebuild the seamless map's art | `tools\Update-MapTextures.ps1 -Source <OpenMap folder or zip>` (`-Zip` for a tester) |
 | Repaint the textures | `tools\Make-Media.ps1` |
 | Check the addon | `Test-WowAddon.ps1 -Path . -Flavor forever` |
 | Link into the game | `Link-WowAddons.ps1 -Path .` |
@@ -72,4 +87,7 @@ The pins are plain textures on a frame of ours on the map canvas. One small butt
 | `Calibrate.lua` | Map Genie pixels to game map positions, using the flight points |
 | `Layer.lua` | The pins, link lines, hover, click and tooltip on the world map |
 | `Panel.lua` | Search, factions, quest filters, categories, results |
-| `Options.lua` | Settings page: layer on/off, panel, pin size |
+| `Options.lua` | Settings page: layer on/off, panel, pin size, seamless map |
+| `Stitch/Base.lua` | The seamless map's base (in place of OpenMap's Core.lua): the drop-in's namespace, settings, start |
+| `Stitch/Stitch.lua`, `WorldMap.lua`, `Close.lua`, `Combat.lua` | OpenMap's map: the stitched art, the view and zoom, the closest zooms, Blizzard's pins in combat |
+| `../daves_map_textures/` | Generated, not in git: OpenMap's textures and data tables (`tools/Update-MapTextures.ps1`) |

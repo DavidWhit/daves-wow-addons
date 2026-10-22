@@ -81,16 +81,30 @@ local function Watched(q) return C_QuestLog.GetQuestWatchType(q) ~= nil end
 local movedOut = {}
 local ourAdd = {}     -- [questID] = true: tracked by the zone tracking, not by you (QUEST_WATCH_LIST_CHANGED)
 local accepted = {}   -- [questID] = true: just accepted, tracked by the game's own autoQuestWatch, not by you
+-- untracks a quest, keeping its focus: Blizzard lets go of a focused quest when it's untracked (its
+-- QUEST_WATCH_LIST_CHANGED handler, Blizzard_QuestSuperTracking), and a focused quest moving to Ready to Turn In needs
+-- its focus most. Focused again after that event (QUEST_WATCH_LIST_CHANGED, below), unless you've focused another by then
+local keepFocus = {}
+function ns.KeepingFocus(q) return keepFocus[q] end   -- (Layer.lua: the focus at 0 for a moment, not let go)
+local function Unwatch(q)
+	if C_SuperTrack.GetSuperTrackedQuestID() == q then
+		keepFocus[q] = true
+		C_Timer.After(2, function() keepFocus[q] = nil end)
+	end
+	C_QuestLog.RemoveQuestWatch(q)
+end
+
 local function MoveReadyOut(ready)
 	for _, q in ipairs(ready) do
 		if not movedOut[q] then
 			movedOut[q] = true
-			if Watched(q) then C_QuestLog.RemoveQuestWatch(q) end
+			if Watched(q) then Unwatch(q) end
 		end
 	end
 end
 
-local function TrackZoneQuests()
+-- `unpinned`: a quest you've just unpinned, checked whether it's focused or not (its pin was what kept it here)
+local function TrackZoneQuests(unpinned)
 	local db = ns.db
 	local all, here, ready = LogQuests()
 	local isReady = {}
@@ -99,17 +113,19 @@ local function TrackZoneQuests()
 	MoveReadyOut(ready)
 	if not db.trackMyZone or UnitOnTaxi("player") then return end   -- on a flight the landing comes back here
 	if not next(ZoneNames()) then return end                          -- a loading screen: leave the tracker alone
+	local focused = C_SuperTrack.GetSuperTrackedQuestID()
 	for _, q in ipairs(all) do
-		if not isReady[q] and not db.pinned[q] then   -- the zone tracking ignores ready quests and pinned ones
+		-- the zone tracking ignores ready quests, pinned ones and the focused one (unless you've just unpinned it)
+		if not isReady[q] and not db.pinned[q] and (q ~= focused or q == unpinned) then
 			local watched = Watched(q)
 			if here[q] and not watched then
 				ourAdd[q] = true; C_Timer.After(2, function() ourAdd[q] = nil end)   -- its event, not a later one of yours
 				C_QuestLog.AddQuestWatch(q)
-			elseif not here[q] and watched then C_QuestLog.RemoveQuestWatch(q) end
+			elseif not here[q] and watched then C_QuestLog.RemoveQuestWatch(q) end   -- (the focused one only when unpinned)
 		end
 	end
 end
-ns.TrackZoneQuests = function() TrackZoneQuests(); ns.UpdateReady() end
+ns.TrackZoneQuests = function(unpinned) TrackZoneQuests(unpinned); ns.UpdateReady() end
 
 ---------------------------------------------------------------------------
 -- Pins: a pinned quest stays tracked when you change zone. A small pin sits beside each quest in Blizzard's tracker
@@ -125,7 +141,11 @@ local function PinTooltip(b)
 	GameTooltip:SetOwner(b, "ANCHOR_LEFT")
 	if ns.db.pinned[b.questID] then
 		GameTooltip:AddLine("Pinned", 1, .82, 0)
-		GameTooltip:AddLine("Stays tracked when you change zone. Click to unpin.", 1, 1, 1, true)
+		if UnitOnTaxi("player") then
+			GameTooltip:AddLine("Stays tracked when you change zone. You can unpin it once you've landed.", 1, 1, 1, true)
+		else
+			GameTooltip:AddLine("Stays tracked when you change zone. Click to unpin.", 1, 1, 1, true)
+		end
 	else
 		GameTooltip:AddLine("Pin", 1, .82, 0)
 		GameTooltip:AddLine("Keep this quest tracked when you change zone.", 1, 1, 1, true)
@@ -150,13 +170,14 @@ local function PinButton(n)
 	b.icon:SetAllPoints()
 	if PIN_ATLAS then b.icon:SetAtlas(PIN_ATLAS) else b.icon:SetTexture("Interface\\Buttons\\UI-CheckBox-Check") end
 	b:SetScript("OnClick", function(self)
-		ns.db.pinned[self.questID] = not ns.db.pinned[self.questID] or nil
-		PaintPin(self); PinTooltip(self)
-		-- unpinned: the zone check runs now, so a quest from another zone leaves the tracker straight away
-		if not ns.db.pinned[self.questID] then
-			GameTooltip:Hide()
-			ns.TrackZoneQuests()
-		end
+		-- (on a flight the zone check waits for the landing, which would skip a focused quest: no unpinning till then)
+		if ns.db.pinned[self.questID] and UnitOnTaxi("player") then return end
+		local q = self.questID
+		ns.db.pinned[q] = not ns.db.pinned[q] or nil
+		-- unpinned: the zone check runs now, so a quest from another zone leaves the tracker straight away (its
+		-- tooltip with it); one from this zone stays, its tooltip saying so
+		if not ns.db.pinned[q] then ns.TrackZoneQuests(q) end
+		if Watched(q) then PaintPin(self); PinTooltip(self) else GameTooltip:Hide() end
 	end)
 	b:SetScript("OnEnter", function(self) PaintPin(self); PinTooltip(self) end)
 	b:SetScript("OnLeave", function(self) PaintPin(self); if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
@@ -165,6 +186,7 @@ local function PinButton(n)
 end
 
 local PIN_MODULES = { "QuestObjectiveTracker", "CampaignQuestObjectiveTracker" }
+local UpdateQuestClicks   -- the tracker's quest clicks (below, with the events); the pins' watcher runs it
 local function UpdatePins()
 	local n = 0
 	local tracker = ObjectiveTrackerFrame
@@ -229,10 +251,27 @@ local function FontObject(name, fallback)
 	return fallback
 end
 
--- Click: as clicking a quest in Blizzard's tracker does, the quest opens in the quest log on the map and is tracked
--- there (super-tracked: its turn-in on the map, the minimap and the arrow on screen). Where the game has no location
--- for it, the map data shows the turn-in instead (Layer.lua: ns.ShowQuestOnMap). Opening the map from addon code isn't
--- done in combat (it would taint the map); then only the tracking changes. Shift-click: our waypoint to the turn-in.
+-- A Ready to Turn In row clicked: as a quest in Blizzard's tracker (Layer.lua: ns.QuestClicked): focused, its details
+-- page open beside the map, the map centred on it; again, let go. With "Click a tracked quest to focus it" off, as
+-- Blizzard's tracker does it: focused and its details opened, not in combat (an addon can't open the map then).
+-- Shift-click: our waypoint to the turn-in.
+local function ClickFocused(q)
+	return C_SuperTrack.GetSuperTrackedQuestID() == q and type(daves_mapCharDB) == "table" and daves_mapCharDB.focusClick == q
+end
+local function ShowQuest(q)
+	if ns.db.focusQuest then
+		ns.Sound(ClickFocused(q) and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON")
+		ns.QuestClicked(q, "toggle")
+		return
+	end
+	C_SuperTrack.SetSuperTrackedQuestID(q)
+	if InCombatLockdown() then
+		ns.Print("tracking it; can't open the map in combat, click it again after.")
+		return
+	end
+	if QuestMapFrame_OpenToQuestDetails then QuestMapFrame_OpenToQuestDetails(q) end
+end
+
 local function OnRowClick(row)
 	local q = row.questID
 	if not q then return end
@@ -242,12 +281,7 @@ local function OnRowClick(row)
 		if ns.Calibrate() and ns.SetWaypoint then ns.SetWaypoint(row.turnIn) end
 		return
 	end
-	C_SuperTrack.SetSuperTrackedQuestID(q)
-	if InCombatLockdown() then
-		ns.Print("tracking it; can't open the map in combat, click it again after.")
-		return
-	end
-	if QuestMapFrame_OpenToQuestDetails then QuestMapFrame_OpenToQuestDetails(q) end
+	ShowQuest(q)
 end
 
 local function Row(n)
@@ -275,7 +309,11 @@ local function Row(n)
 		if self.questID then
 			GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 			GameTooltip:AddLine(self.title:GetText(), 1, .82, 0)
-			GameTooltip:AddLine("Click: open the quest and show where to turn it in", .5, .8, 1)
+			if ns.db.focusQuest and ClickFocused(self.questID) then
+				GameTooltip:AddLine("Click: stop focusing it (every pin on the map again)", .5, .8, 1)
+			else
+				GameTooltip:AddLine("Click: focus it and show it on the map", .5, .8, 1)
+			end
 			if self.turnIn then GameTooltip:AddLine("Shift-click: a waypoint to where it's turned in", .5, .8, 1) end
 			GameTooltip:Show()
 		end
@@ -388,6 +426,7 @@ local function Build()
 		elapsed = 0
 		Place()
 		UpdatePins()
+		UpdateQuestClicks()
 	end)
 end
 
@@ -477,6 +516,14 @@ events.QUEST_REMOVED = function(_, q) if q then ns.db.pinned[q] = nil end; Queue
 -- it, when the game did on accepting it (autoQuestWatch), or when it's ready to turn in (those aren't pinnable).
 events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
 	if not q then return end
+	if added == false and keepFocus[q] then   -- (Unwatch: focused again, after Blizzard's handler for this has let it go)
+		C_Timer.After(0, function()
+			keepFocus[q] = nil   -- (only now: Layer.lua keeps the click's focus through the moment it's 0)
+			if C_SuperTrack.GetSuperTrackedQuestID() == 0 and C_QuestLog.GetLogIndexForQuestID(q) then
+				C_SuperTrack.SetSuperTrackedQuestID(q)
+			end
+		end)
+	end
 	if added == false then ns.db.pinned[q] = nil return end
 	if added ~= true then return end
 	if ourAdd[q] then ourAdd[q] = nil return end
@@ -484,7 +531,80 @@ events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
 	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
 end
 events.QUEST_LOG_UPDATE = function() Queue(false, .3) end   -- an objective finished: the quest may be ready now
-events.ADDON_LOADED = function(_, name) if name == "Blizzard_ObjectiveTracker" then Queue(false, .3) end end
+events.ADDON_LOADED = function(_, name)
+	if name == "Blizzard_ObjectiveTracker" then Queue(false, .3) end
+end
+
+---------------------------------------------------------------------------
+-- A quest clicked in Blizzard's tracker, with "Click a tracked quest to focus it" on: its name and its "..." icon (its
+-- POI button) do the same as the map's "..." icons and the quest log's list (Layer.lua: ns.QuestClicked): focused, its
+-- details page open beside the map, the map centred on it; the focused one again, let go. Each after Blizzard's own
+-- click: the name's (hooksecurefunc on the module's OnBlockHeaderClick: it opens the details page with the map), the
+-- "..." icon's (HookScript: it focuses the quest or lets it go). Left button only; not Shift (untrack), a link into
+-- chat, or a quest handed in from its pop-up (auto-complete: Blizzard's complete window). Without the option,
+-- Blizzard's clicks as they are.
+---------------------------------------------------------------------------
+-- a quest ready to hand in from its pop-up (auto-complete): Blizzard's click opens its complete window
+local function HandInFromPopUp(q)
+	if type(q) ~= "number" or issecretvalue(q) or not C_QuestLog.IsComplete(q) then return false end
+	local idx = C_QuestLog.GetLogIndexForQuestID(q)
+	local info = idx and C_QuestLog.GetInfo(idx)
+	return info and info.isAutoComplete or false
+end
+
+local function OnNameClick(_, block, button)
+	if button ~= "LeftButton" or not ns.db.focusQuest or not block then return end
+	if IsModifiedClick("QUESTWATCHTOGGLE") or IsModifiedClick("CHATLINK") then return end
+	local q = block.id
+	if type(q) ~= "number" or issecretvalue(q) or HandInFromPopUp(q) then return end
+	ns.QuestClicked(q, "toggle")
+end
+
+-- only the Quests and Campaign sections (the "..." icons are pooled for the tracker's other sections too)
+local QUEST_MODULES = {}
+
+-- (the quest read before Blizzard's click: tracking a quest from it can lay the tracker out again, which hands its
+-- icons out again, so after the click the icon may hold another quest)
+local clickQuest
+local function BeforePOIClick(self)
+	local block = self:GetParent()
+	local ours = block and block.parentModule and QUEST_MODULES[block.parentModule]
+	clickQuest = ours and self.GetQuestID and self:GetQuestID() or nil
+end
+local function OnPOIClick(_, button)
+	local q = clickQuest
+	clickQuest = nil
+	if not q or button ~= "LeftButton" or IsShiftKeyDown() or IsModifiedClick("CHATLINK") then return end
+	ns.QuestClicked(q, "focused")
+end
+
+-- each section's clicks hooked once, each "..." icon once (the tracker reuses its icons for other quests, so the
+-- quest is read at the click)
+local hookedModules, hookedPOI = {}, {}
+UpdateQuestClicks = function()   -- (declared with the pins: their watcher runs it)
+	for _, name in ipairs(PIN_MODULES) do
+		local m = _G[name]
+		if m then
+			QUEST_MODULES[m] = true
+			if m.OnBlockHeaderClick and not hookedModules[m] then
+				hookedModules[m] = true
+				hooksecurefunc(m, "OnBlockHeaderClick", OnNameClick)
+			end
+		end
+		if m and m.usedBlocks then
+			for _, blocks in pairs(m.usedBlocks) do
+				for _, block in pairs(blocks) do
+					local poi = block.poiButton
+					if poi and not hookedPOI[poi] then
+						hookedPOI[poi] = true
+						poi:HookScript("PreClick", BeforePOIClick)
+						poi:HookScript("OnClick", OnPOIClick)
+					end
+				end
+			end
+		end
+	end
+end
 
 local EVENTS = { "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "PLAYER_CONTROL_GAINED", "QUEST_ACCEPTED",
 	"QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_WATCH_LIST_CHANGED", "QUEST_LOG_UPDATE", "ADDON_LOADED" }
