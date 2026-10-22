@@ -161,7 +161,7 @@ end
 
 -- Every click sounds, as in Blizzard's quest log: a tick for the filters, the quest list's select for a step or a
 -- result (a click that turns the map, or sets a waypoint, adds its own map sound in Layer.lua).
-local function Sound(name) ns.Sound(name) end   -- (Layer.lua: one sound a click)
+local Sound = ns.Sound   -- (Layer.lua, loaded before this: one sound a click)
 
 local function OnRowClick(row)
 	local item = row.item

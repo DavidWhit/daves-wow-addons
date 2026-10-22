@@ -391,6 +391,7 @@ local function FlyTo(u, v, zoom)
 			hi = lo
 		end
 		a.rho, a.r0, a.S, a.d1 = hi, r0, len, d1
+		a.c0, a.s0 = Cosh(r0), Sinh(r0)   -- (the same every frame of it)
 	end
 	if not (Finite(a.S) and (a.flat or Finite(a.r0))) then anim = nil ShowWorld(u, v, z1) userMoved = true return end
 	a.time = Clamp(math.abs(a.S) * a.rho * FLY_PACE, FLY_TIME[1], FLY_TIME[2])
@@ -405,8 +406,8 @@ local function FlyAt(a, t)
 	if a.flat then
 		x, y, w = a.x0 + t * a.dx, a.y0 + t * a.dy, a.w0 * math.exp(rho * s)
 	else
-		local c0 = Cosh(a.r0)
-		local k = a.w0 / (rho * rho * a.d1) * (c0 * Tanh(rho * s + a.r0) - Sinh(a.r0))
+		local c0 = a.c0
+		local k = a.w0 / (rho * rho * a.d1) * (c0 * Tanh(rho * s + a.r0) - a.s0)
 		x, y, w = a.x0 + k * a.dx, a.y0 + k * a.dy, a.w0 * c0 / Cosh(rho * s + a.r0)
 	end
 	return x / a.W, y / a.H, math.max(a.span / w, LeastZoom())
@@ -1222,6 +1223,7 @@ end
 -- for Nav.lua: glide / jump to a world point (normalized) at a zoom; the zoom where a map fits
 function mod.Glide(u, v, zoom) if active then GlideTo(u, v, zoom) end end
 function mod.Fly(u, v, zoom) if active then FlyTo(u, v, zoom) end end   -- (daves_map)
+function mod.Flying() return anim ~= nil and anim.mode == "fly" end      -- (daves_map)
 -- (daves_map) the view from just before Blizzard put up another map, in this same frame (a quest opened from the
 -- tracker with the map open: it's shown whole at once; Layer.lua flies there from this instead)
 function mod.ViewBeforeReset()

@@ -232,16 +232,9 @@ local ROW_H, TITLE_H = 16, 26
 local readyCollapsed = false   -- folded with its button; this session only: it opens expanded after a login or reload
 
 -- the turn-in pin for a quest from the map data (Data.lua: a quest's pin and its endp), or nil
-local pinOfQuest
 local function TurnInPin(q)
-	local D = ns.DATA
-	if not D then return nil end
-	if not pinOfQuest then
-		pinOfQuest = {}
-		for i = 1, #D.qid do local id = D.qid[i]; if id ~= 0 and not pinOfQuest[id] then pinOfQuest[id] = i end end
-	end
-	local i = pinOfQuest[q]
-	local e = i and D.endp[i]
+	local i = ns.DATA and ns.QuestPin(q)
+	local e = i and ns.DATA.endp[i]
 	return (e and e ~= 0) and e or nil
 end
 
@@ -255,13 +248,9 @@ end
 -- page open beside the map, the map centred on it; again, let go. With "Click a tracked quest to focus it" off, as
 -- Blizzard's tracker does it: focused and its details opened, not in combat (an addon can't open the map then).
 -- Shift-click: our waypoint to the turn-in.
-local function ClickFocused(q)
-	return C_SuperTrack.GetSuperTrackedQuestID() == q and type(daves_mapCharDB) == "table" and daves_mapCharDB.focusClick == q
-end
 local function ShowQuest(q)
 	if ns.db.focusQuest then
-		ns.Sound(ClickFocused(q) and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON")
-		ns.QuestClicked(q, "toggle")
+		ns.QuestClicked(q, "toggle", true)   -- (its sound too: after combat a second click shows it, not lets go)
 		return
 	end
 	C_SuperTrack.SetSuperTrackedQuestID(q)
@@ -309,7 +298,7 @@ local function Row(n)
 		if self.questID then
 			GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 			GameTooltip:AddLine(self.title:GetText(), 1, .82, 0)
-			if ns.db.focusQuest and ClickFocused(self.questID) then
+			if ns.db.focusQuest and ns.ClickFocused(self.questID) then
 				GameTooltip:AddLine("Click: stop focusing it (every pin on the map again)", .5, .8, 1)
 			else
 				GameTooltip:AddLine("Click: focus it and show it on the map", .5, .8, 1)
@@ -552,9 +541,9 @@ local function HandInFromPopUp(q)
 	return info and info.isAutoComplete or false
 end
 
+-- (the name's untrack is QUESTWATCHTOGGLE, as Blizzard's name click reads it; its "..." icon's is Shift)
 local function OnNameClick(_, block, button)
-	if button ~= "LeftButton" or not ns.db.focusQuest or not block then return end
-	if IsModifiedClick("QUESTWATCHTOGGLE") or IsModifiedClick("CHATLINK") then return end
+	if button ~= "LeftButton" or not block or IsModifiedClick("QUESTWATCHTOGGLE") or IsModifiedClick("CHATLINK") then return end
 	local q = block.id
 	if type(q) ~= "number" or issecretvalue(q) or HandInFromPopUp(q) then return end
 	ns.QuestClicked(q, "toggle")
@@ -562,45 +551,25 @@ end
 
 -- only the Quests and Campaign sections (the "..." icons are pooled for the tracker's other sections too)
 local QUEST_MODULES = {}
-
--- (the quest read before Blizzard's click: tracking a quest from it can lay the tracker out again, which hands its
--- icons out again, so after the click the icon may hold another quest)
-local clickQuest
-local function BeforePOIClick(self)
-	local block = self:GetParent()
-	local ours = block and block.parentModule and QUEST_MODULES[block.parentModule]
-	clickQuest = ours and self.GetQuestID and self:GetQuestID() or nil
-end
-local function OnPOIClick(_, button)
-	local q = clickQuest
-	clickQuest = nil
-	if not q or button ~= "LeftButton" or IsShiftKeyDown() or IsModifiedClick("CHATLINK") then return end
-	ns.QuestClicked(q, "focused")
+local function IsQuestPOI(poi)
+	local block = poi:GetParent()
+	return block and block.parentModule and QUEST_MODULES[block.parentModule] or false
 end
 
--- each section's clicks hooked once, each "..." icon once (the tracker reuses its icons for other quests, so the
--- quest is read at the click)
-local hookedModules, hookedPOI = {}, {}
+-- each section's name clicks hooked once, each "..." icon once as it appears (Layer.lua: ns.HookQuestPOI; the
+-- tracker reuses its icons for other quests and sections, so the quest and section are read at the click)
+local hookedModules = {}
 UpdateQuestClicks = function()   -- (declared with the pins: their watcher runs it)
 	for _, name in ipairs(PIN_MODULES) do
 		local m = _G[name]
-		if m then
+		if m and not hookedModules[m] and m.OnBlockHeaderClick then
+			hookedModules[m] = true
 			QUEST_MODULES[m] = true
-			if m.OnBlockHeaderClick and not hookedModules[m] then
-				hookedModules[m] = true
-				hooksecurefunc(m, "OnBlockHeaderClick", OnNameClick)
-			end
+			hooksecurefunc(m, "OnBlockHeaderClick", OnNameClick)
 		end
 		if m and m.usedBlocks then
 			for _, blocks in pairs(m.usedBlocks) do
-				for _, block in pairs(blocks) do
-					local poi = block.poiButton
-					if poi and not hookedPOI[poi] then
-						hookedPOI[poi] = true
-						poi:HookScript("PreClick", BeforePOIClick)
-						poi:HookScript("OnClick", OnPOIClick)
-					end
-				end
+				for _, block in pairs(blocks) do ns.HookQuestPOI(block.poiButton, IsQuestPOI) end
 			end
 		end
 	end
