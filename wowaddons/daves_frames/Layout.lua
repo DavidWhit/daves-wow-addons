@@ -2,7 +2,7 @@
 -- Where everything sits, and the colours. All positions are layout pixels from the frame's top-left
 -- corner (y grows downward here; Frame.lua flips it for SetPoint). One geometry for every unit.
 -- The box is tools/template/frame-template.json, drawn by tools/Build-FrameTemplate.py.
--- guides/frame-template.png is the paint mask at 2x. Media/frame-*.tga is that plate in the
+-- guides/frame-template-ai.png is the 16:9 paint mask (2x). Media/frame-*.tga is that plate in the
 -- top of the atlas.
 
 local _, ns = ...
@@ -62,8 +62,8 @@ local GEO = {
 	laneL = { 16, 376 }, laneR = { 648, 1008 },
 }
 
-local function Variant(key, texture, chain, metal)
-	local v = { key = key, texture = MEDIA .. texture, chain = MEDIA .. chain, metal = metal }
+local function Variant(key, label, texture, chain, metal)
+	local v = { key = key, label = label, texture = MEDIA .. texture, chain = MEDIA .. chain, metal = metal }
 	for k, value in pairs(GEO) do v[k] = value end
 	return v
 end
@@ -80,22 +80,27 @@ local function Metal(r, g, b)
 	}
 end
 
--- plain: ordinary NPCs. rare: silver, same shape. elite / rareelite: the same shape.
+-- plain: ordinary NPCs. rare: silver, same shape. elite / rareelite / boss: the same shape.
 -- Class keys are UnitClass's English file token, lowercased. Forever's nine classes each have a plate.
+ns.VARIANT_ORDER = {
+	"plain", "rare", "elite", "rareelite", "boss",
+	"warrior", "paladin", "hunter", "rogue", "priest", "shaman", "mage", "warlock", "druid",
+}
 ns.VARIANTS = {
-	plain = Variant("plain", "frame-plain.tga", "chain-gold.tga", GOLD),
-	rare = Variant("rare", "frame-rare.tga", "chain-silver.tga", SILVER),
-	elite = Variant("elite", "frame-elite.tga", "chain-gold.tga", GOLD),
-	rareelite = Variant("rareelite", "frame-rareelite.tga", "chain-silver.tga", SILVER),
-	warrior = Variant("warrior", "frame-warrior.tga", "chain-gold.tga", Metal(0.780, 0.612, 0.431)),
-	paladin = Variant("paladin", "frame-paladin.tga", "chain-gold.tga", Metal(0.961, 0.549, 0.729)),
-	hunter = Variant("hunter", "frame-hunter.tga", "chain-gold.tga", Metal(0.671, 0.831, 0.451)),
-	rogue = Variant("rogue", "frame-rogue.tga", "chain-silver.tga", Metal(1.000, 0.961, 0.412)),
-	priest = Variant("priest", "frame-priest.tga", "chain-silver.tga", Metal(0.860, 0.840, 0.780)),
-	shaman = Variant("shaman", "frame-shaman.tga", "chain-gold.tga", Metal(0.000, 0.439, 0.871)),
-	mage = Variant("mage", "frame-mage.tga", "chain-silver.tga", Metal(0.412, 0.800, 0.941)),
-	warlock = Variant("warlock", "frame-warlock.tga", "chain-silver.tga", Metal(0.580, 0.510, 0.788)),
-	druid = Variant("druid", "frame-druid.tga", "chain-gold.tga", Metal(1.000, 0.490, 0.039)),
+	plain = Variant("plain", "Plain", "frame-plain.tga", "chain-gold.tga", GOLD),
+	rare = Variant("rare", "Rare", "frame-rare.tga", "chain-silver.tga", SILVER),
+	elite = Variant("elite", "Elite", "frame-elite.tga", "chain-gold.tga", GOLD),
+	rareelite = Variant("rareelite", "Rare Elite", "frame-rareelite.tga", "chain-silver.tga", SILVER),
+	boss = Variant("boss", "Boss", "frame-boss.tga", "chain-gold.tga", GOLD),
+	warrior = Variant("warrior", "Warrior", "frame-warrior.tga", "chain-gold.tga", Metal(0.780, 0.612, 0.431)),
+	paladin = Variant("paladin", "Paladin", "frame-paladin.tga", "chain-gold.tga", Metal(0.961, 0.549, 0.729)),
+	hunter = Variant("hunter", "Hunter", "frame-hunter.tga", "chain-gold.tga", Metal(0.671, 0.831, 0.451)),
+	rogue = Variant("rogue", "Rogue", "frame-rogue.tga", "chain-silver.tga", Metal(1.000, 0.961, 0.412)),
+	priest = Variant("priest", "Priest", "frame-priest.tga", "chain-silver.tga", Metal(0.860, 0.840, 0.780)),
+	shaman = Variant("shaman", "Shaman", "frame-shaman.tga", "chain-gold.tga", Metal(0.000, 0.439, 0.871)),
+	mage = Variant("mage", "Mage", "frame-mage.tga", "chain-silver.tga", Metal(0.412, 0.800, 0.941)),
+	warlock = Variant("warlock", "Warlock", "frame-warlock.tga", "chain-silver.tga", Metal(0.580, 0.510, 0.788)),
+	druid = Variant("druid", "Druid", "frame-druid.tga", "chain-gold.tga", Metal(1.000, 0.490, 0.039)),
 }
 
 -- Colours: light, mid, dark (NOTES.md section 3).

@@ -1,4 +1,4 @@
-"""Read Lua errors recorded by !WowKitErrors. Matches Get-WowScriptErrors.ps1."""
+"""Read Lua errors recorded by !WowKitErrors."""
 
 from __future__ import annotations
 

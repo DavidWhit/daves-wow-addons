@@ -1,6 +1,6 @@
 """Screenshot concepts/index.html in headless Chrome and print JS errors.
 
-Matches shot.ps1. Usage: shot.py -Only skin -Hold 60 -Sim 2 -H 40 -Out skin60.png
+Usage: shot.py -Only skin -Hold 60 -Sim 2 -H 40 -Out skin60.png
 """
 
 from __future__ import annotations

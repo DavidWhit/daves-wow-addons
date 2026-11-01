@@ -5,7 +5,7 @@ description: Paint, generate, restyle, or pack an AI target unit frame theme (pl
 
 # Paint and pack a `daves_frames` target frame
 
-Every unit variant in `wowaddons/daves_frames/` (`plain`, `rare`, `elite` / `worldboss`, `rareelite`, and the nine class frames) shares **one exact single-box geometry** (`1024 × 300` layout px; `2048 × 600` 2× canvas) packed into a `2048 × 1024` 32-bit `.tga` atlas (`Media/frame-*.tga`) with its matching 2× `600 × 220` 9-slice aura board strip at `y = 608`.
+Every unit variant in `wowaddons/daves_frames/` (`plain`, `rare`, `elite`, `rareelite`, `boss`, and the nine class frames) shares **one exact single-box geometry** (`1024 × 300` layout px; `2048 × 600` 2× canvas) packed into a `2048 × 1024` 32-bit `.tga` atlas (`Media/frame-*.tga`) with its matching 2× `600 × 220` 9-slice aura board strip at `y = 608`.
 
 Full pixel coordinates live in `wowaddons/daves_frames/tools/template/PAINT-LAYERS.md` and `wowaddons/daves_frames/NOTES.md`.
 
@@ -36,9 +36,18 @@ Run `Build-FrameTemplate.py` if `guides/frame-template-ai.png` is missing or if 
 py -3 "wowaddons/daves_frames/tools/Build-FrameTemplate.py"
 ```
 
-This writes `guides/frame-template.png` (`2048 × 600`), `guides/frame-template-1x.png` (`1024 × 300`), `guides/frame-template-ai.png` (`2048 × 1152`, `16:9`), and `frame-template.json`, and checks `Layout.lua`.
+This writes `guides/frame-template-ai.png` (`2048 × 1152`, `16:9`) and `frame-template.json`, and checks `Layout.lua`.
 
-## 2. Paint the theme on `frame-template-ai.png`
+## 2. Plan each section's pixel budget, then paint on `frame-template-ai.png`
+
+Before writing the image prompt, **budget the actual drawable thickness of each stencil band** so motifs, crests, and gems are proportioned to fit comfortably *inside* their band without touching or clipping against inner/outer rims:
+
+| Section | Total band | Recommended rim margin | Net interior channel | Motif sizing rule |
+| --- | --- | --- | --- | --- |
+| **Grey (`#808080`) outer bar frame** | `22` layout px | `~2.5–3 px` outer rail | **`~16–17` layout px** tall × `~350 px` long | Long horizontal running motifs (vines, filigree, chains, chevrons); corner gems `<= 10–12 px` set flush inside the `22×22` corners (zero corner flange/step-out) |
+| **Green (`#00FF00`) inner bar lip** | `5` layout px | — | **`5` layout px** bevel | Clean gleaming metallic bevel only — too thin for busy ornament |
+| **Orange (`#FF8000`) portrait ring** | `23` layout px | `~3 px` outer + `~3 px` inner unbroken concentric rims | **`~17` layout px** circular channel | **12, 3, and 9 o'clock crests/moons/gems MUST be `<= 12–14` layout px (`~55%` of total ring width)** so dark backing + unbroken inner/outer rims stay clearly visible above and below |
+| **White (`#FFFFFF`) level ring** | `16` layout px | `~2.5 px` outer + `~2.5 px` inner rims | **`~11` layout px** circular channel | Simple slender single-strand motif, ticks, or clean engraving |
 
 Invoke the `image-generator` subagent (or an external Nano Banana / Imagine `16:9` image-edit pass) with:
 - **Reference image (`ImagePaths`):** absolute path to `wowaddons/daves_frames/tools/template/guides/frame-template-ai.png`
@@ -64,6 +73,7 @@ Run `Pack-FrameTemplate.py`:
 
 ```powershell
 # Example: boss / elite plate + matching forged-silver rareelite atlas
+# (QA --preview and --plate-out renders go to gitignored tools/template/preview/)
 py -3 "wowaddons/daves_frames/tools/Pack-FrameTemplate.py" `
   --source "wowaddons/daves_frames/tools/template/paintings/<theme>.png" `
   --plate-out "wowaddons/daves_frames/tools/template/preview/<theme>-plate.png" `
@@ -87,8 +97,9 @@ py -3 "wowaddons/daves_frames/tools/Pack-FrameTemplate.py" `
 Built-in `Layout.lua` variants:
 - `Media/frame-plain.tga` (`plain`: ordinary NPCs, and players whose class token is secret)
 - `Media/frame-rare.tga` (`rare`: normal rares, typically `--silver-out` of `plain`)
-- `Media/frame-elite.tga` (`elite`: elites and world bosses)
-- `Media/frame-rareelite.tga` (`rareelite`: rare-elites, typically `--silver-out` of `elite`)
+- `Media/frame-elite.tga` (`elite`: gold elites)
+- `Media/frame-rareelite.tga` (`rareelite`: silver rare-elites, typically `--silver-out` of `elite`)
+- `Media/frame-boss.tga` (`boss`: bosses and world bosses via `UnitIsBossMob` or `"worldboss"`)
 - `Media/frame-<class>.tga` (`warrior`, `paladin`, `hunter`, `rogue`, `priest`, `shaman`, `mage`, `warlock`, `druid`: players when `UnitClass` returns a non-secret token)
 
 If adding a brand-new art key beyond the built-in variants above, wire it into `Layout.lua` (`VARIANTS`), `Core.lua` (`/davesframes art`), and `daves_frames/README.md` + `NOTES.md`.

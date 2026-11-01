@@ -140,6 +140,7 @@ function ns:BuildFrame(variant)
 	local L = ns.VARIANTS[variant]
 	local S = ns.STD
 	ns.L = L
+	ns.artKey = L.key
 
 	local f = CreateFrame("Frame", "DavesFramesTarget", UIParent)
 	f:SetSize(L.w, L.h)
@@ -284,6 +285,7 @@ end
 
 -- Swap the metal without moving anything. Every variant shares GEO.
 function ns:ApplyArt(key)
+	key = key or ns.ArtFor(ns.unit)
 	local L = ns.VARIANTS[key] or ns.VARIANTS.plain
 	key = L.key
 	if ns.artKey == key then return end

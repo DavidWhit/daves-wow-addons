@@ -40,4 +40,4 @@ Targets: forever (`## Interface: 16001, 11509, 20506`).
 | Link into the game | `python wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.py -Path wowaddons/daves_chat` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
-Files: `daves_chat.toc`, `Core.lua`, `EditModeDialog.lua`, `Tabs.lua`, `Dock.lua`, `Header.lua`, `Window.lua`, `EditMode.lua`, `Options.lua`, `Media/gear.tga`, `Media/grip.tga`. See `NOTES.md` for architecture details and Forever UI constraints.
+Files: `daves_chat.toc`, `Core.lua`, `EditModeDialog.lua`, `Tabs.lua`, `Dock.lua`, `Header.lua`, `Window.lua`, `EditMode.lua`, `Options.lua`, `Media/grip.tga`. See `NOTES.md` for architecture details and Forever UI constraints.

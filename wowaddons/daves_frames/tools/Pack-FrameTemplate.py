@@ -1,8 +1,7 @@
 """Register, key, and pack an AI-painted daves_frames plate into Media/*.tga.
 
 Reads an AI painting made on `guides/frame-template-ai.png` (2048 x 1152, 16:9)
-or `guides/frame-template.png` (2048 x 600), in PNG, JPG, or TGA format, or an
-already-aligned 2048 x 600 RGBA plate:
+in PNG, JPG, or TGA format, or an already-aligned 2048 x 600 RGBA plate:
 
 1. Finds the three blue holes (left bar, portrait, right bar) and the yellow
    level hole and fits a least-squares X/Y transform onto the 2048 x 600 single
@@ -416,14 +415,100 @@ def fit_source_transform(w: int, h: int, rgba: bytearray):
 # Signed-distance plate coverage, sampling & inpainting
 # ---------------------------------------------------------------------------
 
-def build_clean_metal_mask(w: int, h: int, rgba: bytearray, erode: bool = True) -> bytearray:
-    """1 where source pixel is usable metal (not a flat key colour or JPEG 4:2:0 chroma halo)."""
-    key = bytearray(w * h)
+def _keep_large_key_components(w: int, h: int, raw: bytearray, min_pixels: int = 400, seed_border: bool = False) -> bytearray:
+    """Keep only true stencil-hole / exterior background components, never tiny enclosed gem highlights."""
+    seen = bytearray(w * h)
+    kept = bytearray(w * h)
+    for start in range(w * h):
+        if not raw[start] or seen[start]:
+            continue
+        q = deque([start])
+        seen[start] = 1
+        comp = []
+        touches_border = False
+        while q:
+            cur = q.popleft()
+            comp.append(cur)
+            cx_, cy_ = cur % w, cur // w
+            if cx_ == 0 or cx_ == w - 1 or cy_ == 0 or cy_ == h - 1:
+                touches_border = True
+            if cx_ > 0 and raw[cur - 1] and not seen[cur - 1]:
+                seen[cur - 1] = 1
+                q.append(cur - 1)
+            if cx_ + 1 < w and raw[cur + 1] and not seen[cur + 1]:
+                seen[cur + 1] = 1
+                q.append(cur + 1)
+            if cy_ > 0 and raw[cur - w] and not seen[cur - w]:
+                seen[cur - w] = 1
+                q.append(cur - w)
+            if cy_ + 1 < h and raw[cur + w] and not seen[cur + w]:
+                seen[cur + w] = 1
+                q.append(cur + w)
+        if len(comp) >= min_pixels or (seed_border and touches_border):
+            for idx in comp:
+                kept[idx] = 1
+    return kept
+
+
+def build_stencil_masks(w: int, h: int, rgba: bytearray):
+    """Return (clean_metal_mask, near_exterior_magenta_mask) ignoring enclosed purple/blue/gold gems."""
+    raw_mag = bytearray(w * h)
+    raw_blue = bytearray(w * h)
+    raw_yel = bytearray(w * h)
+    trans = bytearray(w * h)
     for i in range(w * h):
         o = i * 4
         r, g, b, a = rgba[o], rgba[o + 1], rgba[o + 2], rgba[o + 3]
-        if a < 128 or is_magenta_key(r, g, b) or is_blue_key(r, g, b) or is_yellow_key(r, g, b):
+        if a < 128:
+            trans[i] = 1
+            raw_mag[i] = 1
+        elif is_magenta_key(r, g, b):
+            raw_mag[i] = 1
+        elif is_blue_key(r, g, b):
+            raw_blue[i] = 1
+        elif is_yellow_key(r, g, b):
+            raw_yel[i] = 1
+
+    ext_mag = _keep_large_key_components(w, h, raw_mag, min_pixels=2000, seed_border=True)
+    blue_holes = _keep_large_key_components(w, h, raw_blue, min_pixels=400)
+    yel_holes = _keep_large_key_components(w, h, raw_yel, min_pixels=300)
+
+    key = bytearray(w * h)
+    for i in range(w * h):
+        if trans[i] or ext_mag[i] or blue_holes[i] or yel_holes[i]:
             key[i] = 1
+
+    # Mark source pixels within 5px of exterior magenta so --organic-edge only keys real outer silhouettes.
+    ext_h = bytearray(w * h)
+    for y in range(h):
+        ro = y * w
+        for x in range(w):
+            x0 = 0 if x < 5 else x - 5
+            x1 = w if x + 6 > w else x + 6
+            for xx in range(x0, x1):
+                if ext_mag[ro + xx]:
+                    ext_h[ro + x] = 1
+                    break
+    near_ext_mag = bytearray(w * h)
+    for y in range(h):
+        y0 = 0 if y < 5 else y - 5
+        y1 = h if y + 6 > h else y + 6
+        ro = y * w
+        for x in range(w):
+            for yy in range(y0, y1):
+                if ext_h[yy * w + x]:
+                    near_ext_mag[ro + x] = 1
+                    break
+
+    return key, near_ext_mag
+
+
+def build_clean_metal_mask(w: int, h: int, rgba: bytearray, erode: bool = True, key_override: bytearray = None) -> bytearray:
+    """1 where source pixel is usable metal (not a flat key colour or JPEG 4:2:0 chroma halo)."""
+    if key_override is not None:
+        key = bytearray(key_override)
+    else:
+        key, _ = build_stencil_masks(w, h, rgba)
     if not erode:
         return bytearray(0 if k else 1 for k in key)
 
@@ -590,19 +675,18 @@ def plate_coverage(x: int, y: int, outer_rad_px: float = 0.0, seal_only: bool = 
 
 
 def magenta_edge_chroma_key(r: int, g: int, b: int, a: int):
-    """Chroma-key + despill against magenta (#FF00FF), blue, and yellow for --organic-edge corners."""
+    """Chroma-key + despill against exterior magenta (#FF00FF), blue, and yellow for --organic-edge silhouettes."""
     if a < 16 or is_blue_key(r, g, b) or is_yellow_key(r, g, b):
         return 0, 0, 0, 0
-    mag = (min(r, b) - g) if (r > 90 and b > 80) else 0
-    if mag >= 115:
+    mag = (min(r, b) - g) if (r > 36 and b > 32) else 0
+    if mag >= 85:
         return 0, 0, 0, 0
     out_a = a
-    if mag > 25:
-        fade = int(255 * (115 - mag) / 90.0)
+    if mag > 16:
+        fade = int(255 * (85 - mag) / 69.0)
         out_a = min(out_a, fade)
-        cap = g + 15
-        r = min(r, cap + (r - b if r > b else 0))
-        b = min(b, cap)
+    if min(r, b) - g > 4:
+        r, g, b = despill_boundary_rgb(r, g, b)
     return max(0, min(255, r)), max(0, min(255, g)), max(0, min(255, b)), out_a
 
 
@@ -670,7 +754,8 @@ def extract_plate(
     outer_rad_px: float = 0.0,
     organic_edge: bool = False,
 ):
-    clean = build_clean_metal_mask(sw, sh, src, erode=erode_keys)
+    key_mask, near_ext_mag = build_stencil_masks(sw, sh, src)
+    clean = build_clean_metal_mask(sw, sh, src, erode=erode_keys, key_override=key_mask)
     out = bytearray(IW * IH * 4)
     need_fill = []
     have_rgb = bytearray(IW * IH)
@@ -695,7 +780,12 @@ def extract_plate(
                     need_fill.append(idx)
             elif organic_edge and outer_pa > 0:
                 sr, sg, sb, sa = sample_bilinear_rgba(src, sw, sh, fx, fy)
-                kr, kg, kb, ka = magenta_edge_chroma_key(sr, sg, sb, sa)
+                sx_i = 0 if fx < 0 else (sw - 1 if fx >= sw else int(fx))
+                sy_i = 0 if fy < 0 else (sh - 1 if fy >= sh else int(fy))
+                if near_ext_mag[sy_i * sw + sx_i]:
+                    kr, kg, kb, ka = magenta_edge_chroma_key(sr, sg, sb, sa)
+                else:
+                    kr, kg, kb, ka = sr, sg, sb, sa
                 fa = (ka * outer_pa) // 255
                 if fa >= 20:
                     out[o], out[o + 1], out[o + 2], out[o + 3] = kr, kg, kb, fa
@@ -767,21 +857,21 @@ def extract_plate(
                 out[o], out[o + 1], out[o + 2] = r, g, b
         print(f"inpainted {len(filled)} key-covered plate pixels")
 
-    # Despill residual JPEG 4:2:0 magenta/blue chroma bleed within 12px of any plate boundary.
+    # Despill residual JPEG 4:2:0 magenta/blue chroma bleed within 4px of any plate boundary.
     if erode_keys:
         edge_h = bytearray(IW * IH)
         for y in range(IH):
             ro = y * IW
             for x in range(IW):
-                x0 = 0 if x < 12 else x - 12
-                x1 = IW if x + 13 > IW else x + 13
+                x0 = 0 if x < 4 else x - 4
+                x1 = IW if x + 5 > IW else x + 5
                 for xx in range(x0, x1):
                     if out[(ro + xx) * 4 + 3] < 240:
                         edge_h[ro + x] = 1
                         break
         for y in range(IH):
-            y0 = 0 if y < 12 else y - 12
-            y1 = IH if y + 13 > IH else y + 13
+            y0 = 0 if y < 4 else y - 4
+            y1 = IH if y + 5 > IH else y + 5
             ro = y * IW
             for x in range(IW):
                 o = (ro + x) * 4

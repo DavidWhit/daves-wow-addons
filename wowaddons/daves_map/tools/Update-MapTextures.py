@@ -1,6 +1,6 @@
 """Build wowaddons/daves_map_textures from a local OpenMap folder or zip.
 
-Matches Update-MapTextures.ps1. Nothing is downloaded. The default output is the
+Nothing is downloaded. The default output is the
 gitignored daves_map_textures addon next to daves_map. Pass a source you already have.
 """
 
@@ -194,7 +194,7 @@ def build(source, addon_dir, repo, make_zip):
                         archive.write(full, rel)
             print(
                 f"Shareable copy: {zip_path} ({n0(os.path.getsize(zip_path) / 1048576)} MB). "
-                "Unzip into World of Warcraft\\_classic_beta_\\Interface\\AddOns, restart the client.",
+                "Unzip into World of Warcraft\\_forever_\\Interface\\AddOns, restart the client.",
                 flush=True,
             )
         print("First time on this machine: link it into the game, then restart the client fully:", flush=True)

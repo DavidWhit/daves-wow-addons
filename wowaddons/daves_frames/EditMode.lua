@@ -79,6 +79,19 @@ function ns:InitEditMode(frame)
 		get = function() return ns.db.swing end,
 		set = function(v) ns.db.swing = v end })
 
+	-- Preview: cycle every plate in turn while Edit Mode is open, or hold on one.
+	local previews = { { key = "all", text = "All" } }
+	for _, k in ipairs(ns.VARIANT_ORDER) do
+		previews[#previews + 1] = { key = k, text = ns.VARIANTS[k].label }
+	end
+	d:AddButtonGrid({ label = "Preview", columns = 3,
+		buttons = previews,
+		onClick = function(key)
+			ns.editPreview = key ~= "all" and key or nil
+			ns:StepEditPreview(ns.editPreview)
+		end,
+		isActive = function(key) return (key == "all" and not ns.editPreview) or key == ns.editPreview end })
+
 	-- The default place, so this is also the reset (right-clicking the frame does the same).
 	d:AddButton({ text = "Pin to top edge", onClick = function()
 		ns.db.pos = nil

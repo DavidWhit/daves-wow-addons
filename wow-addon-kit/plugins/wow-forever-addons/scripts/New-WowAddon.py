@@ -1,4 +1,4 @@
-"""Create a WoW addon from the kit template. Matches New-WowAddon.ps1."""
+"""Create a WoW addon from the kit template."""
 
 from __future__ import annotations
 

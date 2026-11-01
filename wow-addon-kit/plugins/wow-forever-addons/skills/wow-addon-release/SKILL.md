@@ -31,7 +31,7 @@ The zip must contain the addon **folder** at its root (`MyAddon/MyAddon.toc`), n
 $src = "<addon folder>"; $name = Split-Path $src -Leaf
 $ver = (Select-String -Path "$src\$name.toc" -Pattern '^## Version:\s*(.+)$').Matches[0].Groups[1].Value.Trim()
 $stage = Join-Path $env:TEMP "wowrel\$name"; Remove-Item (Split-Path $stage) -Recurse -Force -ErrorAction SilentlyContinue
-robocopy $src $stage /E /XD .git .vscode tests .release /XF .luacheckrc .pkgmeta .gitignore *.zip | Out-Null
+robocopy $src $stage /E /XD .git .vscode tests tools __pycache__ .release /XF .luacheckrc .pkgmeta .gitignore README.md NOTES.md *.zip | Out-Null
 Compress-Archive -Path $stage -DestinationPath (Join-Path (Split-Path $src) "$name-$ver.zip") -Force
 ```
 

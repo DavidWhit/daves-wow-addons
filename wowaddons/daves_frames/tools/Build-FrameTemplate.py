@@ -343,12 +343,6 @@ def main():
     check_geometry()
     check_pixels()
     check_layout_lua()
-    path = os.path.join(GUIDES, "frame-template.png")
-    w, h, rgb = render(SCALE)
-    write_png(path, w, h, rgb)
-    one = os.path.join(GUIDES, "frame-template-1x.png")
-    w1, h1, rgb1 = render(1)
-    write_png(one, w1, h1, rgb1)
     ai = os.path.join(GUIDES, "frame-template-ai.png")
     wai, hai, rgbai = render(SCALE, pad_layout=AI_PAD_LAYOUT)
     write_png(ai, wai, hai, rgbai)
@@ -356,8 +350,6 @@ def main():
     with open(spec_path, "w", encoding="utf-8", newline="\n") as f:
         json.dump(spec(), f, indent=2)
         f.write("\n")
-    print(f"wrote {path} ({w}x{h})")
-    print(f"wrote {one} ({w1}x{h1})")
     print(f"wrote {ai} ({wai}x{hai}, exact 16:9 AI-padded)")
     print(f"wrote {spec_path}")
     print(

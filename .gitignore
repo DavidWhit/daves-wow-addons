@@ -1,22 +1,28 @@
-# Build output
+# Build output & local cleanup archive
 *.zip
 .release/
+.old/
 
-# OS / editor
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local CLI / OS / editor
+.grok/
 Thumbs.db
 .DS_Store
 desktop.ini
 
-# Local copy of Blizzard UI source (rebuild with Update-WowUiSource.ps1)
+# Local copy of Blizzard UI source (rebuild with Update-WowUiSource.py)
 wow-addon-kit/plugins/wow-forever-addons/data/ui-source/
 
 # ForeverLoot: never committed (user rule)
 wowaddons/ForeverLoot/
 
-# daves_map_data: generated from Map Genie by wowaddons/daves_map/tools/Update-MapData.ps1 (their data; public repo)
+# daves_map_data: generated from Map Genie by wowaddons/daves_map/tools/Update-MapData.py (their data; public repo)
 wowaddons/daves_map_data/
 
-# daves_map_textures: OpenMap's map art (Blizzard's) and tables, built by wowaddons/daves_map/tools/Update-MapTextures.ps1
+# daves_map_textures: OpenMap's map art (Blizzard's) and tables, built by wowaddons/daves_map/tools/Update-MapTextures.py
 wowaddons/daves_map_textures/
 
 # OpenMap release, downloaded as the source for daves_map_textures (not ours to commit)

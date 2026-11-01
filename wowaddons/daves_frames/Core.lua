@@ -101,6 +101,10 @@ function ns:ADDON_LOADED(name)
 	-- Per-frame work runs on its own child frame: Edit Mode's drag owns the frame's OnUpdate.
 	local ticker = CreateFrame("Frame", nil, f)
 	ticker:SetScript("OnUpdate", function(_, dt)
+		if ns.editing and not ns.editPreview then
+			ns.editClock = (ns.editClock or 0) + dt
+			if ns.editClock >= 2.6 then ns:StepEditPreview() end
+		end
 		if ns.aurasDirty then ns.aurasDirty = nil; ns:RefreshAuras() end
 		ns:TickCast()
 		ns:TickBoards(dt)
@@ -127,11 +131,28 @@ function ns:PLAYER_LOGIN()
 end
 
 -- Preview shows the frame on yourself when there's no target: in Edit Mode, or with /davesframes test.
+-- While Edit Mode is open, the frame also cycles through the plate variants (or holds on one chosen in the dialog).
+function ns:StepEditPreview(key)
+	if not key then
+		ns.editIndex = (ns.editIndex or 0) % #ns.VARIANT_ORDER + 1
+		key = ns.VARIANT_ORDER[ns.editIndex]
+	end
+	ns.editArt = key
+	ns.editClock = 0
+	if ns.editing then ns:ApplyArt(ns.ArtFor(ns.unit)) end
+end
+
 local previewReasons = {}
 function ns:SetPreview(reason, on)
+	local wasEditing = ns.editing
 	previewReasons[reason] = on or nil
 	ns.preview = next(previewReasons) ~= nil
 	ns.editing = previewReasons.editmode ~= nil   -- Edit Mode shows the frame even when it's disabled
+	if ns.editing and not wasEditing then
+		ns:StepEditPreview(ns.editPreview)
+	elseif not ns.editing then
+		ns.editArt, ns.editClock = nil, nil
+	end
 	ns:Refresh()
 end
 
@@ -206,11 +227,10 @@ SlashCmdList["DAVES_FRAMES"] = function(msg)
 		local which = msg:match("^art%s+(%S+)") or "auto"
 		if which == "auto" then
 			ns.artForce = nil
-			ns.artKey = nil
+			ns:ApplyArt(ns.ArtFor(ns.unit))
 			ns.Print("art follows the unit.")
 		elseif ns.VARIANTS[which] then
 			ns.artForce = which
-			ns.artKey = nil
 			ns:ApplyArt(which)
 			ns.Print("art: " .. which .. ".  /davesframes art auto puts it back on the unit.")
 		else

@@ -22,5 +22,6 @@ globals = {
 	"SlashCmdList",
 	"StaticPopupDialogs",
 	"daves_mapDB",
+	"daves_mapCharDB",
 	"daves_map_OnAddonCompartmentClick",
 }

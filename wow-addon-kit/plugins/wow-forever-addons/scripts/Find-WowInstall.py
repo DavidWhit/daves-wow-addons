@@ -1,4 +1,4 @@
-"""Find the WoW install and list clients. Matches Find-WowInstall.ps1."""
+"""Find the WoW install and list clients."""
 
 from __future__ import annotations
 

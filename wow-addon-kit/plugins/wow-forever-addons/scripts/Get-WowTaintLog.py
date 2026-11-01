@@ -1,4 +1,4 @@
-"""Read the WoW client's taint log. Matches Get-WowTaintLog.ps1."""
+"""Read the WoW client's taint log."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
-"""Self-test for the Python kit scripts. Same checks as Invoke-KitSelfTest.ps1.
+"""Self-test for the Python kit scripts.
 
-Runs Test-WowAddon.py, New-WowAddon.py and Link-WowAddons.py. The fake WoW
-install stays in a temp folder. Junctions are removed before the temp tree is.
+Runs Test-WowAddon.py, New-WowAddon.py, Link-WowAddons.py, Find-WowApi.py, and Prepare-WowReview.py.
+The fake WoW install stays in a temp folder. Junctions are removed before the temp tree is.
 """
 
 from __future__ import annotations

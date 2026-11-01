@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# link-wow-addons.sh - macOS twin of Link-WowAddons.ps1 for Macs without PowerShell 7.
+# link-wow-addons.sh - pure-bash macOS twin of Link-WowAddons.py for Macs without Python 3.
 #
 # Symlinks every addon folder (one holding <Folder>.toc or <Folder>_<Flavor>.toc) into
-# <client>/Interface/AddOns of every client folder (_retail_, _classic_beta_, ...) under the
-# WoW root. Run it after cloning or pulling. Unlike the PowerShell script it does not read the
+# <client>/Interface/AddOns of every client folder (_retail_, _forever_, ...) under the
+# WoW root. Run it after cloning or pulling. Unlike Link-WowAddons.py it does not read the
 # TOC's Interface lines: every addon goes into every client.
 #
 #   - a symlink to this addon's folder is left alone;
@@ -12,7 +12,7 @@
 #   --remove deletes only symlinks that point at these addons; nothing else is touched.
 #
 # The kit's development addons (devaddons/: !WowKitErrors, which records in-game Lua errors for
-# Get-WowScriptErrors.ps1) are linked too, every run; --no-dev-addons leaves them out. --remove with
+# Get-WowScriptErrors.py) are linked too, every run; --no-dev-addons leaves them out. --remove with
 # a folder of addons unlinks them as well; with one addon, it leaves them.
 #
 # Usage:
@@ -184,7 +184,7 @@ for client in "$wow_root"/_*_/; do
 done
 
 if [ "$found_client" -eq 0 ]; then
-	echo "No client folders (_retail_, _classic_beta_, ...) under $wow_root." >&2
+	echo "No client folders (_retail_, _forever_, ...) under $wow_root." >&2
 	exit 1
 fi
 

@@ -1,4 +1,4 @@
-"""Paint daves_balls orb TGA files. Matches Make-OrbMedia.ps1.
+"""Paint daves_balls orb TGA files.
 
 32-bit uncompressed TGA, bottom-left origin. -Out is required.
 System.Random(seed) is the .NET Framework generator PowerShell 5.1 uses.

@@ -1,4 +1,4 @@
-"""Build data/api-<branch>.json from Blizzard's UI source. Matches Update-WowApiIndex.ps1.
+"""Build data/api-<branch>.json from Blizzard's UI source.
 
 The download hits GitHub. Pass -OutDir to keep the live data\\api-forever.json untouched.
 """

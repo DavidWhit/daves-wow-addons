@@ -1,8 +1,6 @@
 """Shared helpers for the wow-forever-addons scripts.
 
-Behavior matches scripts/WowKit.psm1 (and the copy in powershell-backup). Windows
-PowerShell 5.1 details that callers depend on are kept, including flavor order,
-Interface encoding, and the backup-folder suffix that starts at -2.
+Preserves flavor order, Interface encoding, and the backup-folder suffix that starts at -2.
 """
 
 from __future__ import annotations

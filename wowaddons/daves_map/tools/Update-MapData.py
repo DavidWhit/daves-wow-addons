@@ -1,6 +1,6 @@
 """Rebuild wowaddons/daves_map_data from Map Genie and pfQuest.
 
-Matches Update-MapData.ps1. Downloads are data: JSON and Lua literals only,
+Downloads are data: JSON and Lua literals only,
 https on mapgenie.io and raw.githubusercontent.com, 64 MB cap. Nothing fetched
 is executed. Do not commit daves_map_data or its zip.
 """
@@ -852,7 +852,7 @@ def main(argv):
             print(f"Removed the old {old_in_addon} (the data now lives in daves_map_data)", flush=True)
         print(
             f"Shareable copy: {zip_path} ({n0(os.path.getsize(zip_path) / 1024)} KB). "
-            "Unzip into World of Warcraft\\_classic_beta_\\Interface\\AddOns, restart the client.",
+            "Unzip into World of Warcraft\\_forever_\\Interface\\AddOns, restart the client.",
             flush=True,
         )
         print("First time on this machine: link it into the game, then restart the client fully:", flush=True)

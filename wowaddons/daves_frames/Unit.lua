@@ -78,7 +78,6 @@ function ns:Refresh()
 		return
 	end
 	ns.unit = unit
-	f:Show()
 	ns:UpdateIdentity()
 	ns:UpdateHealth(true)
 	ns:UpdatePower(true)
@@ -87,6 +86,7 @@ function ns:Refresh()
 	ns:UpdateTargetOfTarget()
 	ns:RefreshCast()
 	ns:RefreshAuras(true)
+	f:Show()
 end
 
 function ns:UpdateHealth(snap)
@@ -174,6 +174,7 @@ end
 -- NPCs follow classification. A secret classification stays plain rather than guessing.
 function ns.ArtFor(unit)
 	if ns.artForce and ns.VARIANTS[ns.artForce] then return ns.artForce end
+	if ns.editing and ns.editArt and ns.VARIANTS[ns.editArt] then return ns.editArt end
 	if not unit then return "plain" end
 	local player = UnitIsPlayer(unit)
 	if Secret(player) then return "plain" end
@@ -186,10 +187,13 @@ function ns.ArtFor(unit)
 		end
 		return "plain"
 	end
+	local boss = UnitIsBossMob and UnitIsBossMob(unit)
+	if not Secret(boss) and boss then return "boss" end
 	local class = UnitClassification(unit)
 	if Secret(class) then return "plain" end
+	if class == "worldboss" then return "boss" end
 	if class == "rareelite" then return "rareelite" end
-	if class == "elite" or class == "worldboss" then return "elite" end
+	if class == "elite" then return "elite" end
 	if class == "rare" then return "rare" end
 	return "plain"
 end
