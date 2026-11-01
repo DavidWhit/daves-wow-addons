@@ -36,6 +36,8 @@ local done = {}              -- [questID] = true/false, this session
 local lastCX, lastCY
 local searchSet              -- [pin] = true while a search is active (ns.SetSearch)
 local BASE = 15              -- pin size in screen pixels at pinScale 1
+local HIT_R = 0.55           -- hover radius in pin widths; hot's square (2 * HIT_R) encloses the whole circle
+local tipOwner, tipPin, tipDone, tipChain, tipStep, tipLocked
 local posX, posY = {}, {}    -- [pin] = where each shown pin is on the current map (0-1, past it on the seamless map)
 local seamX, seamY = {}, {}  -- posX, posY's own tables on the seamless map (reused at each rebuild)
 
@@ -512,12 +514,8 @@ end
 
 local function Rebuild()
 	dirty = false
-	-- the hovered pin may be filtered out now, or the map changed: start the hover afresh
-	hoverPin, lastCX, lastCY = nil, nil, nil
-	if hot then
-		hot:Hide()
-		if GameTooltip:GetOwner() == hot then GameTooltip:Hide() end
-	end
+	lastCX, lastCY = nil, nil
+	local keepHover = false
 	wipe(shown)
 	nIcons = 0
 	local keepWin = win   -- (filled again in place on the seamless map, below)
@@ -531,6 +529,7 @@ local function Rebuild()
 	end
 	local function Add(i, x, y)
 		shown[#shown + 1] = i
+		if i == hoverPin then keepHover = true end
 		nIcons = nIcons + 1
 		local t = Icon(nIcons)
 		local q = D.qid[i]
@@ -566,7 +565,20 @@ local function Rebuild()
 	end
 	for n = nIcons + 1, #icons do icons[n]:Hide() end
 	if lockedPin and not ns.db.enabled then lockedPin, chain = nil, nil end
+	if hoverPin and not keepHover then
+		hoverPin = nil
+		if hot then
+			hot:Hide()
+			if GameTooltip:GetOwner() == hot then tipOwner = nil; GameTooltip:Hide() end
+		end
+	end
 	DrawLinks()
+	if hoverPin and hot then
+		Place(hot, posX[hoverPin], posY[hoverPin], PinSize(hoverPin) * (HIT_R * 2))
+		if GameTooltip:IsShown() and GameTooltip:GetOwner() == hot then
+			ns.ShowTooltip(hot, hoverPin)
+		end
+	end
 	if ns.OnLayerChanged then ns.OnLayerChanged() end
 end
 
@@ -587,7 +599,7 @@ local function PinAt(cx, cy)
 	local best, bd
 	for n = #shown, 1, -1 do   -- the last drawn is on top
 		local i = shown[n]
-		local r = PinSize(i) * 0.55
+		local r = PinSize(i) * HIT_R
 		local dx, dy = posX[i] * curW - px, posY[i] * curH - py
 		local d = dx * dx + dy * dy
 		if d <= r * r and (not bd or d < bd) then best, bd = i, d end
@@ -599,20 +611,17 @@ local function SetHover(i)
 	if i == hoverPin then return end
 	hoverPin = i
 	local x, y
-	if i then x, y = Pos(i) end
+	if i then x, y = posX[i], posY[i] end
 	if i and not x then hoverPin, i = nil, nil end   -- (nowhere to put it: as no pin)
+	DrawLinks()
 	if i then
-		local size = PinSize(i)
-		hot:ClearAllPoints()
-		hot:SetPoint("CENTER", overlay, "TOPLEFT", x * curW, -y * curH)
-		hot:SetSize(size, size)
+		Place(hot, x, y, PinSize(i) * (HIT_R * 2))
 		hot:Show()
 		ns.ShowTooltip(hot, i)
 	else
 		hot:Hide()
-		if GameTooltip:GetOwner() == hot then GameTooltip:Hide() end
+		if GameTooltip:GetOwner() == hot then tipOwner = nil; GameTooltip:Hide() end
 	end
-	DrawLinks()
 end
 
 -- Blizzard's own map sounds for the same actions (Blizzard_WorldMap, Blizzard_SharedMapDataProviders)
@@ -838,6 +847,9 @@ function ns.Focus(i)
 	Sound(lockedPin and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")   -- as Blizzard's map pins toggle
 	chain = lockedPin and BuildChain(lockedPin) or nil
 	DrawLinks()
+	if hoverPin and GameTooltip:IsShown() and GameTooltip:GetOwner() == hot then
+		ns.ShowTooltip(hot, hoverPin)
+	end
 	if ns.OnLayerChanged then ns.OnLayerChanged() end
 end
 function ns.FocusedPin() return lockedPin end
@@ -958,6 +970,16 @@ local function LinkLine(label, list, base)   -- base: the pin the tooltip is for
 end
 
 function ns.ShowTooltip(owner, i)
+	local q = D.qid[i]
+	local completed = q ~= 0 and IsDone(q)
+	local step = (chain and #chain.steps > 1) and chain.num[i] or nil
+	local isLocked = lockedPin == i
+	if GameTooltip:IsShown() and GameTooltip:GetOwner() == owner
+		and tipOwner == owner and tipPin == i and tipDone == completed
+		and tipChain == chain and tipStep == step and tipLocked == isLocked then
+		return
+	end
+	tipOwner, tipPin, tipDone, tipChain, tipStep, tipLocked = owner, i, completed, chain, step, isLocked
 	local c = D.cats[D.cat[i]]
 	local s = Style(D.cat[i])
 	GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
@@ -972,17 +994,16 @@ function ns.ShowTooltip(owner, i)
 			if not line:find("Faction:") and not line:find("Side:") then GameTooltip:AddLine(line, .9, .9, .9, true) end
 		end
 	end
-	local q = D.qid[i]
-	if q ~= 0 and IsDone(q) then GameTooltip:AddLine("Completed", .4, 1, .4) end
+	if completed then GameTooltip:AddLine("Completed", .4, 1, .4) end
 	if D.endp[i] ~= 0 then LinkLine("|cffffd200Turn in:|r ", { D.endp[i] }, i) end
 	LinkLine("|cff8ca6ffRequires:|r ", D.pre[i] or {}, i)
 	LinkLine("|cff59ff73Leads to:|r ", nextOf[i] or {}, i)
 	if D.dest[i] ~= 0 then LinkLine("|cff4de6ffTravels to:|r ", { D.dest[i] }, i) end
-	if chain and chain.num[i] and #chain.steps > 1 then
-		GameTooltip:AddLine(("Step %d of %d in the selected chain"):format(chain.num[i], #chain.steps), 1, .82, .2)
+	if step then
+		GameTooltip:AddLine(("Step %d of %d in the selected chain"):format(step, #chain.steps), 1, .82, .2)
 	end
 	local hint
-	if lockedPin == i then hint = "Click: clear the selection"
+	if isLocked then hint = "Click: clear the selection"
 	elseif D.pre[i] or nextOf[i] then hint = "Click: show this quest chain, numbered in order"
 	else hint = "Click: keep its links drawn" end
 	GameTooltip:AddLine(" ")
@@ -999,7 +1020,7 @@ local function OnUpdate()
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
 	if map ~= curMap or w ~= curW or h ~= curH then
 		curMap, curW, curH = map, w, h
-		dirty = true   -- Rebuild clears the hover
+		dirty = true   -- Rebuild re-places or clears the hover
 		ns.HideVeilIfMoved()
 	end
 	local scale, zoom = WorldMapFrame:GetCanvasScale(), WorldMapFrame:GetCanvasZoomPercent()
@@ -1025,7 +1046,7 @@ local function OnUpdate()
 	elseif scale ~= curScale or zoom ~= curZoom then
 		curScale, curZoom = scale, zoom
 		Resize()
-		if hoverPin then local s = PinSize(hoverPin); hot:SetSize(s, s) end
+		if hoverPin then local s = PinSize(hoverPin) * (HIT_R * 2); hot:SetSize(s, s) end
 	end
 	-- hover: only over bare canvas or our own button, so Blizzard's pins keep their mouse
 	if #shown == 0 then
@@ -1099,6 +1120,10 @@ local function Init()
 	overlay:SetAllPoints(canvas)
 	overlay:SetFrameLevel(ns.OverlayLevel())
 	overlay:SetScript("OnUpdate", OnUpdate)
+	overlay:SetScript("OnHide", function()
+		if hoverPin then SetHover(nil) end
+		lastCX, lastCY = nil, nil
+	end)
 
 	hot = CreateFrame("Button", nil, overlay)
 	hot:SetFrameLevel(overlay:GetFrameLevel() + 1)
@@ -1112,8 +1137,6 @@ local function Init()
 		if not hoverPin then return end
 		if IsShiftKeyDown() then ns.SetWaypoint(hoverPin) else ns.Focus(hoverPin) end
 	end)
-	hot:SetScript("OnEnter", function(self) if hoverPin then ns.ShowTooltip(self, hoverPin) end end)
-	hot:SetScript("OnLeave", function(self) if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
 
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
