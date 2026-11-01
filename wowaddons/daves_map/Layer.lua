@@ -13,6 +13,10 @@
 -- chain: the prerequisites back to the first quest and the follow-ups on to the last, numbered in order (badges on
 -- the pins) and joined by lines, with each step's turn-in. A step in another zone is held at the map's edge, pointing
 -- the way, with its number and zone. Click again to clear. Shift-click sets a waypoint.
+--
+-- On the seamless map (Stitch\, with daves_map_textures) the same frame sits on the canvas over the stitched art: pins
+-- are placed from their place on the stitched world, any pin in view is where it is (no edge markers), and a click
+-- that opens another map flies the view there instead (FlyToMap).
 
 local _, ns = ...
 
@@ -32,6 +36,56 @@ local done = {}              -- [questID] = true/false, this session
 local lastCX, lastCY
 local searchSet              -- [pin] = true while a search is active (ns.SetSearch)
 local BASE = 15              -- pin size in screen pixels at pinScale 1
+local HIT_R = 0.55           -- hover radius in pin widths; hot's square (2 * HIT_R) encloses the whole circle
+local tipOwner, tipPin, tipDone, tipChain, tipStep, tipLocked
+local posX, posY = {}, {}    -- [pin] = where each shown pin is on the current map (0-1, past it on the seamless map)
+local seamX, seamY = {}, {}  -- posX, posY's own tables on the seamless map (reused at each rebuild)
+
+---------------------------------------------------------------------------
+-- The seamless map (Stitch\, with daves_map_textures): the view runs past the map underneath into its neighbours,
+-- so there pins are placed from their place on the stitched world (u, v) and any pin in view is drawn where it is,
+-- not held at the map's edge. The map underneath follows the view by itself; curMap is that map.
+---------------------------------------------------------------------------
+local stitch, S              -- OpenMap's worldmap module and its art (Stitch\WorldMap.lua, Stitch.lua), when running
+local U, V = {}, {}          -- [pin] = its place on the stitched world, or false (its continent isn't stitched)
+local win                    -- the stitched world the shown pins were picked from: { u0, u1, v0, v1, zoom }
+local builtSeamless = false  -- the pins were last placed for the seamless map
+local WIN = 2                -- pins are picked from this many view half-widths round the view's centre
+
+-- the map window shows the seamless map now
+local function Stitched() return stitch ~= nil and stitch.IsStitched() end
+-- ... and the pins are for the map it shows: a quest opened with the map closed puts the map up and calls in here
+-- (ns.Focus) in the same call, before our OnUpdate has caught up with the new map (curMap)
+local function Seamless() return Stitched() and curMap == WorldMapFrame:GetMapID() end
+function ns.IsSeamless() return Seamless() end
+
+local function WorldUV(i)
+	local u = U[i]
+	if u == nil then
+		u = false
+		local cont = P.cont[i]
+		if cont and S.Rect(cont) then
+			local v
+			u, v = stitch.ToWorld(cont, P.cx[i], P.cy[i])
+			V[i] = v
+		end
+		U[i] = u
+	end
+	if u then return u, V[i] end
+end
+
+-- the view has left the stitched world the pins were picked from, or zoomed well in or out of it (`flying`: zoomed in
+-- doesn't count, the flight's own way in passes through it)
+local checkedScale, checkedX, checkedY, checkedW, checkedH   -- the view WindowStale last looked at (OnUpdate)
+local wasAnimating                                         -- the view was flying at the last OnUpdate
+local function WindowStale(flying)
+	if not win then return true end
+	local u, v, zoom = stitch.ViewNow()
+	if not u then return false end
+	local hu, hv = stitch.ViewHalfExtents(zoom)
+	return u - hu < win[1] or u + hu > win[2] or v - hv < win[3] or v + hv > win[4]
+		or (zoom > win[5] * 2 and not flying) or zoom < win[5] / 2
+end
 
 ---------------------------------------------------------------------------
 -- Styles: Blizzard's own icons where the client has them, else our dot in the category's colour
@@ -88,11 +142,60 @@ end
 local CLASS_BITS = { WARRIOR = 1, PALADIN = 2, HUNTER = 4, ROGUE = 8, PRIEST = 16, SHAMAN = 32, MAGE = 64, WARLOCK = 128, DRUID = 256 }
 ns.CLASS_ORDER = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
 
--- the filters; a search shows its matches whatever their category
+-- a quest's pins in the map data (where it's picked up), by quest ID, in data order; built once
+local pinsOfQuest
+local function PinsOfQuest(q)   -- (ns.DATA, not D: the tracker asks before the map layer is set up)
+	if not pinsOfQuest then
+		pinsOfQuest = {}
+		local qid = ns.DATA.qid
+		for i = 1, #qid do
+			local id = qid[i]
+			if id ~= 0 then pinsOfQuest[id] = pinsOfQuest[id] or {}; table.insert(pinsOfQuest[id], i) end
+		end
+	end
+	return pinsOfQuest[q]
+end
+-- its first pin; nil when the data doesn't have it
+function ns.QuestPin(q)
+	local list = ns.DATA and PinsOfQuest(q)
+	return list and list[1]
+end
+
+-- The quest focused by a click of yours (any quest click: ns.QuestClicked), kept per character (daves_mapCharDB, made
+-- at ADDON_LOADED), not one Blizzard focuses by itself (a quest accepted with nothing focused). With "Click a tracked
+-- quest to focus it" on, the map then shows only its pins: where it's picked up, where it's turned in and where it
+-- sends you, whatever the filters (it's in your log). focusSet nil: no such focus, or none of its pins in the data
+local focusSet, focusFor
+function ns.SetClickFocus(q) daves_mapCharDB.focusClick = q end
+function ns.ClickFocus() return daves_mapCharDB.focusClick end
+function ns.ClickFocused(q) return q == daves_mapCharDB.focusClick and q == ns.SuperTrackedQuest() end
+-- true when the set changed (so the pins need placing again)
+local function UpdateFocus()
+	local q = D and ns.db.focusQuest and ns.SuperTrackedQuest()
+	if not q or q == 0 or issecretvalue(q) or q ~= daves_mapCharDB.focusClick then q = nil end
+	if q == focusFor then return false end
+	focusFor, focusSet = q, nil
+	local list = q and PinsOfQuest(q)
+	if list then
+		focusSet = {}
+		for _, i in ipairs(list) do
+			focusSet[i] = true
+			if D.endp[i] ~= 0 then focusSet[D.endp[i]] = true end
+			if D.dest[i] ~= 0 then focusSet[D.dest[i]] = true end
+		end
+	end
+	return true
+end
+ns.UpdateFocus = UpdateFocus
+function ns.Focused() return focusSet ~= nil end
+
+-- the filters; a search shows its matches whatever their category, a focused quest (above) its own pins
 local function Passes(i)
 	local db = ns.db
 	if searchSet then
 		if not searchSet[i] then return false end
+	elseif focusSet then
+		return focusSet[i] == true
 	elseif db.hidden[D.cats[D.cat[i]].id] then
 		return false
 	end
@@ -186,6 +289,12 @@ end
 -- another zone still points the right way. nil when the pin is on another continent.
 local EDGE = 0.02
 local function Pos(i)
+	if Seamless() then   -- every pin where it is: the seamless map shows past this map's edges
+		local u, v = WorldUV(i)
+		if not u then return nil end   -- (not on the stitched world: this map's edge is open land here, not a border)
+		local x, y = stitch.FromWorld(curMap, u, v)
+		return x, y, true
+	end
 	local x, y, mine = ns.ProjectPin(curMap, i)
 	if not x then return nil end
 	if mine then return x, y, true end   -- a pin drawn on this map stays exactly where it is, even at the edge
@@ -405,52 +514,93 @@ end
 
 local function Rebuild()
 	dirty = false
-	-- the hovered pin may be filtered out now, or the map changed: start the hover afresh
-	hoverPin, lastCX, lastCY = nil, nil, nil
-	if hot then
-		hot:Hide()
-		if GameTooltip:GetOwner() == hot then GameTooltip:Hide() end
-	end
+	lastCX, lastCY = nil, nil
+	local keepHover = false
 	wipe(shown)
 	nIcons = 0
+	local keepWin = win   -- (filled again in place on the seamless map, below)
+	win = nil
+	builtSeamless = Seamless()
+	local level = ns.OverlayLevel()   -- (the seamless map's layers are added after us)
+	if overlay and overlay:GetFrameLevel() ~= level then
+		overlay:SetFrameLevel(level)
+		hot:SetFrameLevel(level + 1)
+		for _, b in ipairs(badges) do b:SetFrameLevel(level + 2) end
+	end
+	local function Add(i, x, y)
+		shown[#shown + 1] = i
+		if i == hoverPin then keepHover = true end
+		nIcons = nIcons + 1
+		local t = Icon(nIcons)
+		local q = D.qid[i]
+		PaintIcon(t, i, (q ~= 0 and IsDone(q)) and .35 or 1)   -- completed quests dimmed
+		Place(t, x, y, PinSize(i))
+		t:Show()
+	end
 	if ns.db.enabled and D and curMap and ns.Calibrate() then
-		local c = ns.PinsOnMap(curMap)
-		for _, i in ipairs(c.idx) do
-			if Passes(i) then
-				shown[#shown + 1] = i
-				nIcons = nIcons + 1
-				local t = Icon(nIcons)
-				local q = D.qid[i]
-				PaintIcon(t, i, (q ~= 0 and IsDone(q)) and .35 or 1)   -- completed quests dimmed
-				Place(t, c.x[i], c.y[i], PinSize(i))
-				t:Show()
+		local u, v, zoom = nil, nil, nil
+		if Seamless() then u, v, zoom = stitch.ViewNow() end
+		if u then
+			-- the pins round the view on the stitched world, wherever their zone (rebuilt as the view moves on: OnUpdate)
+			local hu, hv = stitch.ViewHalfExtents(zoom)
+			win = keepWin or {}
+			win[1], win[2], win[3], win[4], win[5] = u - hu * WIN, u + hu * WIN, v - hv * WIN, v + hv * WIN, zoom
+			wipe(seamX) wipe(seamY)   -- (not posX itself: off the seamless map it's PinsOnMap's own table)
+			posX, posY = seamX, seamY
+			for i = 1, #D.x do
+				local pu, pv = WorldUV(i)
+				if pu and pu >= win[1] and pu <= win[2] and pv >= win[3] and pv <= win[4] and Passes(i) then
+					local x, y = stitch.FromWorld(curMap, pu, pv)
+					posX[i], posY[i] = x, y
+					Add(i, x, y)
+				end
+			end
+		else
+			local c = ns.PinsOnMap(curMap)
+			posX, posY = c.x, c.y
+			for _, i in ipairs(c.idx) do
+				if Passes(i) then Add(i, c.x[i], c.y[i]) end
 			end
 		end
 	end
 	for n = nIcons + 1, #icons do icons[n]:Hide() end
 	if lockedPin and not ns.db.enabled then lockedPin, chain = nil, nil end
+	if hoverPin and not keepHover then
+		hoverPin = nil
+		if hot then
+			hot:Hide()
+			if GameTooltip:GetOwner() == hot then tipOwner = nil; GameTooltip:Hide() end
+		end
+	end
 	DrawLinks()
+	if hoverPin and hot then
+		Place(hot, posX[hoverPin], posY[hoverPin], PinSize(hoverPin) * (HIT_R * 2))
+		if GameTooltip:IsShown() and GameTooltip:GetOwner() == hot then
+			ns.ShowTooltip(hot, hoverPin)
+		end
+	end
 	if ns.OnLayerChanged then ns.OnLayerChanged() end
 end
 
 -- sizes only (zooming): the textures keep their places on the canvas
 local function Resize()
-	local c = ns.PinsOnMap(curMap)
-	for n, i in ipairs(shown) do icons[n]:SetSize(PinSize(i), PinSize(i)) end
-	if c then DrawLinks() end
+	for n, i in ipairs(shown) do
+		local size = PinSize(i)
+		icons[n]:SetSize(size, size)
+	end
+	DrawLinks()
 end
 
 ---------------------------------------------------------------------------
 -- Hover and click
 ---------------------------------------------------------------------------
 local function PinAt(cx, cy)
-	local c = ns.PinsOnMap(curMap)
 	local px, py = cx * curW, cy * curH
 	local best, bd
 	for n = #shown, 1, -1 do   -- the last drawn is on top
 		local i = shown[n]
-		local r = PinSize(i) * 0.55
-		local dx, dy = c.x[i] * curW - px, c.y[i] * curH - py
+		local r = PinSize(i) * HIT_R
+		local dx, dy = posX[i] * curW - px, posY[i] * curH - py
 		local d = dx * dx + dy * dy
 		if d <= r * r and (not bd or d < bd) then best, bd = i, d end
 	end
@@ -460,45 +610,81 @@ end
 local function SetHover(i)
 	if i == hoverPin then return end
 	hoverPin = i
+	local x, y
+	if i then x, y = posX[i], posY[i] end
+	if i and not x then hoverPin, i = nil, nil end   -- (nowhere to put it: as no pin)
+	DrawLinks()
 	if i then
-		local x, y = Pos(i)
-		local size = PinSize(i)
-		hot:ClearAllPoints()
-		hot:SetPoint("CENTER", overlay, "TOPLEFT", x * curW, -y * curH)
-		hot:SetSize(size, size)
+		Place(hot, x, y, PinSize(i) * (HIT_R * 2))
 		hot:Show()
 		ns.ShowTooltip(hot, i)
 	else
 		hot:Hide()
-		if GameTooltip:GetOwner() == hot then GameTooltip:Hide() end
+		if GameTooltip:GetOwner() == hot then tipOwner = nil; GameTooltip:Hide() end
 	end
-	DrawLinks()
 end
 
 -- Blizzard's own map sounds for the same actions (Blizzard_WorldMap, Blizzard_SharedMapDataProviders)
-local function Sound(name)
+-- one sound a click: the first in a frame (a search result's click would otherwise play the list's, the selection's
+-- and the map's, all at once); the panel's too (ns.Sound). `force`: played all the same (it's the one that says what
+-- happened: a waypoint placed, a quest focused again)
+local soundAt, muted   -- muted: the map selecting a quest's pin for a quest opened elsewhere, whose own sound speaks
+local function Sound(name, force)
+	local now = GetTime()
+	if muted or (soundAt == now and not force) then return end
 	local id = SOUNDKIT and SOUNDKIT[name]
-	if id then PlaySound(id) end
+	if id then PlaySound(id) soundAt = now end
 end
+ns.Sound = Sound
 
 function ns.SetWaypoint(i)
 	local zone = P.zone[i]
-	if not zone or not C_Map.CanSetUserWaypointOnMap(zone) then
+	if not zone then
 		ns.Print("can't set a waypoint there.")
 		return
 	end
 	local c = ns.PinsOnMap(zone)
 	local x, y = c.x[i], c.y[i]
 	if not x then return end
-	C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(zone, x, y))
-	C_SuperTrack.SetSuperTrackedUserWaypoint(true)
-	Sound("UI_MAP_WAYPOINT_CLICK_TO_PLACE")
+	if not ns.PlaceUserWaypoint(zone, x, y) then
+		ns.Print("can't set a waypoint there.")
+		return
+	end
+	Sound("UI_MAP_WAYPOINT_CLICK_TO_PLACE", true)
 	ns.Print(("waypoint: %s (%s %.1f, %.1f)."):format(D.title[i], ns.ZoneName(i) or "?", x * 100, y * 100))
+end
+
+-- The seamless map's view flown to a point of the stitched world (stitch.Fly: out while it moves, then in on it,
+-- centred on it): `factor` times the zoom where `mapID` fills the view (its centre when there's no point), or with
+-- `keepZoom` as far in as the view is already when that's further
+local function FlyView(mapID, u, v, factor, keepZoom)
+	if not u then
+		local l, r, t, b = S.Rect(mapID)
+		u, v = (l + r) / 2, (t + b) / 2
+	end
+	local zoom = stitch.FitZoom(mapID) * (factor or 1)
+	if keepZoom then
+		local _, _, now = stitch.ViewNow()
+		if now and now > zoom then zoom = now end
+	end
+	stitch.Fly(u, v, zoom)
+end
+
+-- On the seamless map: flies the view to a point of the stitched world at the zoom where `mapID` fills the view, as
+-- its own clicks do. The map underneath follows by itself once the view settles, out of combat (Stitch\WorldMap.lua),
+-- so this works in combat too. False when that map isn't part of the stitched world (a dungeon, another continent).
+-- `closer`: that many times further in (a chain step: the step itself, not its whole zone), or as far in as it is now
+local function FlyToMap(mapID, u, v, closer)
+	if not (Stitched() and mapID and S.Rect(mapID) and WorldMapFrame:IsShown()) then return false end
+	Sound("IG_QUEST_LOG_OPEN")
+	FlyView(mapID, u, v, closer, closer ~= nil)
+	return true
 end
 
 -- Turns the open world map to another map. SetMapID from addon code taints the map's refresh, and its pins'
 -- SetPassThroughButtons is blocked in combat (see the top of this file), so not in combat. True when it switched.
 local function ShowMap(mapID)
+	if FlyToMap(mapID) then return true end
 	if not mapID or mapID == curMap or not WorldMapFrame:IsShown() then return false end
 	if InCombatLockdown() then
 		ns.Print("can't change the map in combat.")
@@ -509,9 +695,152 @@ local function ShowMap(mapID)
 	return true
 end
 
--- the map a pin is on (a click in the panel)
-function ns.ShowPinMap(i)
+-- the map a pin is on (a click in the panel); on the seamless map, its zone's view centred on the pin. `close` (a chain
+-- step): on the seamless map, always there and zoomed in on it (STEP_ZOOM times its zone's view), in view or not.
+-- False when there's nothing to open: the pin is on this map, or (seamless, not `close`) already in view
+local STEP_ZOOM = 4
+local IN_VIEW = 0.8   -- "in view": inside this much of the view (one at its very edge is brought in)
+function ns.ShowPinMap(i, close)
+	local u, v
+	if Stitched() then u, v = WorldUV(i) end
+	if u then
+		local cu, cv, zoom = stitch.ViewNow()
+		if cu and not close then
+			local hu, hv = stitch.ViewHalfExtents(zoom)
+			if math.abs(u - cu) < hu * IN_VIEW and math.abs(v - cv) < hv * IN_VIEW then return false end
+		end
+		if FlyToMap(P.zone[i], u, v, close and STEP_ZOOM or nil) then return true end
+	end
 	return ShowMap(P.zone[i])
+end
+
+-- A quest's place on the seamless map: the flight to it, centred, at QUEST_ZOOM times its zone's view (the whole zone
+-- when it has no place on it). Two ways in: a quest's details page opened with the map (the tracker's click, its
+-- menu's "Show on map", ns.QuestClicked: QuestMapFrame_OpenToQuestDetails), where Blizzard has put up its zone whole
+-- at once, so from the view you had (FlyToQuest); and a click that only centres it (CentreQuest)
+local QUEST_ZOOM = 2
+local function FlyToQuestOn(mapID, questID, keepZoom)
+	local u, v
+	local ok, quests = pcall(C_QuestLog.GetQuestsOnMap, mapID)
+	for _, q in ipairs(ok and type(quests) == "table" and quests or {}) do
+		if q.questID == questID and q.x and q.y and not issecretvalue(q.x) and not issecretvalue(q.y) then
+			u, v = stitch.ToWorld(mapID, q.x, q.y)
+			break
+		end
+	end
+	FlyView(mapID, u, v, u and QUEST_ZOOM or 1, keepZoom)
+end
+
+-- the stitched map Blizzard has just put up for a quest's details page, or nil. It picks between the quest's own map
+-- and its next waypoint's, by a choice of the player's we can't read, and leaves the one it picked in the details
+-- frame (read only). (Stitched, not Seamless: curMap is only brought up to date in our OnUpdate, after this)
+local function QuestDetailsStitchedMap(questID)
+	if not (Stitched() and questID and not issecretvalue(questID)) then return end
+	local mapID = WorldMapFrame:GetMapID()
+	local d = QuestMapFrame and QuestMapFrame.DetailsFrame
+	if mapID and d and d.questMapID == mapID and S.Rect(mapID) then return mapID end
+end
+
+local function FlyToQuest(questID)
+	local mapID = QuestDetailsStitchedMap(questID)
+	if not mapID then return end
+	local u0, v0, z0 = stitch.ViewBeforeReset()
+	if u0 then stitch.ShowNow(u0, v0, z0) end      -- (no reset: the quest is on the map you were on; from where you are)
+	FlyToQuestOn(mapID, questID, true)
+end
+
+-- an open seamless map centred on a quest where it is (a click that let go of its focus, or one in combat): nothing
+-- opened or switched, nothing for a quest with no place on the stitched world
+local function CentreQuest(q)
+	if not (WorldMapFrame:IsShown() and Stitched()) then return end
+	local mapID = GetQuestUiMapID and GetQuestUiMapID(q)
+	if not mapID or mapID == 0 or issecretvalue(mapID) or not S.Rect(mapID) then return end
+	FlyToQuestOn(mapID, q, true)
+end
+
+-- a plain left click on a quest: not Shift (Blizzard's track / untrack) or a link into chat
+function ns.PlainLeftClick(button)
+	return button == "LeftButton" and not IsShiftKeyDown() and not IsModifiedClick("CHATLINK")
+end
+
+-- A quest clicked: in Blizzard's tracker (its name, its "..." icon), on the map (its "..." icon), in the quest log's
+-- list (its name, its "..." icon), or a Ready to Turn In row (Tracker.lua). With "Click a tracked quest to focus it"
+-- on, they all do the same, each after Blizzard's own click has done its part: the quest focused (super-tracked; our
+-- click's focus, so Dave's Map shows only its pins), its details page open in the quest log beside the map
+-- (Blizzard's: the map then shows that quest's icons) and the map centred on it (the QuestMapFrame_OpenToQuestDetails
+-- hook, or FlyToQuest here). Clicked again (focused by a click of ours), let go: the focus off (Blizzard closes the
+-- details page then) and an open map centred on it. `how`: "toggle" (we focus or let go: the tracker's name, our
+-- rows), "focused" (Blizzard's "..." has already focused it or let it go), "details" (Blizzard's quest log has opened
+-- its details page: focused, not let go). In combat an addon can't open the map: an open one is centred, a closed one
+-- waits for the next click after combat. True when it let go (the caller's sound)
+local pendingOpen   -- the quest focused in combat with the map closed: its next click shows it rather than letting go
+local ownOpen       -- our QuestMapFrame_OpenToQuestDetails under way (its hook then plays no sound)
+local lastFlight, lastFlightAt   -- the quest the OpenToQuestDetails hook last flew to, and when
+function ns.QuestClicked(q, how, toggleSound)
+	if not (ns.db.focusQuest and type(q) == "number" and q ~= 0) or issecretvalue(q) then return end
+	local now = ns.SuperTrackedQuest()
+	local reopen = pendingOpen == q and not InCombatLockdown()
+	pendingOpen = nil
+	local letGo
+	if how == "toggle" then letGo = ns.ClickFocused(q) and not reopen
+	elseif how == "focused" then letGo = now ~= q and not reopen   -- (Blizzard let it go; after combat, shown instead)
+	else letGo = false end
+	-- `toggleSound` (our rows): "off" or "on" for what it does, first in the frame, before the map can sound
+	if toggleSound then Sound(letGo and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON") end
+	if letGo then
+		ns.SetClickFocus(nil)
+		if now == q then ns.SetSuperTrackedQuest(0) end
+		-- (not when Blizzard's own click has just opened it and flown there: a tracker name's)
+		if not (lastFlight == q and lastFlightAt == GetTime()) then CentreQuest(q) end
+		return true
+	end
+	ns.SetClickFocus(q)
+	-- (a "..." clicked again after combat: Blizzard's click let it go with its "off" sound; focused again, so "on")
+	if how == "focused" and reopen and now ~= q then Sound("IG_MAINMENU_OPTION_CHECKBOX_ON", true) end
+	if now ~= q then
+		ns.SetSuperTrackedQuest(q)   -- (its event refreshes the map's filter)
+	elseif UpdateFocus() then   -- (already focused, by Blizzard just now or before: our click's filter now)
+		ns.Refresh()
+	end
+	if how == "details" then FlyToQuest(q) return false end   -- (Blizzard has just put its zone up: from the view you had)
+	local d = QuestMapFrame and QuestMapFrame.DetailsFrame
+	if WorldMapFrame:IsShown() and d and d:IsShown() and d.questID == q then return false end   -- (open already: flown)
+	if InCombatLockdown() then
+		if WorldMapFrame:IsShown() then
+			CentreQuest(q)
+		else
+			pendingOpen = q
+			ns.Print("focused it; can't open the map in combat: click it again after combat to see it.")
+		end
+		return false
+	end
+	if QuestMapFrame_OpenToQuestDetails then   -- (its hook flies there; silent: the click's own sound has played)
+		ownOpen = true
+		xpcall(QuestMapFrame_OpenToQuestDetails, CallErrorHandler, q)
+		ownOpen = nil
+	end
+	return false
+end
+
+-- a "..." quest icon (a POI button: the tracker's, the quest log list's) whose click is a quest click ("focused"),
+-- hooked once. The quest is read before Blizzard's click: tracking a quest from it lays the list or the tracker out
+-- again, which hands the icons out again, so after the click the icon may hold another quest. `accept(poi)`: false
+-- for an icon that isn't a quest's of ours (the tracker's other sections share its icons)
+local hookedPOI, clickQuest = {}, nil
+local function BeforePOIClick(poi)
+	local accept = hookedPOI[poi]
+	clickQuest = (accept == true or accept(poi)) and poi.GetQuestID and poi:GetQuestID() or nil
+end
+local function OnPOIClick(_, button)
+	local q = clickQuest
+	clickQuest = nil
+	if q and ns.PlainLeftClick(button) then ns.QuestClicked(q, "focused") end
+end
+function ns.HookQuestPOI(poi, accept)
+	if not poi or hookedPOI[poi] then return end
+	hookedPOI[poi] = accept or true
+	poi:HookScript("PreClick", BeforePOIClick)
+	poi:HookScript("OnClick", OnPOIClick)
 end
 
 -- lock a pin's chain on the map (a search result, or a click); nil clears it
@@ -520,19 +849,12 @@ function ns.Focus(i)
 	Sound(lockedPin and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")   -- as Blizzard's map pins toggle
 	chain = lockedPin and BuildChain(lockedPin) or nil
 	DrawLinks()
+	if hoverPin and GameTooltip:IsShown() and GameTooltip:GetOwner() == hot then
+		ns.ShowTooltip(hot, hoverPin)
+	end
 	if ns.OnLayerChanged then ns.OnLayerChanged() end
 end
 function ns.FocusedPin() return lockedPin end
-
--- A quest's pin in the map data (where it's picked up), by quest ID; nil when the data doesn't have it.
-local pinOfQuest
-function ns.QuestPin(q)
-	if not pinOfQuest then
-		pinOfQuest = {}
-		for i = 1, #D.qid do local id = D.qid[i]; if id ~= 0 and not pinOfQuest[id] then pinOfQuest[id] = i end end
-	end
-	return pinOfQuest[q]
-end
 
 -- Many of Forever's classic quests have no map location in the game (GetQuestUiMapID is 0), so opening one leaves
 -- the map where it was with nothing marked. Then the map data stands in: the quest's chain is selected (its pin, its
@@ -543,17 +865,23 @@ function ns.ShowQuestOnMap(q)
 	local i = ns.QuestPin(q)
 	if not i then return false end
 	local e = D.endp[i]
-	local ready = C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(q)
-	if lockedPin ~= i then ns.Focus(i) end
-	ns.ShowPinMap((ready and e ~= 0) and e or i)
+	local ready = ns.QuestReady(q)
+	-- silent: the quest was opened elsewhere (the tracker, the quest log), and that click's own sound speaks for it
+	local was = muted
+	muted = true
+	xpcall(function()   -- (an error reported from where it happened; muted always put back)
+		if lockedPin ~= i then ns.Focus(i) end
+		ns.ShowPinMap((ready and e ~= 0) and e or i)
+	end, CallErrorHandler)
+	muted = was
 	return true
 end
 
 -- the zone a quest is filed under in the quest log: the header above it
 local function QuestHeader(q)
-	local idx = C_QuestLog.GetLogIndexForQuestID(q)
+	local idx = ns.QuestLogIndex(q)
 	for k = idx or 0, 1, -1 do
-		local info = C_QuestLog.GetInfo(k)
+		local info = ns.QuestInfo(k)
 		if info and info.isHeader then return info.title end
 	end
 end
@@ -616,7 +944,7 @@ local function OnQuestDetails(q)
 	if ns.ShowQuestOnMap(q) ~= false then return end
 	local zone = QuestHeader(q)
 	local mapID = zone and MapNamed(zone)
-	local title = C_QuestLog.GetTitleForQuestID(q) or tostring(q)
+	local title = ns.QuestTitle(q) or tostring(q)
 	if not mapID then ShowVeil(title, zone) return end
 	ShowMap(mapID)
 	if not toldNoMap[q] then
@@ -644,6 +972,16 @@ local function LinkLine(label, list, base)   -- base: the pin the tooltip is for
 end
 
 function ns.ShowTooltip(owner, i)
+	local q = D.qid[i]
+	local completed = q ~= 0 and IsDone(q)
+	local step = (chain and #chain.steps > 1) and chain.num[i] or nil
+	local isLocked = lockedPin == i
+	if GameTooltip:IsShown() and GameTooltip:GetOwner() == owner
+		and tipOwner == owner and tipPin == i and tipDone == completed
+		and tipChain == chain and tipStep == step and tipLocked == isLocked then
+		return
+	end
+	tipOwner, tipPin, tipDone, tipChain, tipStep, tipLocked = owner, i, completed, chain, step, isLocked
 	local c = D.cats[D.cat[i]]
 	local s = Style(D.cat[i])
 	GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
@@ -658,17 +996,16 @@ function ns.ShowTooltip(owner, i)
 			if not line:find("Faction:") and not line:find("Side:") then GameTooltip:AddLine(line, .9, .9, .9, true) end
 		end
 	end
-	local q = D.qid[i]
-	if q ~= 0 and IsDone(q) then GameTooltip:AddLine("Completed", .4, 1, .4) end
+	if completed then GameTooltip:AddLine("Completed", .4, 1, .4) end
 	if D.endp[i] ~= 0 then LinkLine("|cffffd200Turn in:|r ", { D.endp[i] }, i) end
 	LinkLine("|cff8ca6ffRequires:|r ", D.pre[i] or {}, i)
 	LinkLine("|cff59ff73Leads to:|r ", nextOf[i] or {}, i)
 	if D.dest[i] ~= 0 then LinkLine("|cff4de6ffTravels to:|r ", { D.dest[i] }, i) end
-	if chain and chain.num[i] and #chain.steps > 1 then
-		GameTooltip:AddLine(("Step %d of %d in the selected chain"):format(chain.num[i], #chain.steps), 1, .82, .2)
+	if step then
+		GameTooltip:AddLine(("Step %d of %d in the selected chain"):format(step, #chain.steps), 1, .82, .2)
 	end
 	local hint
-	if lockedPin == i then hint = "Click: clear the selection"
+	if isLocked then hint = "Click: clear the selection"
 	elseif D.pre[i] or nextOf[i] then hint = "Click: show this quest chain, numbered in order"
 	else hint = "Click: keep its links drawn" end
 	GameTooltip:AddLine(" ")
@@ -685,29 +1022,51 @@ local function OnUpdate()
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
 	if map ~= curMap or w ~= curW or h ~= curH then
 		curMap, curW, curH = map, w, h
-		dirty = true   -- Rebuild clears the hover
+		dirty = true   -- Rebuild re-places or clears the hover
 		ns.HideVeilIfMoved()
 	end
 	local scale, zoom = WorldMapFrame:GetCanvasScale(), WorldMapFrame:GetCanvasZoomPercent()
+	-- the seamless map: on as the map turns to or from it, and its view moved on past the pins picked for it (looked
+	-- at only when the view has moved; during a flight, zooming in alone doesn't count: the pins are already there)
+	local seamless = Seamless()
+	local animating = seamless and stitch.Flying()   -- (a flight only: wheel zooms and glides as ever)
+	if wasAnimating and not animating then checkedScale = nil end   -- (landed: looked at again, zooming in counts now)
+	wasAnimating = animating
+	if seamless ~= builtSeamless then
+		dirty = true
+	elseif win then
+		local sc = WorldMapFrame.ScrollContainer
+		local sx, sy, sw, sh = sc:GetCurrentScrollX(), sc:GetCurrentScrollY(), sc:GetWidth(), sc:GetHeight()
+		if scale ~= checkedScale or sx ~= checkedX or sy ~= checkedY or sw ~= checkedW or sh ~= checkedH then
+			checkedScale, checkedX, checkedY, checkedW, checkedH = scale, sx, sy, sw, sh
+			if WindowStale(animating) then dirty = true end
+		end
+	end
 	if dirty then
 		curScale, curZoom = scale, zoom
 		Rebuild()
 	elseif scale ~= curScale or zoom ~= curZoom then
 		curScale, curZoom = scale, zoom
 		Resize()
-		if hoverPin then local s = PinSize(hoverPin); hot:SetSize(s, s) end
+		if hoverPin then local s = PinSize(hoverPin) * (HIT_R * 2); hot:SetSize(s, s) end
 	end
 	-- hover: only over bare canvas or our own button, so Blizzard's pins keep their mouse
 	if #shown == 0 then
 		if hoverPin then SetHover(nil) end
 		return
 	end
-	if not (WorldMapFrame.ScrollContainer:IsMouseMotionFocus() or hot:IsMouseMotionFocus()) then
-		if hoverPin then SetHover(nil) end
+	if animating or not (WorldMapFrame.ScrollContainer:IsMouseMotionFocus() or hot:IsMouseMotionFocus()) then
+		if hoverPin then SetHover(nil) end   -- (and none while the view flies: the pins sweep under the mouse)
 		lastCX = nil
 		return
 	end
-	local cx, cy = WorldMapFrame:GetNormalizedCursorPosition()
+	local cx, cy
+	if seamless then
+		-- (Blizzard's cursor position is held inside the map underneath: Saturate in NormalizeUIPosition)
+		local u, v = stitch.CursorWorld()
+		if u then cx, cy = stitch.FromWorld(curMap, u, v) end
+	end
+	if not cx then cx, cy = WorldMapFrame:GetNormalizedCursorPosition() end
 	if cx == lastCX and cy == lastCY then return end
 	lastCX, lastCY = cx, cy
 	SetHover(PinAt(cx, cy))
@@ -727,6 +1086,23 @@ end
 function ns.ShownCount() return #shown end
 function ns.CurrentMap() return curMap end
 
+-- Blizzard's map layers are pins with absolute frame levels from 2000 up (MapCanvas_PinFrameLevelsManager.lua): the
+-- explored-area art, fog of war and zone highlight are among them. Just above the highlight puts us over all the map's
+-- art and under its markers (dig sites, dungeon entrances, flight points, POIs). The seamless map inserts its art
+-- under the highlight and its own icons just above it (Stitch\WorldMap.lua): then above those. Read each rebuild, as
+-- the seamless map adds its layers when it starts. GetValidFrameLevel only reads.
+-- (ours, or OpenMap's own when that addon is on instead: its icons go just above the highlight too)
+local STITCH_ICON_LEVELS = { "PIN_FRAME_LEVEL_DAVES_MAP_STITCH_ICONS", "PIN_FRAME_LEVEL_OPENMAP_ICONS" }
+function ns.OverlayLevel()
+	local levels = WorldMapFrame:GetPinFrameLevelsManager()
+	local level = levels:GetValidFrameLevel("PIN_FRAME_LEVEL_MAP_HIGHLIGHT") + 1
+	for _, name in ipairs(STITCH_ICON_LEVELS) do
+		local d = levels.definitions and levels.definitions[name]
+		if d then level = math.max(level, d.startLevel + d.range) end
+	end
+	return level
+end
+
 local function Init()
 	D = ns.DATA
 	P = ns.P
@@ -737,15 +1113,19 @@ local function Init()
 			table.insert(nextOf[p], i)
 		end
 	end
+	local om = ns.OM
+	stitch = om and om:GetModule("worldmap")
+	S = om and om.MapStitch
+	if not (stitch and S) then stitch, S = nil, nil end
 	local canvas = WorldMapFrame:GetCanvas()
 	overlay = CreateFrame("Frame", nil, canvas)
 	overlay:SetAllPoints(canvas)
-	-- Blizzard's map layers are pins with absolute frame levels from 2000 up (MapCanvas_PinFrameLevelsManager.lua): the
-	-- explored-area art, fog of war and zone highlight are among them. Just above the highlight puts us over all the
-	-- map's art and under its markers (dig sites, dungeon entrances, flight points, POIs). GetValidFrameLevel only reads.
-	local levels = WorldMapFrame:GetPinFrameLevelsManager()
-	overlay:SetFrameLevel(levels:GetValidFrameLevel("PIN_FRAME_LEVEL_MAP_HIGHLIGHT") + 1)
+	overlay:SetFrameLevel(ns.OverlayLevel())
 	overlay:SetScript("OnUpdate", OnUpdate)
+	overlay:SetScript("OnHide", function()
+		if hoverPin then SetHover(nil) end
+		lastCX, lastCY = nil, nil
+	end)
 
 	hot = CreateFrame("Button", nil, overlay)
 	hot:SetFrameLevel(overlay:GetFrameLevel() + 1)
@@ -754,25 +1134,63 @@ local function Init()
 	-- right-clicks go on to the map (zoom out / up a level), as on Blizzard's pins. A left-drag that starts on a pin
 	-- doesn't pan: left clicks are the pin's. SetPassThroughButtons is restricted on protected frames in combat; ours is
 	-- a plain button, but it is set outside combat all the same.
-	if InCombatLockdown() then ns.events:RegisterEvent("PLAYER_REGEN_ENABLED") else hot:SetPassThroughButtons("RightButton") end
+	if hot.SetPassThroughButtons then
+		if InCombatLockdown() then ns.events:RegisterEvent("PLAYER_REGEN_ENABLED") else hot:SetPassThroughButtons("RightButton") end
+	end
 	hot:SetScript("OnClick", function()
 		if not hoverPin then return end
 		if IsShiftKeyDown() then ns.SetWaypoint(hoverPin) else ns.Focus(hoverPin) end
 	end)
-	hot:SetScript("OnEnter", function(self) if hoverPin then ns.ShowTooltip(self, hoverPin) end end)
-	hot:SetScript("OnLeave", function(self) if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
 
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
-	-- opening a quest (the tracker, the quest log, our Ready to Turn In section): stand in for a missing map location
+	ns.RegisterSuperTracking(ns.events)   -- a quest focused or unfocused: the map's pins follow
+	UpdateFocus()
+	-- opening a quest's details page (the quest log, the tracker's menu, its pop-up): stand in for a missing map location
 	if QuestMapFrame_ShowQuestDetails then hooksecurefunc("QuestMapFrame_ShowQuestDetails", OnQuestDetails) end
-	-- a quest opened while the map is already open (the tracker, our Ready to Turn In): Blizzard plays nothing then,
-	-- only the map's opening sound the first time; so the quest list's select sound, as in the quest log
+	-- a quest's details opened with the map (the tracker's click, its menu's "Show on map", our ns.QuestClicked): the
+	-- map centred on the quest. Already open: Blizzard plays nothing then, only the map's opening sound the first time,
+	-- so the quest list's select sound, as in the quest log, and a flight from the view you had. Just opened (zoomed in
+	-- on you: Stitch\Open.lua): a frame later, once its first layout is done (a size change resets the view)
 	local mapShownAt = 0
 	WorldMapFrame:HookScript("OnShow", function() mapShownAt = GetTime() end)
 	if QuestMapFrame_OpenToQuestDetails then
-		hooksecurefunc("QuestMapFrame_OpenToQuestDetails", function()
-			if GetTime() - mapShownAt > .1 then Sound("IG_QUEST_LIST_SELECT") end
+		hooksecurefunc("QuestMapFrame_OpenToQuestDetails", function(questID)
+			lastFlight, lastFlightAt = questID, GetTime()
+			if GetTime() - mapShownAt > .1 then
+				if not ownOpen then Sound("IG_QUEST_LIST_SELECT") end
+				FlyToQuest(questID)
+				return
+			end
+			local mapID = WorldMapFrame:IsShown() and QuestDetailsStitchedMap(questID)
+			if not mapID then return end
+			C_Timer.After(0, function()
+				if WorldMapFrame:IsShown() and Stitched() and WorldMapFrame:GetMapID() == mapID then
+					FlyToQuestOn(mapID, questID, false)
+				end
+			end)
+		end)
+	end
+
+	-- the other quest clicks (ns.QuestClicked), after Blizzard's own (hooksecurefunc, HookScript): a quest's "..." icon
+	-- on the map (its pin: Blizzard's click focuses it or lets it go, POIButtonMixin.OnClick), the quest log list's own
+	-- "..." icons (POI buttons from its pool, each hooked as GetButtonForQuest hands it out: ns.HookQuestPOI) and a
+	-- quest's name in the list (Blizzard's click opens its details page). The map's quest pins take their methods from
+	-- QuestPinMixin as they're made, all after this (the map is new here)
+	if QuestPinMixin and QuestPinMixin.OnMouseClickAction then
+		hooksecurefunc(QuestPinMixin, "OnMouseClickAction", function(pin, button)
+			if pin.GetMap and pin:GetMap() ~= WorldMapFrame then return end   -- (the flight master's map has them too)
+			if ns.PlainLeftClick(button) then ns.QuestClicked(pin.GetQuestID and pin:GetQuestID(), "focused") end
+		end)
+	end
+	local contents = QuestScrollFrame and QuestScrollFrame.Contents
+	if contents and contents.GetButtonForQuest and contents.FindButtonByQuestID then
+		hooksecurefunc(contents, "GetButtonForQuest", function(owner, questID) ns.HookQuestPOI(owner:FindButtonByQuestID(questID)) end)
+		if contents.buttonPool then for poi in contents.buttonPool:EnumerateActive() do ns.HookQuestPOI(poi) end end
+	end
+	if QuestMapLogTitleButton_OnClick then
+		hooksecurefunc("QuestMapLogTitleButton_OnClick", function(button, mouseButton)
+			if ns.PlainLeftClick(mouseButton) then ns.QuestClicked(button and button.questID, "details") end
 		end)
 	end
 end
@@ -784,9 +1202,24 @@ end
 
 function ns:PLAYER_LEVEL_UP() ns.Refresh() end   -- "Hide quests above / below my level"
 
+function ns:SUPER_TRACKING_CHANGED()
+	-- another quest focused, or the focus let go (Blizzard's menu, a map icon, its own on accepting one): the click's
+	-- focus is over, so focusing that quest again some other way doesn't filter the map. Not the moment it's 0 while
+	-- Tracker.lua's Unwatch keeps the focus through a quest moving to Ready to Turn In
+	local q, mine = ns.SuperTrackedQuest(), ns.ClickFocus()
+	if mine and q and not issecretvalue(q) and q ~= mine and not (q == 0 and ns.KeepingFocus(mine)) then
+		ns.SetClickFocus(nil)
+	end
+	if UpdateFocus() then ns.Refresh() end   -- (most focus changes aren't ours: then the pins stay as they are)
+end
+
+function ns:SUPER_TRACKED_QUEST_CHANGED()
+	return self:SUPER_TRACKING_CHANGED()
+end
+
 function ns:PLAYER_REGEN_ENABLED()
 	ns.events:UnregisterEvent("PLAYER_REGEN_ENABLED")
-	if hot then hot:SetPassThroughButtons("RightButton") end
+	if hot and hot.SetPassThroughButtons then hot:SetPassThroughButtons("RightButton") end
 end
 
 -- Without the companion data addon there is nothing to draw: say so on the map itself, every time it opens.

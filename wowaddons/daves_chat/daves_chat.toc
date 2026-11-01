@@ -1,0 +1,17 @@
+## Interface: 16001, 11509, 20506
+## Title: |cffd4a94eDave's|r Chat
+## Notes: Movable chat dock for wide screens. Party, whispers and say on the first tab, the combat log on the second, and general on the third.
+## Author: davidwhit5
+## Version: 0.3.4
+## SavedVariables: daves_chatDB
+## IconTexture: Interface\Icons\INV_Misc_Note_01
+## AddonCompartmentFunc: daves_chat_OnAddonCompartmentClick
+
+Core.lua
+EditModeDialog.lua
+Tabs.lua
+Dock.lua
+Header.lua
+Window.lua
+EditMode.lua
+Options.lua

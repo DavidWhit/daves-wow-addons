@@ -5,7 +5,7 @@
 -- templates where the client has them and fall back to plain widgets plus our
 -- own art (Media\thumb) where it doesn't.
 
-local _, ns = ...
+local ADDON, ns = ...
 local M = ns.MEDIA
 local floor, max, format = math.floor, math.max, string.format
 
@@ -311,6 +311,14 @@ local function Build()
 
 	y = y - 16
 	Header("Extras", RIGHT_X, y, RIGHT_W); y = y - 20
+	Check(RIGHT_X, y, RIGHT_W, "Confirm delete (trash)",
+		function() return db.confirmDestroy ~= false end,
+		function(on)
+			db.confirmDestroy = on
+			if not on and ns.HideDestroyConfirm then ns.HideDestroyConfirm() end
+		end,
+		"Ask before destroying an item dropped on the delete / trash button (rare and better items ask you to type DELETE). Untick to destroy items immediately.")
+	y = y - 26
 	local cur = Check(RIGHT_X, y, RIGHT_W, "Backpack currencies",
 		function() return db.showCurrencies ~= false end,
 		function(on) db.showCurrencies = on; ns.RefreshCurrencies() end,
@@ -373,7 +381,7 @@ local function Build()
 	defaults:SetScript("OnClick", function()
 		db.columns, db.scale, db.viewHeight, db.pos, db.background, db.backgroundStyle = ns.ClampColumns(10), 1, nil, nil, 0.8, "dark"
 		db.splitReagents, db.splitConsumables = true, true
-		db.showCurrencies, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag = true, true, true, true
+		db.showCurrencies, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag, db.confirmDestroy = true, true, true, true, true
 		wipe(db.collapsed); wipe(db.startFolded); wipe(db.offGroups)
 		ns.ApplyScale(); ns.ApplyBackground(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies(); RefreshAll()
 	end)
@@ -382,7 +390,7 @@ local function Build()
 	tips:SetPoint("TOPLEFT", LEFT_X, resetY - 58); tips:SetWidth(FULL_W)
 	tips:SetJustifyH("LEFT")
 	if tips.SetWordWrap then tips:SetWordWrap(true) end
-	opt:SetHeight(-(resetY - 58) + 46)
+	opt:SetHeight(-(resetY - 58) + max(36, (tips:GetStringHeight() or 36)) + 20)
 
 	opt:SetScript("OnShow", function()
 		Sound("IG_MAINMENU_OPEN")
@@ -423,4 +431,64 @@ end
 -- Keeps the controls in step when the bag window is resized by its corners.
 function ns.RefreshOptions()
 	if opt and opt:IsShown() then RefreshAll() end
+end
+
+-- Also register a page in Blizzard's Settings panel (Esc > Options > AddOns)
+-- so players looking in standard AddOn options find Confirm delete (trash) and
+-- core bag toggles right away. Full layout & category controls live in the bag
+-- window's Settings button (/sack options).
+function ns.InitSettingsPanel()
+	if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end
+
+	local category = Settings.RegisterVerticalLayoutCategory("Dave's Sack")
+
+	local confirm = Settings.RegisterAddOnSetting(category, ADDON .. "_confirmDestroy", "confirmDestroy", ns.db,
+		Settings.VarType.Boolean, "Confirm delete (trash)", true)
+	Settings.CreateCheckbox(category, confirm,
+		"Ask before destroying an item dropped on the delete / trash button (rare and better items ask you to type DELETE). Untick to destroy items immediately. Click the Settings button on the bag window (/sack options) for layout and category settings.")
+	confirm:SetValueChangedCallback(function()
+		if not ns.db.confirmDestroy and ns.HideDestroyConfirm then ns.HideDestroyConfirm() end
+		ns.RefreshOptions()
+	end)
+
+	local freeSpace = Settings.RegisterAddOnSetting(category, ADDON .. "_showFreeSpace", "showFreeSpace", ns.db,
+		Settings.VarType.Boolean, "Free Space tile", true)
+	Settings.CreateCheckbox(category, freeSpace,
+		"An empty slot to drop items on. You can also drop items anywhere on the bag window.")
+	freeSpace:SetValueChangedCallback(function()
+		ns.Relayout()
+		ns.RefreshOptions()
+	end)
+
+	local autoSplit = Settings.RegisterAddOnSetting(category, ADDON .. "_autoPlaceSplit", "autoPlaceSplit", ns.db,
+		Settings.VarType.Boolean, "Auto-place split stacks", true)
+	Settings.CreateCheckbox(category, autoSplit,
+		"After you split a stack, the new stack goes straight into a free slot next to the original. Paused while a merchant, mailbox, trade, bank or auction window is open.")
+	autoSplit:SetValueChangedCallback(function()
+		ns.RefreshOptions()
+	end)
+
+	if ns.HasCurrencyAPI then
+		local cur = Settings.RegisterAddOnSetting(category, ADDON .. "_showCurrencies", "showCurrencies", ns.db,
+			Settings.VarType.Boolean, "Backpack currencies", true)
+		Settings.CreateCheckbox(category, cur,
+			"Currencies you ticked \"Show on Backpack\" in the Currency tab appear in the footer.")
+		cur:SetValueChangedCallback(function()
+			ns.RefreshCurrencies()
+			ns.RefreshOptions()
+		end)
+	end
+
+	if ns.REAGENT_BAG then
+		local reagent = Settings.RegisterAddOnSetting(category, ADDON .. "_preferReagentBag", "preferReagentBag", ns.db,
+			Settings.VarType.Boolean, "Prefer the reagent bag", true)
+		Settings.CreateCheckbox(category, reagent,
+			"Reagents you drop on the window (and split reagent stacks) go into your reagent bag first, while it has room.")
+		reagent:SetValueChangedCallback(function()
+			ns.RefreshOptions()
+		end)
+	end
+
+	Settings.RegisterAddOnCategory(category)
+	ns.settingsCategory = category
 end

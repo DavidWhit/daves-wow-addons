@@ -52,8 +52,8 @@ with "Flame", ...), then the "Other casts" setting: a look (Plain, Blizzard's ow
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `Test-WowAddon.ps1 -Path . -Flavor forever` |
-| Link into the game | `Deploy-WowAddon.ps1 -Path . -Flavor forever` |
+| Check the addon | `Test-WowAddon.py -Path . -Flavor forever` |
+| Link into the game | `Deploy-WowAddon.py -Path . -Flavor forever` |
 | Rebuild the art | `& .\tools\Make-CastbarMedia.ps1` |
 | Animated preview in the browser | `& .\tools\Show-Preview.ps1` |
 | Concept of the look being designed (only that one; finished looks live in the code) | open `tools/concepts/index.html` (see its README) |

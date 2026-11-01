@@ -5,7 +5,7 @@ description: Refresh daves_map's data from Map Genie's WoW Forever map (and pfQu
 
 # Refresh daves_map's map data
 
-`wowaddons/daves_map_data/` (its TOC and `Data.lua`, a separate addon daves_map lists in `## OptionalDeps`) is generated from two sources by `wowaddons/daves_map/tools/Update-MapData.ps1`:
+`wowaddons/daves_map_data/` (its TOC and `Data.lua`, a separate addon daves_map lists in `## OptionalDeps`) is generated from two sources by `wowaddons/daves_map/tools/Update-MapData.py`:
 
 | Source | What it gives | How |
 | --- | --- | --- |
@@ -22,7 +22,7 @@ description: Refresh daves_map's data from Map Genie's WoW Forever map (and pfQu
 ## 1. Run it
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "wowaddons/daves_map/tools/Update-MapData.ps1"
+py -3 "wowaddons/daves_map/tools/Update-MapData.py"
 ```
 
 | Option | Use |
@@ -40,10 +40,10 @@ It takes about 20 seconds and prints:
 
 ## 2. Check the result
 
-- **Fewer than 4,000 pins, or a category drops to 0:** Map Genie probably changed its page or API. Re-run with `-KeepRaw`, look at the saved `page.html` / `mapdata.json` as text, fix the parser in `Update-MapData.ps1`, and say what changed.
+- **Fewer than 4,000 pins, or a category drops to 0:** Map Genie probably changed its page or API. Re-run with `-KeepRaw`, look at the saved `page.html` / `mapdata.json` as text, fix the parser in `Update-MapData.py`, and say what changed.
 - **Quest match rate well below 80%:** compare a few unmatched titles against pfQuest's `pf_quests_enUS.txt` (`-KeepRaw`).
 - `grep -c http wowaddons/daves_map_data/Data.lua` should be 2: the header comment and `source.url`. Anything more means a link slipped through `CleanText`.
-- Run the **wow-addon-test** skill's validator on `wowaddons/daves_map`, step 1. A data-only refresh doesn't need the reviewer agent. A change to `Update-MapData.ps1` or any `.lua` file does.
+- Run the **wow-addon-test** skill's validator on `wowaddons/daves_map`, step 1 (`Test-WowAddon.py -NoInfo`). A data-only refresh doesn't need the advisor review (step 2, `Prepare-WowReview.py`). A change to `Update-MapData.py` or any `.lua` file does.
 
 ## 3. Tell the user
 

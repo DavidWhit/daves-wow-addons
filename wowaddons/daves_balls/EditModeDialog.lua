@@ -1,6 +1,6 @@
 -- EditModeDialog.lua: shared Edit Mode settings UI from the wow-forever-addons kit
 -- (templates/editmode/EditModeDialog.lua). Don't edit an addon's copy: change the kit file and
--- copy it into every addon. Test-WowAddon.ps1 warns when a copy differs (rule editmode-dialog).
+-- copy it into every addon. Test-WowAddon.py warns when a copy differs (rule editmode-dialog).
 --
 -- Every addon frame that can be set up in Edit Mode gets the same look and behaviour,
 -- modelled on Blizzard's own EditModeSystemSettingsDialog (Blizzard_EditMode/Shared/

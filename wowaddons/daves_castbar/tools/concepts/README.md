@@ -10,7 +10,7 @@ code is the reference for it: compare a new look with the other bars' code (`Ele
 | Page | What it is |
 | --- | --- |
 | `index.html` | The concept harness. It shows every concept here; `?only=key-b,key-c` a selection, `&hold=60` freezes the bars at 60 %, `&h=36&w=420` sets the size, `&sim=2` pre-runs two seconds (for screenshots). `&style=borderless` (or the Style switch) shows the bars without their frame |
-| `shot.ps1` | Headless Chrome screenshot of `index.html` with any JS errors reported: `shot.ps1 -Only key -Hold 60 -H 56 -W 560 -Out x.png -Extra "style=borderless"` |
+| `shot.py` | Headless Chrome screenshot of `index.html` with any JS errors reported: `shot.py -Only key -Hold 60 -H 56 -W 560 -Out x.png -Extra "style=borderless"` |
 
 ## In progress
 

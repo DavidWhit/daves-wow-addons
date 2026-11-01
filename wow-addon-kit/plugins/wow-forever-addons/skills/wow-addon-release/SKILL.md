@@ -12,16 +12,16 @@ Arguments: `$ARGUMENTS`.
 ## 1. Gate on a clean check
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowInstall.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.ps1" -Path "<addon>" -Flavor forever[,retail,classic_era]
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowInstall.py"
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.py" -Path "<addon>" -Flavor forever[,retail,classic_era] -NoInfo
 ```
 
-Don't release with errors. Warnings need either a fix or a stated reason.
+Don't release with errors. Warnings need either a fix or a stated reason. If changes since the last release haven't had a full advisor review yet, run `Prepare-WowReview.py -Path "<addon>" -Full` and complete **wow-addon-test** step 2 first.
 
 ## 2. Version and Interface
 
 - Bump `## Version:` in the TOC (semver, e.g. `1.4.0`). Add a changelog entry if the project keeps one.
-- `## Interface:` must include the current number for every supported flavor: 16001 for Forever, plus whatever `Find-WowInstall.ps1` reports for others. Keep older numbers only if those clients still exist.
+- `## Interface:` must include the current number for every supported flavor: 16001 for Forever, plus whatever `Find-WowInstall.py` reports for others. Keep older numbers only if those clients still exist.
 
 ## 3. Build a zip locally (no packager needed)
 
@@ -35,7 +35,7 @@ robocopy $src $stage /E /XD .git .vscode tests .release /XF .luacheckrc .pkgmeta
 Compress-Archive -Path $stage -DestinationPath (Join-Path (Split-Path $src) "$name-$ver.zip") -Force
 ```
 
-Then test the zip itself: extract it over the deployed copy (`Deploy-WowAddon.ps1 -Mode Copy` gives the same layout) and do the in-game checks from **wow-addon-test**.
+Then test the zip itself: extract it over the deployed copy (`Deploy-WowAddon.py -Mode Copy` gives the same layout) and do the in-game checks from **wow-addon-test**.
 
 ## 4. Automated releases with BigWigsMods/packager (optional)
 

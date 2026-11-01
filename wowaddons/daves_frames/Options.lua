@@ -14,16 +14,16 @@ function ns:InitOptions()
 
 	local enabled = Settings.RegisterAddOnSetting(category, ADDON .. "_enabled", "enabled", ns.db,
 		Settings.VarType.Boolean, "Enabled", true)
-	Settings.CreateCheckbox(category, enabled, "Show the dragon target frame. Blizzard's own target frame stays as it is. Edit Mode always shows it, so it can be placed while off.")
+	Settings.CreateCheckbox(category, enabled, "Show the target frame. Blizzard's own target frame stays as it is. Edit Mode always shows it, so it can be placed while off.")
 
 	local scale = Settings.RegisterAddOnSetting(category, ADDON .. "_size", "size", ns.db,
 		Settings.VarType.Number, "Scale", 0.8)
-	local sliderOptions = Settings.CreateSliderOptions(0.5, 1, 0.05)
+	local sliderOptions = Settings.CreateSliderOptions(ns.MinSize(), 1, 0.05)
 	sliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
 		return ("%.2f"):format(value)
 	end)
 	Settings.CreateSlider(category, scale, sliderOptions,
-		"Size of the target frame. Everything else is set up in Edit Mode: open it and click the frame.")
+		"Size of the target frame. It stops at the size where the name is still easy to read. Everything else is set up in Edit Mode: open it and click the frame.")
 
 	-- Settings write straight into ns.db; react to changes here.
 	enabled:SetValueChangedCallback(function() if ns.Apply then ns:Apply() end end)

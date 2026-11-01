@@ -1,5 +1,5 @@
--- Test fixture: every block below should be reported by Test-WowAddon.ps1.
--- The expected rule is named in each comment; Invoke-KitSelfTest.ps1 asserts them.
+-- Test fixture: every block below should be reported by Test-WowAddon.py.
+-- The expected rule is named in each comment; Invoke-KitSelfTest.py asserts them.
 local ADDON, ns = ...
 
 local f = CreateFrame("Frame")                        -- fine: engine global still exists

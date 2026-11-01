@@ -1,8 +1,8 @@
 -- daves_frames / Auras.lua
 -- The aura boards (NOTES.md section 6): your debuffs on the target on the left, their buffs on the right.
--- Each board grows from its outer end toward the ring and wraps to a new row before it gets there
--- (and before the ornament below the plate), up to the Max rows setting; past that the last cell shows
--- an ellipsis. Boards hang on two chains and swing a little when you move, or sit right under the bar.
+-- Each board grows from its outer end toward the ring and wraps to a new row before it gets there,
+-- up to the Max rows setting; past that the last cell shows an ellipsis. A thin border sits around
+-- the icons. Boards hang on two chains and swing a little when you move, or sit right under the bar.
 
 local _, ns = ...
 
@@ -13,43 +13,17 @@ local FILTERS = { L = "HARMFUL|PLAYER", R = "HELPFUL" }
 local function Secret(v) return issecretvalue and issecretvalue(v) end
 
 ---------------------------------------------------------------------------
--- Board art: a 9-slice from the strip in the frame atlas, or a plain bordered board.
+-- Board: a hairline in the frame's metal and a faint dark fill. Not the atlas strip.
 ---------------------------------------------------------------------------
-local function NineSlice(parent, L)
-	local S = ns.STD.board
-	local u0, u1, v0, v1 = unpack(L.strip)
-	local du = (u1 - u0) / L.stripPx.w
-	local dv = (v1 - v0) / L.stripPx.h
-	local s = L.stripSlice
-	local us = { u0, u0 + s.left * du, u1 - s.right * du, u1 }
-	local vs = { v0, v0 + s.top * dv, v1 - s.bottom * dv, v1 }
-	-- Cut lines across and down the board: corners keep their size, edges and middle stretch.
-	local xs = { { "LEFT", 0 }, { "LEFT", S.left }, { "RIGHT", -S.right }, { "RIGHT", 0 } }
-	local ys = { { "TOP", 0 }, { "TOP", -S.top }, { "BOTTOM", S.bottom }, { "BOTTOM", 0 } }
-	local parts = {}
-	for row = 1, 3 do
-		for col = 1, 3 do
-			local t = parent:CreateTexture(nil, "BACKGROUND")
-			t:SetTexture(L.texture)
-			t:SetTexCoord(us[col], us[col + 1], vs[row], vs[row + 1])
-			t:SetPoint("TOPLEFT", parent, ys[row][1] .. xs[col][1], xs[col][2], ys[row][2])
-			t:SetPoint("BOTTOMRIGHT", parent, ys[row + 1][1] .. xs[col + 1][1], xs[col + 1][2], ys[row + 1][2])
-			parts[#parts + 1] = t
-		end
-	end
-	return parts
-end
-
-local function PlainBoard(parent, L)
+local function ThinBoard(parent, L)
 	local P = ns.STD.plainPad
 	local edge = parent:CreateTexture(nil, "BACKGROUND")
 	edge:SetAllPoints()
-	edge:SetColorTexture(L.metal[2][1], L.metal[2][2], L.metal[2][3], 1)
+	edge:SetColorTexture(ns.BoardEdgeColor(L))
 	local fill = parent:CreateTexture(nil, "BACKGROUND", nil, 1)
 	fill:SetPoint("TOPLEFT", P.border, -P.border)
 	fill:SetPoint("BOTTOMRIGHT", -P.border, P.border)
-	fill:SetColorTexture(1, 1, 1, 1)
-	fill:SetGradient("VERTICAL", CreateColor(0.05, 0.04, 0.03, 1), CreateColor(0.13, 0.10, 0.07, 1))
+	fill:SetColorTexture(0.02, 0.015, 0.01, 0.35)
 	return { edge, fill }
 end
 
@@ -179,13 +153,12 @@ local boards = {}
 ns.boards = boards
 
 local function NewBoard(side, length)
-	local f, L = ns.frame, ns.L
+	local f, L, S = ns.frame, ns.L, ns.STD
 	local b = { side = side, slots = {}, byId = {}, th = 0, w = 0, L = length, sign = side == "L" and 1 or -1, alpha = 0 }
 	b.frame = CreateFrame("Frame", nil, f.boardLayer)
 	b.frame:SetFrameLevel(f.boardLayer:GetFrameLevel() + 2)
-	b.frame:SetSize(104, 120)
-	b.ornate = NineSlice(b.frame, L)
-	b.plain = PlainBoard(b.frame, L)
+	b.frame:SetSize(2 * S.chainIn, 120)
+	b.plain = ThinBoard(b.frame, L)
 	b.chains = {}
 	for i = 1, 2 do
 		local t = f.boardLayer:CreateTexture(nil, "ARTWORK")
@@ -209,8 +182,6 @@ end
 function ns:ApplyBoardStyle()
 	local under = ns.db.boards == "under"
 	for _, b in pairs(boards) do
-		for _, t in ipairs(b.ornate) do t:SetShown(not under) end
-		for _, t in ipairs(b.plain) do t:SetShown(under) end
 		for _, t in ipairs(b.chains) do t:SetShown(not under) end
 		b.tops, b.fx, b.fy, b.fw, b.fh = nil, nil, nil, nil, nil
 		for _, t in ipairs(b.chains) do t.at = nil end
@@ -307,15 +278,13 @@ local function Ease(a, b, k, eps)
 end
 
 local ROT_PIVOT = CreateVector2D(0.5, 0)   -- chains turn about their top
-local PAD = {}                              -- board padding per style, built once
-local function Pad(under)
-	local key = under and "under" or "chains"
-	if not PAD[key] then
-		local S = ns.STD
-		PAD[key] = under and { top = S.plainPad.top + S.plainPad.border, bottom = S.plainPad.bottom + S.plainPad.border, side = S.plainPad.side + S.plainPad.border }
-			or { top = S.board.top + S.boardPad.top, bottom = S.board.bottom + S.boardPad.bottom, side = S.board.left + S.boardPad.side }
+local PAD                                   -- board padding, built once
+local function Pad()
+	if not PAD then
+		local P = ns.STD.plainPad
+		PAD = { top = P.top + P.border, bottom = P.bottom + P.border, side = P.side + P.border }
 	end
-	return PAD[key]
+	return PAD
 end
 
 -- Placement helpers that skip the widget call when nothing moved.
@@ -362,7 +331,7 @@ local function LayoutBoard(b, dt)
 	if under then
 		if b.side == "L" then laneB = L.cx - L.rOut - 8 else laneA = L.cx + L.rOut + 8 end
 	end
-	local B = Pad(under)
+	local B = Pad()
 	local pad = 2 * B.side
 	local cell = S.slot + S.slotGap
 	local perRow = math.max(1, math.floor((laneB - laneA - pad) / cell))
@@ -398,7 +367,8 @@ local function LayoutBoard(b, dt)
 	-- It eases in and out like the rest of the board.
 	b.timerRow = Ease(b.timerRow or (timed and 1 or 0), timed and 1 or 0, math.min(1, dt * 9), 0.002)
 	local rowH = S.slot + b.timerRow * (S.timerGap + (ns.timerH or S.timerH))
-	local w = math.max(under and 60 or 104, maxRowW + pad)
+	local minW = 2 * S.chainIn
+	local w = math.max(minW, maxRowW + pad)
 	local h = B.top + B.bottom + rows * rowH + (rows - 1) * S.rowGap
 	if w ~= b.fw or h ~= b.fh then b.frame:SetSize(w, h); b.fw, b.fh = w, h end
 
@@ -441,7 +411,7 @@ local function LayoutBoard(b, dt)
 	local ci = S.chainIn
 	local one = live <= 1
 	local outer = (b.side == "L") and (laneA + ci) or (laneB - ci)
-	local targetW = math.max(104, math.min(live, perRow) * cell + pad)
+	local targetW = math.max(minW, math.min(live, perRow) * cell + pad)
 	local tx0 = (b.side == "L") and laneA or (laneB - targetW)
 	local innerTop = one and outer or ((b.side == "L") and (tx0 + targetW - ci) or (tx0 + ci))
 	local innerEnd = one and outer or ((b.side == "L") and (x0 + w - ci) or (x0 + ci))

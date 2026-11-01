@@ -169,9 +169,35 @@ local function HealthShades(unit)
 	return HEALTH
 end
 
+-- A player uses their class plate when the class token can be read. UnitClass is secret when
+-- unit identity is restricted, and a secret can't be a table key, so that frame stays plain.
+-- NPCs follow classification. A secret classification stays plain rather than guessing.
+function ns.ArtFor(unit)
+	if ns.artForce and ns.VARIANTS[ns.artForce] then return ns.artForce end
+	if not unit then return "plain" end
+	local player = UnitIsPlayer(unit)
+	if Secret(player) then return "plain" end
+	if player then
+		local _, classFile = UnitClass(unit)
+		if Secret(classFile) then return "plain" end
+		if classFile then
+			local key = classFile:lower()
+			if ns.VARIANTS[key] then return key end
+		end
+		return "plain"
+	end
+	local class = UnitClassification(unit)
+	if Secret(class) then return "plain" end
+	if class == "rareelite" then return "rareelite" end
+	if class == "elite" or class == "worldboss" then return "elite" end
+	if class == "rare" then return "rare" end
+	return "plain"
+end
+
 function ns:UpdateIdentity()
 	local f, unit = ns.frame, ns.unit
 	if not unit then return end
+	ns:ApplyArt(ns.ArtFor(unit))
 	local shades = HealthShades(unit)
 	ns.healthShades = shades
 	ns.Paint(f.health:GetStatusBarTexture(), shades)
@@ -193,6 +219,9 @@ function ns:UpdateIdentity()
 end
 
 function ns:UpdatePortrait()
+	-- Never pass disableMasking=true (3rd arg): SetPortraitTexture updates a shared per-unit
+	-- engine texture, which turns Blizzard's stock unit-frame portrait into a dark square.
+	-- Frame.lua sizes f.portrait to L.rOut so the engine's circle clears the opening and our mask crops it.
 	if ns.unit then SetPortraitTexture(ns.frame.portrait, ns.unit) end
 end
 

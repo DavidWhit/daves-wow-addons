@@ -13,8 +13,8 @@ Targets: {{FLAVORS}} (`## Interface: {{INTERFACES}}`).
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `Test-WowAddon.ps1 -Path . -Flavor {{FLAVORLIST}}` |
-| Link into the game | `Deploy-WowAddon.ps1 -Path . -Flavor forever` |
+| Check the addon | `Test-WowAddon.py -Path . -Flavor {{FLAVORLIST}}` |
+| Link into the game | `Deploy-WowAddon.py -Path . -Flavor forever` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
 Files: `{{NAME}}.toc` (manifest), `Core.lua` (startup, events, slash command), `Options.lua` (Settings panel).

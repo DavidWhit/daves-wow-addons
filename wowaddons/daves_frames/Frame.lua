@@ -1,7 +1,7 @@
 -- daves_frames / Frame.lua
 -- Builds the target frame: the layers in NOTES.md section 2, from the back:
 --   boards (behind the plate) < bars (clipped to the windows) < inset shadow and portrait < frame art
---   < text and numbers.
+--   < text and numbers < the level circle.
 -- Nothing here reads unit data; Unit.lua, Cast.lua and Auras.lua fill it in.
 
 local _, ns = ...
@@ -154,7 +154,7 @@ function ns:BuildFrame(variant)
 	f.boardLayer:SetAllPoints()
 	f.boardLayer:SetFrameLevel(base + 1)
 
-	-- Bars, clipped to each window (run a few px under the rim; the ring hides the inner end).
+	-- Bars, clipped to each window. They run 5px under the lip; the inner end stops at the ring.
 	local cl, cr, ct, cb = L.winL - S.sideX, L.winR + S.sideX, L.winT - S.sideY, L.winB + S.sideY
 	local function Clip(l, r)
 		local c = CreateFrame("Frame", nil, f)
@@ -206,10 +206,13 @@ function ns:BuildFrame(variant)
 	f.portraitBack:SetColorTexture(1, 1, 1, 1)
 	f.portraitBack:SetGradient("VERTICAL", CreateColor(0.03, 0.02, 0.015, 1), CreateColor(0.14, 0.11, 0.075, 1))
 	f.portrait = overlay:CreateTexture(nil, "ARTWORK")
-	f.portrait:SetAllPoints(f.portraitBack)
+	-- Oversized to L.rOut so SetPortraitTexture's built-in circular margin sits past pr2 while
+	-- f.portraitMask crops cleanly under the ring (passing disableMasking=true would unmask the
+	-- engine's shared per-unit portrait texture on Blizzard's stock unit frames).
+	Rect(f.portrait, f, L.cx - L.rOut, L.cy - L.rOut, L.cx + L.rOut, L.cy + L.rOut)
 	local mask = overlay:CreateMaskTexture()
 	mask:SetAllPoints(f.portraitBack)
-	mask:SetAtlas("CircleMask")
+	mask:SetTexture(ns.CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 	f.portraitBack:AddMaskTexture(mask)
 	f.portrait:AddMaskTexture(mask)
 	f.portraitMask = mask
@@ -235,19 +238,14 @@ function ns:BuildFrame(variant)
 	f.numBand:SetColorTexture(0, 0, 0, 0.62)
 	local bandMask = text:CreateMaskTexture()
 	Rect(bandMask, f, L.cx - L.rIn, L.cy - L.rIn, L.cx + L.rIn, L.cy + L.rIn)
-	bandMask:SetAtlas("CircleMask")
+	bandMask:SetTexture(ns.CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 	f.numBand:AddMaskTexture(bandMask)
 	f.pnHealth = Font(text, "OVERLAY", NUM_FONT, 23)
 	f.pnHealth:SetPoint("CENTER", f, "TOPLEFT", L.cx, -(L.cy - 12))
 	f.pnPower = Font(text, "OVERLAY", NUM_FONT, 19)
 	f.pnPower:SetPoint("CENTER", f, "TOPLEFT", L.cx, -(L.cy + 13))
 
-	-- Name and level (left window), cast text and who they target (right window), bar numbers.
-	-- Level: Blizzard's own level circle and number (Forever's TargetFrameTemplates.xml: LevelBackgroundCircle,
-	-- atlas UI-HUD-UnitFrame-SmallCircle, and LevelText in WhiteLargeNumberFont, centred on it 0.5 low).
-	f.levelBadge = text:CreateTexture(nil, "ARTWORK")
-	f.levelBadge:SetAtlas(S.badge.atlas)
-	f.level = Font(text, "OVERLAY", NUM_FONT, 16)
+	-- Name (left window), cast text and who they target (right window), bar numbers.
 	f.name = Font(text, "OVERLAY", NAME_FONT, 21)
 	f.name:SetJustifyH("LEFT")
 	f.dead = Font(text, "OVERLAY", NAME_FONT, 21)
@@ -269,8 +267,42 @@ function ns:BuildFrame(variant)
 	f.tot = Font(text, "OVERLAY", NUM_FONT, 15)
 	f.tot:SetJustifyH("LEFT")
 
+	-- Level, above the plate and the other text. The dark disc tucks under the painted level ring
+	-- (above f.portrait where the two circles overlap); the number sits above the plate, 0.5 px low.
+	f.levelBadge = overlay:CreateTexture(nil, "OVERLAY")
+	f.levelBadge:SetTexture(ns.CIRCLE)
+	f.levelBadge:SetVertexColor(0.12, 0.08, 0.04, 1)
+	local level = CreateFrame("Frame", nil, f)
+	level:SetAllPoints()
+	level:SetFrameLevel(base + 12)
+	f.levelLayer = level
+	f.level = Font(level, "OVERLAY", NUM_FONT, 16)
+
 	ns:ApplyLayout()
 	return f
+end
+
+-- Swap the metal without moving anything. Every variant shares GEO.
+function ns:ApplyArt(key)
+	local L = ns.VARIANTS[key] or ns.VARIANTS.plain
+	key = L.key
+	if ns.artKey == key then return end
+	ns.artKey = key
+	ns.L = L
+	local f = ns.frame
+	if not f then return end
+	f.art:SetTexture(L.texture)
+	f.art:SetTexCoord(unpack(L.art))
+	if ns.boards then
+		for _, b in pairs(ns.boards) do
+			for _, t in ipairs(b.chains) do
+				t:SetTexture(L.chain, "CLAMP", "REPEAT")
+			end
+			if b.plain and b.plain[1] then
+				b.plain[1]:SetColorTexture(ns.BoardEdgeColor(L))
+			end
+		end
+	end
 end
 
 -- Text scales with the frame, like the art: TEXT layout units for a full-size role (what Blizzard's target
@@ -327,31 +359,31 @@ function ns:ApplyLayout()
 	Rect(f.power, f, pl, barTop, pr, bottom)
 	if stacked then Rect(f.cast, f, pl, top, pr, split) else Rect(f.cast, f, pl, top, pr, bottom) end
 
-	-- Level: Blizzard's level circle on the bottom middle of the portrait ring, until a variant paints its own
-	-- (NOTES.md: L5 level badge), at the L5 guide's size so a painted badge replaces it exactly. It scales with
-	-- the frame like the art; the number keeps Blizzard's proportion to the circle, so two digits always fit.
+	-- Level disc tucked under the painted level ring; digits are sized to the 60 px yellow hole.
 	local B = S.badge
-	local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(B.atlas)
-	local atlasW = (info and info.width and info.width > 0) and info.width or 30
 	local d = B.d
-	local u = d / atlasW                                              -- layout px per unit of Blizzard's circle
-	local bx, by = Snap(L.cx), Snap(L.cy + B.dy)
-	local bHalf = Snap(d / 2)
-	Rect(f.levelBadge, f, bx - bHalf, by - bHalf, bx + bHalf, by + bHalf)
+	local lr = d / 2 + S.portraitPad
+	Rect(f.levelBadge, f, L.cx - lr, L.cy + B.dy - lr, L.cx + lr, L.cy + B.dy + lr)
 	local fontObj = WhiteLargeNumberFont or TextStatusBarText
-	local file, height, flags = fontObj:GetFont()
-	local levelSize = math.max(1, math.floor((height or 14) * u / px + 0.5)) * px
-	f.level:ClearAllPoints(); f.level:SetPoint("CENTER", f, "TOPLEFT", bx, -Snap(by + 0.5 * u))   -- on a whole pixel: sharp digits
-	f.level:SetJustifyH("CENTER"); f.level:SetJustifyV("MIDDLE")
+	local file, _, flags = fontObj:GetFont()
+	local levelSize = math.max(px, Snap(d * 0.46))
+	-- The string is the hole itself. A font string with no width keeps the digits
+	-- on the left of their box, so the vertical middle lined up and the horizontal did not.
 	f.level:SetFont(file or (BlizzardFont()), levelSize, flags or "")
 	f.level:SetShadowColor(0, 0, 0, 0)
+	f.level:ClearAllPoints()
+	f.level:SetPoint("CENTER", f.levelBadge, "CENTER", 0, -0.5)
+	f.level:SetSize(d, d)
+	f.level:SetJustifyH("CENTER")
+	f.level:SetJustifyV("MIDDLE")
 
 	-- Name, from the outer end of the health window.
 	local nameMid = stacked and stripMid or (L.winT + L.winB) / 2
-	local nameSize = stacked and Size(1, strip - 6) or Size(1, 34)
+	-- Overlay: the name fills the window, which is sized so 44 layout px still fits.
+	local nameSize = stacked and Size(1, strip - 6) or Size(1, (L.winB - L.winT) - 8)
 	f.name:ClearAllPoints()
 	f.name:SetPoint("LEFT", f, "TOPLEFT", L.winL + 16, Y(nameMid, nameSize))
-	f.name:SetPoint("RIGHT", f, "TOPLEFT", L.cx - L.hidden - 60, Y(nameMid, nameSize))
+	f.name:SetPoint("RIGHT", f, "TOPLEFT", L.cx - L.hidden - 14, Y(nameMid, nameSize))
 	ns.StyleFont(f.name, ns.NAME_FONT, nameSize)
 
 	local barMid = stacked and stackBarMid or (L.winT + L.winB) / 2
@@ -388,12 +420,14 @@ function ns:ApplyLayout()
 	-- Numbers on the portrait: health over resource, centred, on a dark band that grows with them.
 	-- "Both" ("12.3K  ·  100%", about 7.5 em in Friz Quadrata) is capped to the opening's width where
 	-- the text sits.
-	local cap = db.format == "both" and math.floor(2 * math.sqrt(L.rIn * L.rIn - 1225) / 7.5) or 42
-	-- Health and resource are one size: the same as the numbers in the bars.
-	local hs = Size(1, math.min(34, cap))
+	-- "Both" is a wide string, so it shrinks to the opening. A single number uses the name's size.
+	-- 5.5 is Arial Narrow's width in ems for "12.3k  ·  100%"; the text sits about 22 px off centre.
+	local chord = math.sqrt(math.max(0, L.rIn * L.rIn - 22 * 22))
+	local cap = db.format == "both" and math.floor(2 * chord / 5.5) or 44
+	local hs = Size(1, math.min(44, cap))
 	local ps = hs
-	-- The band covers at most about 40% of the opening.
-	local half = math.min(math.floor(L.rIn * 0.4 + 0.5), math.max(34, math.floor((hs + ps) * 0.75 + 0.5)))
+	-- The dark band stays inside the opening.
+	local half = math.min(math.floor(L.rIn * 0.62 + 0.5), math.max(hs, math.floor((hs + ps) * 0.62 + 0.5)))
 	Rect(f.numBand, f, L.cx - L.rIn, L.cy - half, L.cx + L.rIn, L.cy + half)
 	ns.StyleFont(f.pnHealth, ns.NUM_FONT, hs)
 	f.pnHealth:SetPoint("CENTER", f, "TOPLEFT", L.cx, -(L.cy - hs * 0.5))

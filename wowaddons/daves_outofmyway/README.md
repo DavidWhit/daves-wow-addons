@@ -31,8 +31,8 @@ One known limit: while a roll is open, Blizzard's own roll container still takes
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `Test-WowAddon.ps1 -Path . -Flavor forever` |
-| Link into the game | `Link-WowAddons.ps1 -Path .` |
+| Check the addon | `Test-WowAddon.py -Path . -Flavor forever` |
+| Link into the game | `Link-WowAddons.py -Path .` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
 | File | Purpose |
