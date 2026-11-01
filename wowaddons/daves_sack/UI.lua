@@ -2,7 +2,8 @@
 -- One combined bag window dressed in the same chrome as WoW's HUD Edit Mode
 -- window: Blizzard's own translucent dialog border, centred white title and
 -- close button, a Settings button in the toolbar that opens the Settings
--- window, and resize grips in the bottom corners. Blizzard templates are used where
+-- window, a delete button beside that gear, and resize grips in the bottom
+-- corners. Blizzard templates are used where
 -- they exist so each client draws its native art; our own icons cover the rest.
 --
 -- Performance notes
@@ -42,8 +43,10 @@ local SECTION_NAMES = {}
 for i, n in ipairs(ns.CATEGORY_NAMES) do SECTION_NAMES[i] = n end
 SECTION_NAMES[FREE_CAT] = "Free Space"
 
-ns.TIPS = "Drag the window to move it. Drag a bottom corner to resize it. Click a section name to collapse it. Scroll with the mouse wheel or the bar on the right."
-local MIN_COLS, MAX_COLS = 6, 36
+ns.TIPS = "Drag the window to move it. Drag a bottom corner to resize it. Click a section name to collapse it. Scroll with the mouse wheel or the bar on the right. Drag an item onto the delete button beside Settings to destroy it."
+-- 8 is the narrowest width where Sort, Settings, the delete button and a usable
+-- search box all fit, with the scrollbar gutter reserved.
+local MIN_COLS, MAX_COLS = 8, 36
 local MIN_VIEW = 3 * (SLOT + GAP)       -- the item area is never shorter than ~3 rows
 ns.MIN_COLS, ns.MAX_COLS, ns.MIN_VIEW = MIN_COLS, MAX_COLS, MIN_VIEW
 
@@ -460,7 +463,8 @@ end
 -- is never allowed, however it's set (slider, corner grip, a saved value,
 -- a reagent bag or another digit of gold arriving):
 --  * at least enough columns for the footer: both counters and the gold
---    side by side, never overlapping, and never fewer than MIN_COLS;
+--    side by side, never overlapping, and never fewer than MIN_COLS
+--    (the toolbar needs that floor too);
 --  * at most the columns that fit on the screen;
 --  * the item area at least ~3 rows, and at most what the screen leaves
 --    under the toolbar and footer.
@@ -845,6 +849,7 @@ function ns.ApplyBackground()
 	local style = ns.BackgroundStyle(ns.db.backgroundStyle)
 	SetBackground(bagBorder, a, style)
 	SetBackground(ns.optionsBorder, a, style)
+	SetBackground(ns.confirmBorder, a, style)
 end
 
 function ns.Relayout()
@@ -1125,6 +1130,315 @@ function ns.MarkCurrencies()
 	Schedule()
 end
 
+---------------------------------------------------------------------------
+-- Taint-free destroy confirmation dialog (same Edit Mode chrome as the bags).
+-- Never calls StaticPopup_Show from addon code, so Blizzard's shared StaticPopup
+-- frames stay untainted for protected actions. While open, the item stays on the
+-- cursor (same as Blizzard's native world-drop prompt): clicking Destroy runs in
+-- a fresh hardware event and calls DeleteCursorItem(); Cancel or Escape puts the
+-- item back via ClearCursor(); dropping the item elsewhere hides the dialog on
+-- CURSOR_CHANGED.
+---------------------------------------------------------------------------
+local AskDestroy
+do
+	local confirm
+	local confirmRec = {}
+	local upper = string.upper
+
+	local function SameCursorItem()
+		if not (confirm and CursorHasItem and CursorHasItem() and GetCursorInfo) then return false end
+		local kind, id, link = GetCursorInfo()
+		if kind ~= "item" or id ~= confirm.itemID or link ~= confirm.itemLink then return false end
+		if confirm.bag and C_Cursor and C_Cursor.GetCursorItem then
+			local loc = C_Cursor.GetCursorItem()
+			if not (loc and loc.IsEqualToBagAndSlot and loc:IsEqualToBagAndSlot(confirm.bag, confirm.slot)) then
+				return false
+			end
+		end
+		return true
+	end
+
+	local function SetYesEnabled(on)
+		confirm.yesReady = on
+		local b = confirm.yesBtn
+		if on and b.Enable then b:Enable() elseif not on and b.Disable then b:Disable() end
+		if not b.Disable then b:SetAlpha(on and 1 or 0.45) end
+	end
+
+	local function AcceptDestroy()
+		if not (confirm and confirm.yesReady) then return end
+		if confirm.needType and upper(confirm.edit:GetText() or "") ~= upper(confirm.confirmWord or "DELETE") then
+			return
+		end
+		confirm.keepCursor = true
+		if SameCursorItem() and DeleteCursorItem then
+			DeleteCursorItem()
+		end
+		confirm:Hide()
+	end
+
+	local function CancelDestroy()
+		if confirm then confirm:Hide() end
+	end
+
+	function ns.HideDestroyConfirm(keep)
+		if confirm and confirm:IsShown() then
+			confirm.keepCursor = keep
+			confirm:Hide()
+		end
+	end
+
+	-- While an item is on the cursor, nudging the mouse between mouse-down and
+	-- mouse-up can dispatch OnReceiveDrag instead of OnClick; accept either so
+	-- clicking Delete / Cancel / X never misses.
+	local function BindConfirmClick(btn, fn)
+		btn:SetScript("OnClick", function(self)
+			self.down = false
+			fn()
+		end)
+		btn:SetScript("OnMouseDown", function(self, b)
+			if b == "LeftButton" and (not self.IsEnabled or self:IsEnabled()) then
+				self.down = true
+			end
+		end)
+		btn:SetScript("OnLeave", function(self) self.down = false end)
+		btn:SetScript("OnHide", function(self) self.down = false end)
+		btn:SetScript("OnReceiveDrag", function(self)
+			if self.down and (not self.IsEnabled or self:IsEnabled()) then
+				self.down = false
+				fn()
+			end
+		end)
+	end
+
+	local function MakeConfirmButton(parent, text, width)
+		local b = TryTemplate("Button", nil, parent, "UIPanelButtonTemplate")
+		if not b then
+			b = CreateFrame("Button", nil, parent)
+			local bg = b:CreateTexture(nil, "BACKGROUND"); bg:SetColorTexture(0.45, 0.08, 0.06, 1); bg:SetAllPoints()
+			b:SetNormalFontObject("GameFontNormal")
+			local hl = b:CreateTexture(nil, "HIGHLIGHT"); hl:SetColorTexture(1, 1, 1, 0.08); hl:SetAllPoints()
+		end
+		if b.SetText then b:SetText(text) end
+		b:SetSize(width, 22)
+		b:RegisterForClicks("LeftButtonUp")
+		return b
+	end
+
+	local function BuildConfirm()
+		confirm = CreateFrame("Frame", "DavesSackConfirm", UIParent)
+		confirm:SetSize(340, 140)
+		confirm:SetPoint("TOP", UIParent, "TOP", 0, -135)
+		confirm:SetFrameStrata("FULLSCREEN_DIALOG")
+		confirm:SetClampedToScreen(true)
+		confirm:EnableMouse(true); confirm:SetMovable(true); confirm:RegisterForDrag("LeftButton")
+		if confirm.SetDontSavePosition then confirm:SetDontSavePosition(true) end
+		confirm:SetScript("OnDragStart", function(self)
+			if not (CursorHasItem and CursorHasItem()) then self:StartMoving() end
+		end)
+		confirm:SetScript("OnDragStop", confirm.StopMovingOrSizing)
+		confirm:Hide()
+		tinsert(UISpecialFrames, "DavesSackConfirm")
+
+		local border = TryTemplate("Frame", nil, confirm, "DialogBorderTranslucentTemplate")
+		if border then
+			border:SetAllPoints()
+		else
+			border = CreateFrame("Frame", nil, confirm, BackdropTemplateMixin and "BackdropTemplate" or nil)
+			border:SetAllPoints(); border:SetFrameLevel(confirm:GetFrameLevel())
+			border:SetBackdrop({
+				bgFile = "Interface\\Buttons\\WHITE8X8",
+				edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 32,
+				insets = { left = 11, right = 12, top = 12, bottom = 11 },
+			})
+			border:SetBackdropColor(0, 0, 0, 0.8)
+		end
+		ns.confirmBorder = border
+		ns.ApplyBackground()
+
+		local title = confirm:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+		title:SetPoint("TOP", 0, -15)
+		title:SetText("Destroy Item")
+
+		local close = TryTemplate("Button", nil, confirm, "UIPanelCloseButton")
+		if close then
+			close:SetPoint("TOPRIGHT")
+		else
+			close = CreateFrame("Button", nil, confirm)
+			close:SetSize(32, 32); close:SetPoint("TOPRIGHT", 2, 2)
+			close:SetNormalTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Up")
+			close:SetPushedTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Down")
+			close:SetHighlightTexture("Interface\\Buttons\\UI-Panel-MinimizeButton-Highlight", "ADD")
+		end
+		close:SetFrameLevel(confirm:GetFrameLevel() + 5)
+		close:RegisterForClicks("LeftButtonUp")
+		BindConfirmClick(close, CancelDestroy)
+
+		local slotBox = CreateFrame("Frame", nil, confirm)
+		slotBox:SetSize(36, 36)
+		slotBox:SetPoint("TOPLEFT", 24, -46)
+		slotBox:EnableMouse(true)
+		local slotBg = slotBox:CreateTexture(nil, "BACKGROUND")
+		slotBg:SetTexture(M .. "slot"); slotBg:SetVertexColor(SLOTBG[1], SLOTBG[2], SLOTBG[3]); slotBg:SetAllPoints()
+		local icon = slotBox:CreateTexture(nil, "ARTWORK")
+		icon:SetPoint("TOPLEFT", 2, -2); icon:SetPoint("BOTTOMRIGHT", -2, 2)
+		icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		if slotBox.CreateMaskTexture and icon.AddMaskTexture then
+			local mask = slotBox:CreateMaskTexture()
+			mask:SetTexture(M .. "slot", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+			mask:SetAllPoints(icon)
+			icon:AddMaskTexture(mask)
+		end
+		local edge = slotBox:CreateTexture(nil, "OVERLAY")
+		edge:SetTexture(M .. "slotedge"); edge:SetAllPoints()
+		local countFS = slotBox:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+		countFS:SetPoint("BOTTOMRIGHT", -3, 3)
+		slotBox:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			if confirm.bag and confirm.slot and GameTooltip.SetBagItem then
+				GameTooltip:SetBagItem(confirm.bag, confirm.slot)
+			elseif confirm.itemLink and GameTooltip.SetHyperlink then
+				GameTooltip:SetHyperlink(confirm.itemLink)
+			end
+			GameTooltip:Show()
+		end)
+		slotBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		confirm.slotBox, confirm.icon, confirm.edge, confirm.count = slotBox, icon, edge, countFS
+
+		local prompt = confirm:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+		prompt:SetPoint("LEFT", slotBox, "RIGHT", 10, 0)
+		prompt:SetWidth(340 - 24 - 36 - 10 - 24)
+		prompt:SetJustifyH("LEFT")
+		if prompt.SetWordWrap then prompt:SetWordWrap(true) end
+		confirm.prompt = prompt
+
+		local hint = confirm:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+		confirm.hint = hint
+
+		local edit = CreateFrame("EditBox", "DavesSackConfirmEdit", confirm, "InputBoxTemplate")
+		edit:SetAutoFocus(false)
+		edit:SetSize(160, 22)
+		edit:SetMaxLetters(32)
+		edit:SetScript("OnTextChanged", function(self)
+			if not confirm.needType then return end
+			local word = confirm.confirmWord or "DELETE"
+			SetYesEnabled(upper(self:GetText() or "") == upper(word))
+		end)
+		edit:SetScript("OnEnterPressed", AcceptDestroy)
+		edit:SetScript("OnEscapePressed", CancelDestroy)
+		confirm.edit = edit
+
+		local yesBtn = MakeConfirmButton(confirm, DELETE or "Destroy", 112)
+		yesBtn:SetPoint("BOTTOMRIGHT", confirm, "BOTTOM", -6, 16)
+		BindConfirmClick(yesBtn, AcceptDestroy)
+		confirm.yesBtn = yesBtn
+
+		local noBtn = MakeConfirmButton(confirm, CANCEL or "Cancel", 112)
+		noBtn:SetPoint("BOTTOMLEFT", confirm, "BOTTOM", 6, 16)
+		BindConfirmClick(noBtn, CancelDestroy)
+		confirm.noBtn = noBtn
+
+		confirm:SetScript("OnEvent", function()
+			if not SameCursorItem() then confirm:Hide() end
+		end)
+		confirm:SetScript("OnShow", function(self)
+			pcall(self.RegisterEvent, self, "CURSOR_CHANGED")
+			Sound("IG_MAINMENU_OPEN")
+		end)
+		confirm:SetScript("OnHide", function(self)
+			pcall(self.UnregisterEvent, self, "CURSOR_CHANGED")
+			local keep = self.keepCursor
+			self.keepCursor = nil
+			self.needType = false
+			edit:ClearFocus()
+			edit:SetText("")
+			if GameTooltip:GetOwner() == slotBox then GameTooltip:Hide() end
+			if not keep and SameCursorItem() and ClearCursor then ClearCursor() end
+			Sound("IG_MAINMENU_CLOSE")
+		end)
+	end
+
+	AskDestroy = function(itemID, itemLink)
+		if not confirm then BuildConfirm() end
+		local bag, slot
+		if C_Cursor and C_Cursor.GetCursorItem then
+			local loc = C_Cursor.GetCursorItem()
+			if loc and loc.IsBagAndSlot and loc:IsBagAndSlot() then
+				bag, slot = loc:GetBagAndSlot()
+			end
+		else
+			for id, list in pairs(buttons) do
+				for s = 1, list.n do
+					local r = list[s].fbRec
+					if r.locked and r.id == itemID and (not itemLink or r.link == itemLink) then
+						bag, slot = id, s
+						break
+					end
+				end
+				if bag then break end
+			end
+		end
+		local icon, count, quality, link
+		if bag and slot then
+			ReadSlot(bag, slot, confirmRec)
+			icon, count, quality, link = confirmRec.texture, confirmRec.count or 1, confirmRec.quality, confirmRec.link or itemLink
+		end
+		if not icon or not quality then
+			local fbIcon, fbQ = ns.ItemSummary(itemID, itemLink)
+			icon = icon or fbIcon
+			quality = quality or fbQ or 1
+		end
+		count = (count and count > 0) and count or 1
+		link = link or itemLink
+
+		confirm.keepCursor = nil
+		confirm.itemID, confirm.itemLink, confirm.bag, confirm.slot = itemID, itemLink, bag, slot
+		confirm.icon:SetTexture(icon); confirm.icon:SetShown(icon ~= nil)
+		if count > 1 then confirm.count:SetText(count); confirm.count:Show() else confirm.count:Hide() end
+		local c = quality and quality >= 2 and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[quality]
+		if c then
+			confirm.edge:SetVertexColor(c.r, c.g, c.b, 0.9)
+		else
+			confirm.edge:SetVertexColor(TRIM[1], TRIM[2], TRIM[3], 1)
+		end
+
+		local nameText = link or ("item #" .. tostring(itemID))
+		local qtyText = count > 1 and (" |cffaaaaaax" .. count .. "|r") or ""
+		confirm.prompt:SetText(format("Destroy %s%s?", nameText, qtyText))
+
+		local rowH = max(36, (confirm.prompt:GetStringHeight() or 20) + 4)
+		local needType = quality >= 3 and quality ~= 7   -- Rare+ (except Heirloom), matching Blizzard's rule
+		local word = DELETE_ITEM_CONFIRM_STRING or "DELETE"
+		confirm.needType = needType
+		confirm.confirmWord = word
+		if needType then
+			confirm.hint:SetText(format("Type %s to confirm:", word))
+			confirm.hint:ClearAllPoints()
+			confirm.hint:SetPoint("TOP", confirm, "TOP", 0, -(46 + rowH + 8))
+			confirm.hint:Show()
+			confirm.edit:SetText("")
+			confirm.edit:ClearAllPoints()
+			confirm.edit:SetPoint("TOP", confirm.hint, "BOTTOM", 0, -6)
+			confirm.edit:Show()
+			SetYesEnabled(false)
+			confirm:SetHeight(46 + rowH + 8 + 14 + 6 + 22 + 50)
+		else
+			confirm.hint:Hide()
+			confirm.edit:SetText("")
+			confirm.edit:Hide()
+			SetYesEnabled(true)
+			confirm:SetHeight(46 + rowH + 50)
+		end
+
+		confirm:Show()
+		if needType then
+			confirm.edit:SetFocus()
+		else
+			SetYesEnabled(true)
+		end
+	end
+end
+
 local function Build()
 	frame = CreateFrame("Frame", "DavesSackFrame", UIParent)
 	ns.frame = frame
@@ -1286,6 +1600,81 @@ local function Build()
 		if ns.ToggleOptions then ns.ToggleOptions() end
 	end)
 	searchRight = searchRight - 96 - 8
+
+	-- Delete, immediately left of Settings so it sits beside the gear. Drop a held item on it,
+	-- or click it while holding one. DeleteCursorItem requires a hardware event and destroys the
+	-- cursor item immediately (it does NOT raise DELETE_ITEM_CONFIRM — Blizzard's confirmation
+	-- popup calls DeleteCursorItem after you click Yes). When "Confirm delete (trash)" is ticked in
+	-- Settings (the default), our own taint-free dialog asks first (and asks to type DELETE for
+	-- rare and better items); when unticked, DeleteCursorItem runs right away.
+	local DELETE_W = 22
+	local deleteBtn = CreateFrame("Button", "DavesSackDeleteButton", frame)
+	deleteBtn:SetSize(DELETE_W, 22)
+	deleteBtn:SetPoint("TOPRIGHT", searchRight, -42)
+	deleteBtn:SetFrameLevel(frame:GetFrameLevel() + 5)
+	deleteBtn:RegisterForClicks("LeftButtonUp")
+	local deleteIcon = deleteBtn:CreateTexture(nil, "ARTWORK")
+	deleteIcon:SetPoint("CENTER")
+	local deleteHL = deleteBtn:CreateTexture(nil, "HIGHLIGHT")
+	deleteHL:SetPoint("CENTER")
+	deleteHL:SetBlendMode("ADD")
+	deleteHL:SetAlpha(0.4)
+	local atlasName = "common-icon-delete"
+	local atlasInfo
+	if C_Texture and C_Texture.GetAtlasInfo then
+		local ok, info = pcall(C_Texture.GetAtlasInfo, atlasName)
+		atlasInfo = ok and info or nil
+	end
+	if atlasInfo and deleteIcon.SetAtlas then
+		deleteIcon:SetSize(16, 16); deleteIcon:SetAtlas(atlasName)
+		deleteHL:SetSize(16, 16); deleteHL:SetAtlas(atlasName)
+	else
+		-- The loot-pass X: the same red button every client has shipped.
+		deleteIcon:SetSize(20, 20); deleteIcon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+		deleteHL:SetSize(20, 20); deleteHL:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
+	end
+	-- Brighter while holding an item, and only listens to CURSOR_CHANGED while the bags are open.
+	local function DropReady()
+		local held = CursorHasItem and CursorHasItem()
+		deleteIcon:SetAlpha(held and 1 or 0.65)
+	end
+	deleteBtn:SetScript("OnEvent", DropReady)
+	deleteBtn:SetScript("OnShow", function(self)
+		pcall(self.RegisterEvent, self, "CURSOR_CHANGED")
+		DropReady()
+	end)
+	deleteBtn:SetScript("OnHide", function(self)
+		pcall(self.UnregisterEvent, self, "CURSOR_CHANGED")
+	end)
+	-- A drop can fire OnClick, OnReceiveDrag and OnMouseUp in the same frame; only act once.
+	local destroyPending
+	local function DestroyHeld()
+		if destroyPending or not (DeleteCursorItem and CursorHasItem and CursorHasItem() and GetCursorInfo) then return end
+		local kind, itemID, itemLink = GetCursorInfo()
+		if kind ~= "item" or not itemID then return end
+		destroyPending = true
+		C_Timer.After(0, function() destroyPending = false end)
+		if ns.db.confirmDestroy == false then
+			ns.HideDestroyConfirm(true)
+			DeleteCursorItem()
+		else
+			AskDestroy(itemID, itemLink)
+		end
+	end
+	deleteBtn:SetScript("OnClick", DestroyHeld)
+	deleteBtn:SetScript("OnReceiveDrag", DestroyHeld)
+	deleteBtn:SetScript("OnMouseUp", function(_, b) if b == "LeftButton" then DestroyHeld() end end)
+	deleteBtn:SetScript("OnEnter", function(self)
+		DropReady()
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Delete / Trash")
+		GameTooltip:AddLine(ns.db.confirmDestroy == false
+			and "Drag an item here to destroy it immediately."
+			or "Drag an item here to destroy it (asks to confirm).", 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	deleteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	searchRight = searchRight - DELETE_W - 8
 
 	local function OnSearch(self)
 		local t = self:GetText()

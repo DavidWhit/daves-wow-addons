@@ -68,6 +68,13 @@ function ns.ReadSlot(bag, slot, rec)
 	return changed
 end
 
+-- Fallback icon and quality for a cursor item when it didn't come from a scanned bag slot.
+function ns.ItemSummary(id, link)
+	local icon = id and GetItemInfoInstant and select(5, GetItemInfoInstant(id)) or nil
+	local quality = id and ((GetQualityByID and GetQualityByID(link or id)) or (link and GetItemInfo and select(3, GetItemInfo(link)))) or 1
+	return icon, quality
+end
+
 ---------------------------------------------------------------------------
 -- Categories (display order)
 ---------------------------------------------------------------------------
@@ -296,6 +303,7 @@ local DEFAULTS = {
 	showCurrencies = true, showFreeSpace = true,     -- Free Space: drop target for split stacks
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot
 	preferReagentBag = true,                         -- reagents dropped on the window go into the reagent bag first
+	confirmDestroy = true,                           -- ask before destroying an item dropped on the delete button
 	background = 0.8,                                -- window background darkness (0.8 = Blizzard's translucent dialog)
 	backgroundStyle = "dark",                        -- which Blizzard background shows at that darkness (UI.lua BACKGROUND_STYLES)
 }
@@ -324,6 +332,7 @@ loader:SetScript("OnEvent", function(self, event, name)
 	DavesSackDB.maxHeight = nil            -- replaced by viewHeight (set by resizing)
 	ns.db = DavesSackDB
 	if ns.OnLoad then ns.OnLoad() end
+	if ns.InitSettingsPanel then ns.InitSettingsPanel() end
 end)
 
 ---------------------------------------------------------------------------
