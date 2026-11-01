@@ -9,27 +9,27 @@ WoW: Forever runs on the **modern (Mainline) client** with the **same addon API 
 
 ## Something broke in game? Read the evidence first
 
-For a Lua error, "action blocked", "only available to the Blizzard UI" or odd behaviour, read what the game recorded **before** the code. Start with the recorded addon errors (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.ps1 -Addon <name>`). If nothing was recorded, read the taint log (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1 -Addon <name>`). Then read the code. The full steps are in step 0 of the **wow-addon-test** skill (`${CLAUDE_PLUGIN_ROOT}/skills/wow-addon-test/SKILL.md`). Follow them.
+For a Lua error, "action blocked", "only available to the Blizzard UI" or odd behaviour, read what the game recorded **before** the code. Start with the recorded addon errors (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.py -Addon <name>`). If nothing was recorded, read the taint log (`${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.py -Addon <name>`). Then read the code. The full steps are in step 0 of the **wow-addon-test** skill (`${CLAUDE_PLUGIN_ROOT}/skills/wow-addon-test/SKILL.md`). Follow them.
 
 ## Rule zero: look it up, don't recall it
 
 Your training data predates Forever, and APIs move every patch. Before you use or recommend any API, check it against the local index built from Blizzard's own client source:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.ps1" GetSpellInfo
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.ps1" "C_UnitAuras.*"
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.ps1" UNIT_AURA -Events
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.ps1" "Unit*" -SecretOnly
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.py" GetSpellInfo UnitHealth :SetTimerDuration
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.py" "C_UnitAuras.*"
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.py" UNIT_AURA -Events
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.py" "Unit*" -SecretOnly
 ```
 
-If the index is missing or older than a patch, rebuild it (about one minute): `scripts/Update-WowApiIndex.ps1 -Branch forever`.
-For behaviour details, read Blizzard's own code. A local copy of the `forever` branch lives in the plugin at `data/ui-source/forever/Interface/` (every .lua, .xml and .toc). Look a name up in `data/ui-source/forever/INDEX.tsv` first (`name<TAB>kind<TAB>path:line`; kinds: function, method, template, frame), then read that file at that line:
+If the index is missing or older than a patch, rebuild it: `scripts/Update-WowApiIndex.py -Branch forever` (add `-FromLocal` to rebuild offline from `data/ui-source/forever/`).
+For behaviour details, read Blizzard's own code in `data/ui-source/forever/Interface/` (every .lua, .xml and .toc). Look symbols up via `Find-WowApi.py -UiSource` first (searches `INDEX.tsv` in <0.1s and filters to Forever-loaded folders), then read that file at that line:
 
 ```powershell
-Select-String -Path "${CLAUDE_PLUGIN_ROOT}/data/ui-source/forever/INDEX.tsv" -Pattern "^ContainerFrameItemButton_OnClick`t"
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.py" ContainerFrameItemButton_OnClick EditModeManagerFrame -UiSource
 ```
 
-On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Vanilla`/`TBC`/`Wrath`/`Cata`/`Mists` copies don't (the addon's TOC decides). If the folder is missing or older than the installed build (`SOURCE.txt` has the commit and date), run `scripts/Update-WowUiSource.ps1` (about a minute). Also see the API pages on https://warcraft.wiki.gg. See [sources.md](sources.md) for what each source is good for.
+On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Vanilla`/`TBC`/`Wrath`/`Cata`/`Mists` copies don't (the addon's TOC decides). If the folder is missing or older than the installed build (`SOURCE.txt` has the commit and date), run `scripts/Update-WowUiSource.py` (about a minute). Also see the API pages on https://warcraft.wiki.gg. See [sources.md](sources.md) for what each source is good for.
 
 ## Facts (verified 2026-10-03)
 
@@ -40,9 +40,9 @@ On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Va
 | TOC game type | `camelot`, inside the `mainline` family | Blizzard's own TOCs, e.g. `Blizzard_UnitFrame.toc` |
 | TOC path variables | `[Family]` → `Mainline`, `[Game]` → `Camelot` | same |
 | Client-specific TOC | `<Name>_Camelot.toc` | warcraft.wiki.gg TOC_format |
-| Beta install folder | `_classic_beta_` (product `wow_classic_beta`) | local install; the launch folder may differ, so use `Find-WowInstall.ps1` |
+| Beta install folder | `_classic_beta_` (product `wow_classic_beta`) | local install; the launch folder may differ, so use `Find-WowInstall.py` |
 
-The Interface number can change at launch (expected November 2026) or with any patch. `Find-WowInstall.ps1` reads it from the installed build, so prefer that over this table.
+The Interface number can change at launch (expected November 2026) or with any patch. `Find-WowInstall.py` reads it from the installed build, so prefer that over this table.
 
 ### Detecting Forever at runtime
 
@@ -72,7 +72,7 @@ In restricted contexts (combat, instances, other players), many APIs return **se
 
 **Allowed:** passing it to widget methods Blizzard marks `SecretArguments = "AllowedWhenTainted"`. These include `StatusBar:SetMinMaxValues`, `StatusBar:SetValue`, `FontString:SetText` and `FontString:SetFormattedText`. Methods marked `"AllowedWhenUntainted"` accept secrets only from Blizzard's secure code, never from addons.
 
-How Blizzard's docs mark what can be secret: `SecretReturns = true` (always, e.g. `UnitHealth`) and `SecretWhen<Condition> = true` (conditional, e.g. `UnitHealthMax`: `SecretWhenUnitHealthMaxRestricted`; `UnitName`: `SecretWhenUnitNameIdentityRestricted`). `Find-WowApi.ps1 -SecretOnly` lists them.
+How Blizzard's docs mark what can be secret: `SecretReturns = true` (always, e.g. `UnitHealth`) and `SecretWhen<Condition> = true` (conditional, e.g. `UnitHealthMax`: `SecretWhenUnitHealthMaxRestricted`; `UnitName`: `SecretWhenUnitNameIdentityRestricted`). `Find-WowApi.py -SecretOnly` lists them.
 
 ```lua
 -- Right: straight into widget setters
@@ -120,7 +120,7 @@ Looked up for daves_frames (a target frame) in `Blizzard_APIDocumentationGenerat
 
 ## Removed or moved APIs: common traps
 
-All checked against the forever index. Re-check with `Find-WowApi.ps1` for anything else.
+All checked against the forever index. Re-check with `Find-WowApi.py` for anything else.
 
 | Old global | On Forever |
 | --- | --- |
@@ -152,12 +152,14 @@ The Addon Compartment (minimap addon menu) loads on the mainline family, which i
 
 ## Edit Mode: one shared behaviour (house rule, enforced)
 
-Any addon frame the player places in Edit Mode uses the kit's **`templates/editmode/EditModeDialog.lua`** for its outline, dragging, snapping and settings dialog. Copy it into the addon **unchanged** and list it in the TOC right after `Core.lua`. `New-WowAddon.ps1 -EditMode` does that and also adds an `EditMode.lua` already wired up with `ns.EditMode.Attach`. Never hand-build any of it.
+Any addon frame the player places in Edit Mode uses the kit's **`templates/editmode/EditModeDialog.lua`** for its outline, dragging, snapping and settings dialog. Copy it into the addon **unchanged** and list it in the TOC right after `Core.lua`. `New-WowAddon.py -EditMode` does that and also adds an `EditMode.lua` already wired up with `ns.EditMode.Attach`. Never hand-build any of it.
 
 The validator enforces this in any addon that listens for `EditMode.Enter`/`EditMode.Exit` or uses `ns.EditMode`:
 - `editmode-dialog`: error when the copy is missing, warning when a copy differs from the kit's.
 - `editmode-ui`: error for a hand-built panel, slider or checkbox.
 - `editmode-snap`: error for hand-rolled grid snapping (`gridSpacing`, `IsSnapEnabled`, `EditModeMagnetismManager`), warning for a frame dragged without `ns.EditMode.SnapRect` or `Attach`.
+- `editmode-onupdate`: warning when `SetScript("OnUpdate")` is placed directly on a frame passed to `ns.EditMode.Attach` (which overwrites `OnUpdate` while dragging).
+- `editmode-openfor`: warning when an `ns.EditMode.CreateDialog` dialog is anchored via `:SetPoint()` instead of opened via `dialog:OpenFor(frame)`.
 
 Everything is modelled on Blizzard's own Edit Mode (`Blizzard_EditMode/Shared/EditModeDialogs.xml`, `EditModeUtil.lua`, forever branch):
 - **Same look:** translucent dialog border, large title, close button, a label column, sliders with their number on the right, 32px checkboxes, full-width buttons under a divider. Frames get Blizzard's Edit Mode outline: blue while movable, yellow while selected, a glow on hover, and it stays solid while the frame fades.
@@ -199,4 +201,4 @@ To change the look or behaviour, edit the kit's file, then copy it into every ad
 - Bag replacements: hide Blizzard's container frames (`ContainerFrameN`, `ContainerFrameCombinedBags`) by parking them on a hidden parent, and **leave their events alone** (verified in game 2026-10-21, daves_sack 1.7.14). daves_sack also `UnregisterEvent`ed them from addon code, while showing its own window from `hooksecurefunc` hooks on the bag functions. Together those two tainted every window whose OnShow calls `OpenAllBags`, which means the bank and the mailbox. The bank's free first tab was blocked (`C_Bank.PurchaseBankTab`). Every item used from the bags in combat after a bank visit was blocked too (`UseContainerItem`), because Blizzard's item click reads `BankPanel.bankType` even with the bank closed (Forever's `BankPanel` never hides). Either piece alone left no taint.
 - Use plain color textures or your own `.tga` files for art. Blizzard texture paths move between clients.
 - Initialise SavedVariables in your own `ADDON_LOADED` (when `name == ADDON`).
-- Run the **wow-addon-test** skill after every change to addon code. It validates, then has the **wow-addon-reviewer** agent review the code in advisor mode. Show the user its findings and wait for their go-ahead before applying any.
+- Run the **wow-addon-test** skill after every change to addon code. It builds the `Prepare-WowReview.py` packet (static validation plus diff, `NOTES.md`, and Forever API annotations), then runs the **wow-addon-reviewer** advisor review (inline for small clean diffs, or subagent with the packet). Show the user its findings and wait for their go-ahead before applying any.

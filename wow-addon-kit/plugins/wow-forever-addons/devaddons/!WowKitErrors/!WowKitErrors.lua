@@ -2,7 +2,7 @@
 -- The client shows Lua errors in a pop-up (/console scriptErrors 1) but keeps no record of them on disk, so they can't
 -- be read after the fact. This records every Lua error (message and stack), every blocked or forbidden action (with a
 -- taint probe, below) and every Lua warning into SavedVariables (written on /reload or logout), where the kit's
--- Get-WowScriptErrors.ps1 reads them.
+-- Get-WowScriptErrors.py reads them.
 --
 -- How it hooks in: Blizzard_ScriptErrors installs Blizzard's handler (seterrorhandler(HandleLuaError)). This wraps
 -- whatever handler is installed and always calls it afterwards, so Blizzard's pop-up and logging carry on unchanged;

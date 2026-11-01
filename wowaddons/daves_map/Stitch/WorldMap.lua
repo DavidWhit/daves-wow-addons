@@ -1089,10 +1089,11 @@ local function Setup()
 			local u, v = mod.CursorWorld()
 			local chain = u and S.ChainAt(u, v)
 			local mapID = chain and chain[#chain]
-			if not mapID or mapID == WORLD or not UiMapPoint then return end
+			local setWaypoint = C_Map.SetUserWaypoint and C_Map.SetUserWaypoint
+			if not mapID or mapID == WORLD or not (setWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates) then return end
 			if C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(mapID) then return end
 			local x, y = FromWorld(mapID, u, v)
-			pcall(C_Map.SetUserWaypoint, UiMapPoint.CreateFromCoordinates(mapID, x, y))
+			pcall(setWaypoint, UiMapPoint.CreateFromCoordinates(mapID, x, y))
 		end)
 	end
 	if map.NavigateToParentMap then

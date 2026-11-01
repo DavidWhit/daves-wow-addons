@@ -21,7 +21,7 @@ When the user reports something going wrong in game ("action blocked", "only ava
 **a. Recorded addon errors first.**
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.ps1" -Addon <addon folder name>
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowScriptErrors.py" -Addon <addon folder name>
 ```
 
 The client only shows Lua errors in a pop-up (`/console scriptErrors 1`) and keeps no record of them. The kit's development addon `devaddons/!WowKitErrors` records every Lua error (message and stack), blocked or forbidden action, and Lua warning to its SavedVariables, which the game writes on `/reload` or logout. Blizzard's pop-up still shows.
@@ -31,13 +31,13 @@ The client only shows Lua errors in a pop-up (`/console scriptErrors 1`) and kee
 - **`blocked` / `forbidden`:** read its **taint probe** lines first (the first entry of each kind per session carries one): every value an addon had written on the frames under the mouse, on Blizzard's global tables and frames, and Blizzard globals an addon replaced, each with the addon to blame. A line on a field Blizzard's failing code reads is the cause; fix the write. If the probe names nothing that code reads, go on to the taint log. `/wkprobe` in game runs the probe by hand (hover the frame first, then `/reload`).
   - **Probe lines can be the damage, not the cause.** Once execution is tainted, every field Blizzard writes in that same call is tagged with the addon too. If Blizzard's own code in the failing stack writes the field (daves_sack's bank block listed `BankPanel.bankType` and `ContainerFrameCombinedBags.size`, both written during the bank's own OnShow), it doesn't say where the taint came in. And a run without a block doesn't prove the taint is gone: the same taint can be harmless in one path and block another one (daves_sack's bank taint later blocked every bandage used from the bags).
   - **Then bisect in game.** Put temporary switches read at load (`if not ns.db.debugNoX then ... end`, marked TEMP) around each piece the addon runs in that path: hooks, `SetParent`/event changes on Blizzard frames, `HookScript`. Have the user flip one switch per `/reload`, repeat the action (open the bank, say), then `/wkprobe` and `/reload`. The test: does the probe still list the field the blocked code read (`BankPanel.bankType`) as the addon's? That works on any character, even after a one-time action such as the bank's free tab is done. The recorder keeps one probe per session, so the user can run every switch in one sitting; give each `/run` line as its own code block, each resetting all the switches. A clean run can need two pieces together (daves_sack: either switch alone cleared it). Remove every switch afterwards.
-- **"Was not installed ... Linking it now":** the script has just linked the recorder (the kit's `Link-WowAddons.ps1` and `Deploy-WowAddon.ps1` link it too, every run). Ask the user to restart the client fully, reproduce, and `/reload`, then run the script again. If it says the link failed, run the command it prints and fix what that reports.
+- **"Was not installed ... Linking it now":** the script has just linked the recorder (the kit's `Link-WowAddons.py` and `Deploy-WowAddon.py` link it too, every run). Ask the user to restart the client fully, reproduce, and `/reload`, then run the script again. If it says the link failed, run the command it prints and fix what that reports.
 - **No entries:** the session shown is the newest with entries. Check its start time against when the user reproduced the problem. `-Session 0` shows all sessions.
 
 **b. Then the taint log** (nothing recorded, or the probe of a `blocked` / `forbidden` entry names nothing the failing code reads):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.ps1" -Addon <addon folder name>
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Get-WowTaintLog.py" -Addon <addon folder name>
 ```
 
 Then work from the root cause outward:
@@ -51,57 +51,78 @@ No log, or nothing for this addon: ask the user to run `/console taintLog 1`, re
 ## 1. Static validation (always)
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.ps1" -Path "<addon folder>" -Flavor forever[,retail,classic_era]
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.py" -Path "<addon folder>" -Flavor forever[,retail,classic_era] [-NoInfo]
 ```
 
-Add `-Json` for machine-readable output. The exit code is 1 when there are errors.
+Add `-Json` for machine-readable output, and `-NoInfo` to omit informational notes (`feature-detected, OK`, etc.). The exit code is 1 when there are errors. (Note: `Prepare-WowReview.py` in Step 2 runs `Test-WowAddon.py` automatically, so you don't need to run both separately unless iterating on validator errors.)
 
 What each rule means and how to fix it:
 
 | Rule | Severity | Fix |
 | --- | --- | --- |
 | `toc-name` | error | Rename the TOC to `<Folder>.toc` (or `<Folder>_Camelot.toc`) |
-| `toc-interface` / `toc-flavor` | error/warn | Put the number `Find-WowInstall.ps1` reports (Forever: 16001) in `## Interface:` |
+| `toc-interface` / `toc-flavor` | error/warn | Put the number `Find-WowInstall.py` reports (Forever: 16001) in `## Interface:` |
 | `toc-missing-file` / `xml-missing-file` | error | Fix the path or add the file. `[Family]` is Mainline and `[Game]` is Camelot on Forever |
 | `file-case` | warn | Match case exactly (macOS clients are case-sensitive) |
 | `unloaded-file` | warn | Add the file to the TOC, or delete it |
 | `cleu-removed` | error | Combat log isn't available on 12.x/Forever. Redesign around unit events and widget setters |
-| `unknown-event` | error | The event doesn't exist on this client. Look it up: `Find-WowApi.ps1 <part> -Events` |
-| `unknown-namespace` / `unknown-function` | error/warn | Look it up with `Find-WowApi.ps1`. Feature-detect (`C_X and C_X.Fn`) if it's flavor-specific |
+| `unknown-event` | error | The event doesn't exist on this client. Look it up: `Find-WowApi.py <part> -Events` |
+| `unknown-namespace` / `unknown-function` | error/warn | Look it up with `Find-WowApi.py`. Feature-detect (`C_X and C_X.Fn`) if it's flavor-specific |
 | `moved-api` | warn | Use the `C_*` replacement it names, with a fallback if you also target Classic |
 | `unknown-global` | warn | The global doesn't exist on Forever (e.g. `UnitAura`). Use the suggested replacement |
 | `deprecated-api` | warn | Only Blizzard's deprecation shim provides it, and it will be removed. Migrate now |
-| `secret-value` | warn | Don't compare, do math on or concatenate the value. Pass it to `SetValue`/`SetText`/`SetFormattedText`, or check `issecretvalue()` |
+| `secret-value` | warn | Same-line or 1-hop local secret used in comparison (`~= nil` is OK), math, concatenation or table indexing before `issecretvalue()`. Pass straight to `SetValue`/`SetText`/`SetFormattedText`, or guard with `issecretvalue()` first (`-- secret-value: ok` when known non-restricted) |
+| `secret-args` | warn | Passing a secret value into an API or widget method marked `SecretArguments = AllowedWhenUntainted` or `NotAllowed` (e.g. `StatusBar:SetTimerDuration`). Use an `AllowedWhenTainted` sink instead |
+| `taint-call` | warn | Direct call to a state-tainting Blizzard UI global (`CloseAllBags`, `ToggleAllBags`, `ShowUIPanel`, `ToggleUIPanel`, `ToggleCharacter`, `SetItemButton*`) or `Cooldown:SetCooldownFromDurationObject`. Observe with `hooksecurefunc` or use a `SecureActionButtonTemplate` outside combat (`-- taint-call: ok` if intentional) |
+| `taint-hook` | warn | Overwriting a Blizzard global function by assignment instead of `hooksecurefunc("Name", ...)` |
+| `taint-unregister` | warn | Unregistering events on Blizzard container, bank or chat frames (`ContainerFrame*`, `BankFrame`, `ChatFrame*`). Park on a hidden parent and leave their events alone |
 | `slash-handler` | error | Assign `SlashCmdList["NAME"]` for every `SLASH_NAME1` |
 | `savedvariables-unused` | warn | Use it, or drop it from the TOC |
+| `load-version` | warn | Read `## Version` via `GetAddOnMetadata` and print it on `PLAYER_LOGIN` |
+| `local-limit` | warn | File chunk or function reached >=175 active locals (Lua's hard compile limit is 200). Move locals into a table or split files |
 | `editmode-dialog` | error/warn | Error: the addon joins Edit Mode but has no `EditModeDialog.lua`. Copy the kit's `templates/editmode/EditModeDialog.lua` in, list it after `Core.lua`. Warn: the copy was edited. Restore the kit's version and make the change in the kit instead |
 | `editmode-snap` | error/warn | Error: hand-rolled grid snapping (`gridSpacing`, `IsSnapEnabled`, `EditModeMagnetismManager`). Warn: a frame dragged without the kit's snapping. Use `ns.EditMode.Attach`, or `ns.EditMode.SnapRect` / `SnapEdge` in the drag's OnUpdate, so it snaps like Blizzard's frames |
 | `editmode-ui` | error | A hand-built panel, slider or checkbox in an Edit Mode addon. Rebuild it with `ns.EditMode.CreateDialog` (see the **wow-forever-api** skill). For a window that isn't Edit Mode settings (a bag window, say), end the line with `-- editmode-ui: ok` |
+| `editmode-onupdate` | warn | `SetScript("OnUpdate")` on the same frame passed to `ns.EditMode.Attach` (which overwrites `OnUpdate` while dragging). Run animations/watchers on a separate child frame |
+| `editmode-openfor` | warn | Anchoring an `ns.EditMode.CreateDialog` dialog with `:SetPoint()` instead of opening it with `dialog:OpenFor(frame)` |
 | `luacheck-E*` | error | Lua syntax error. The game would refuse to load the whole file |
 | `luacheck-W111/112` | warn | Accidental global: add `local`, or declare it in `.luacheckrc` `globals` if intentional |
 | `luacheck-W211/212/431...` | warn | Unused or shadowed locals. Tidy up |
 
 Fix errors first, re-run until clean, then fix warnings. Info notes are context; for example, "feature-detected, OK" means the code already guards the call.
 
-If it says the API index or luacheck is missing, run `scripts/Install-WowDevTools.ps1` (see the **wow-addon-setup** skill).
+If it says the API index or luacheck is missing, run `scripts/Install-WowDevTools.py` (see the **wow-addon-setup** skill).
 
-## 2. Code review (always, advisor mode)
+## 2. Code review (always, advisor mode — packet-driven)
 
-The validator only catches what static rules can see. After it runs, launch the reviewer agent with the Agent tool, `subagent_type: "wow-forever-addons:wow-addon-reviewer"`. Give it the addon folder, the flavors, and what changed this session.
+Build the pre-annotated review packet first (this runs `Test-WowAddon.py` in-process, scopes to `git diff`, skips unmodified `EditModeDialog.lua`, extracts `<addon>/NOTES.md` rules & skipped items, and pre-annotates every Forever API/method/event in scope):
 
-The reviewer is read-only and returns numbered findings with proposed fixes. Then:
+```powershell
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Prepare-WowReview.py" -Path "<addon folder>" [-Flavor forever,...] [-Full]
+```
 
-1. Show the user the findings: the numbered list, the recommendation and any questions. Keep them verbatim or tightly condensed, and never drop a finding.
+Pass `-Full` only for a brand-new untracked addon, before a release, or when the user explicitly asks for a full-addon audit. Then follow `RecommendedMode` from the packet header:
+
+- **`inline` (small, low-risk diffs: <=40 changed lines across <=2 files, 0 validator errors/warnings, no taint/secure/secret triggers):**
+  Do **not** spawn a subagent — you already hold the edited files and packet in context. Review the diff yourself against the semantic checklist in `agents/wow-addon-reviewer.md` and emit the exact advisor report (`Confirmed` / `Suspected` / `Recommendation` / `Questions`) directly.
+- **`subagent-diff` or `subagent-full`:**
+  - **Claude Code:** Launch `subagent_type: "wow-forever-addons:wow-addon-reviewer"`.
+  - **Antigravity / other harnesses:** Invoke a read-only reviewer subagent (`define_subagent` with `EnableWriteTools: false` and `SystemPrompt` from `wow-addon-kit/plugins/wow-forever-addons/agents/wow-addon-reviewer.md`, or `research` subagent instructed to follow `agents/wow-addon-reviewer.md`).
+  - In either harness, **paste the `Prepare-WowReview.py` packet into the subagent's prompt** (along with a one-line summary of what changed). Because the packet already includes validator results, line-numbered diffs, `NOTES.md` constraints, and API secret/taint metadata, the reviewer finishes in 1–3 turns instead of re-reading the whole addon.
+
+In **every** mode (`inline`, `subagent-diff`, or `subagent-full`), advisor rules apply strictly:
+
+1. Show the user the numbered findings (`Confirmed` / `Suspected`), recommendation, and any questions. Keep them verbatim or tightly condensed, and never drop a finding.
 2. **Stop and wait for the user's answer.** Don't apply any reviewer finding until the user says which ones to apply ("apply 1, 3", "all", "none").
-3. Apply exactly what they approved, re-run step 1, and say what changed.
+3. Apply exactly what they approved, re-run `Test-WowAddon.py -NoInfo`, and say what changed.
 
-Fixing the validator's own errors in step 1 doesn't need to wait. Design changes, behaviour trade-offs and anything marked suspect always do.
+Fixing the validator's own deterministic errors in step 1 doesn't need to wait. Design changes, behaviour trade-offs and anything marked suspect always do.
 
 ## 3. In-game test (tell the user these steps; you can't run the client)
 
 1. **First load / TOC or new-file changes:** fully restart the client. Otherwise `/reload`.
 2. At character select, open **AddOns**: the addon should be listed and not marked "out of date".
-3. In game, turn on errors: `/console scriptErrors 1`. The kit's `!WowKitErrors` records them too: every kit link installs it, and it must be enabled in the AddOns list. After reproducing, `/reload`, then run `Get-WowScriptErrors.ps1 -Addon <name>`.
+3. In game, turn on errors: `/console scriptErrors 1`. The kit's `!WowKitErrors` records them too: every kit link installs it, and it must be enabled in the AddOns list. After reproducing, `/reload`, then run `Get-WowScriptErrors.py -Addon <name>`.
 4. Exercise every feature, then repeat **in combat and in an instance**. For an Edit Mode addon, open Edit Mode and click each of its frames, plus one of Blizzard's: only one settings dialog should be open at a time, none should cover its frame or Edit Mode's window, every number should sit inside the dialog at its widest value, and Escape should close it. With Snap ticked, drag each frame slowly past grid lines, the screen centre and a Blizzard frame. It should move freely and pull on only within a few pixels, the same as Blizzard's own frames. For a cast bar, check a channel (e.g. Blizzard) ending normally in combat: it must not show as interrupted. Secret values and addon-comms lockdown only show up there.
 5. Taint: `/console taintLog 1`, reproduce, `/reload`, then read `Logs\taint.log` in the client folder (e.g. `_classic_beta_\Logs`). Lines naming the addon mean it touched secure code.
 6. Useful commands: `/dump <expr>` prints a value, `/fstack` identifies the frame under the mouse, `/etrace` shows live events, `/run <lua>` runs a line.

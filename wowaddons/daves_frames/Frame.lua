@@ -1,7 +1,7 @@
 -- daves_frames / Frame.lua
 -- Builds the target frame: the layers in NOTES.md section 2, from the back:
 --   boards (behind the plate) < bars (clipped to the windows) < inset shadow and portrait < frame art
---   < text and numbers.
+--   < text and numbers < the level circle.
 -- Nothing here reads unit data; Unit.lua, Cast.lua and Auras.lua fill it in.
 
 local _, ns = ...
@@ -209,7 +209,7 @@ function ns:BuildFrame(variant)
 	f.portrait:SetAllPoints(f.portraitBack)
 	local mask = overlay:CreateMaskTexture()
 	mask:SetAllPoints(f.portraitBack)
-	mask:SetAtlas("CircleMask")
+	mask:SetTexture(ns.CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 	f.portraitBack:AddMaskTexture(mask)
 	f.portrait:AddMaskTexture(mask)
 	f.portraitMask = mask
@@ -235,7 +235,7 @@ function ns:BuildFrame(variant)
 	f.numBand:SetColorTexture(0, 0, 0, 0.62)
 	local bandMask = text:CreateMaskTexture()
 	Rect(bandMask, f, L.cx - L.rIn, L.cy - L.rIn, L.cx + L.rIn, L.cy + L.rIn)
-	bandMask:SetAtlas("CircleMask")
+	bandMask:SetTexture(ns.CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 	f.numBand:AddMaskTexture(bandMask)
 	f.pnHealth = Font(text, "OVERLAY", NUM_FONT, 23)
 	f.pnHealth:SetPoint("CENTER", f, "TOPLEFT", L.cx, -(L.cy - 12))
@@ -264,15 +264,15 @@ function ns:BuildFrame(variant)
 	f.tot = Font(text, "OVERLAY", NUM_FONT, 15)
 	f.tot:SetJustifyH("LEFT")
 
-	-- Level, above the plate and the other text. Blizzard's circle (Camelot TargetFrameTemplates.xml
-	-- LevelBackgroundCircle, atlas UI-HUD-UnitFrame-SmallCircle) with the number centred 0.5 low,
-	-- the same as TargetFrameMixin:OnLoad.
+	-- Level, above the plate and the other text. The dark disc tucks under the painted level ring
+	-- (above f.portrait where the two circles overlap); the number sits above the plate, 0.5 px low.
+	f.levelBadge = overlay:CreateTexture(nil, "OVERLAY")
+	f.levelBadge:SetTexture(ns.CIRCLE)
+	f.levelBadge:SetVertexColor(0.12, 0.08, 0.04, 1)
 	local level = CreateFrame("Frame", nil, f)
 	level:SetAllPoints()
 	level:SetFrameLevel(base + 12)
 	f.levelLayer = level
-	f.levelBadge = level:CreateTexture(nil, "ARTWORK")
-	f.levelBadge:SetAtlas(S.badge.atlas)
 	f.level = Font(level, "OVERLAY", NUM_FONT, 16)
 
 	ns:ApplyLayout()
@@ -361,23 +361,23 @@ function ns:ApplyLayout()
 	Rect(f.power, f, pl, barTop, pr, bottom)
 	if stacked then Rect(f.cast, f, pl, top, pr, split) else Rect(f.cast, f, pl, top, pr, bottom) end
 
-	-- Level circle, centred on the lower ring, above the plate. One point for every variant.
-	-- The digits keep that circle's size, so two of them fit.
+	-- Level disc tucked under the painted level ring; digits are sized to the 60 px yellow hole.
 	local B = S.badge
-	local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(B.atlas)
-	local atlasW = (info and info.width and info.width > 0) and info.width or 30
 	local d = B.d
-	local u = d / atlasW                                              -- layout px per unit of Blizzard's circle
-	local bx, by = Snap(L.cx), Snap(L.cy + B.dy)
-	local bHalf = Snap(d / 2)
-	Rect(f.levelBadge, f, bx - bHalf, by - bHalf, bx + bHalf, by + bHalf)
+	local lr = d / 2 + S.portraitPad
+	Rect(f.levelBadge, f, L.cx - lr, L.cy + B.dy - lr, L.cx + lr, L.cy + B.dy + lr)
 	local fontObj = WhiteLargeNumberFont or TextStatusBarText
-	local file, height, flags = fontObj:GetFont()
-	local levelSize = math.max(1, math.floor((height or 14) * u / px + 0.5)) * px
-	f.level:ClearAllPoints(); f.level:SetPoint("CENTER", f.levelBadge, "CENTER", 0, -0.5)
-	f.level:SetJustifyH("CENTER"); f.level:SetJustifyV("MIDDLE")
+	local file, _, flags = fontObj:GetFont()
+	local levelSize = math.max(px, Snap(d * 0.46))
+	-- The string is the hole itself. A font string with no width keeps the digits
+	-- on the left of their box, so the vertical middle lined up and the horizontal did not.
 	f.level:SetFont(file or (BlizzardFont()), levelSize, flags or "")
 	f.level:SetShadowColor(0, 0, 0, 0)
+	f.level:ClearAllPoints()
+	f.level:SetPoint("CENTER", f.levelBadge, "CENTER", 0, -0.5)
+	f.level:SetSize(d, d)
+	f.level:SetJustifyH("CENTER")
+	f.level:SetJustifyV("MIDDLE")
 
 	-- Name, from the outer end of the health window.
 	local nameMid = stacked and stripMid or (L.winT + L.winB) / 2

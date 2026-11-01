@@ -1,4 +1,4 @@
-﻿# Dave's WoW Addons
+# Dave's WoW Addons
 
 World of Warcraft addons for **WoW: Forever** (Interface 16001), plus the Claude Code tooling used to build them.
 
@@ -7,7 +7,7 @@ World of Warcraft addons for **WoW: Forever** (Interface 16001), plus the Claude
 | Folder | What it is |
 | --- | --- |
 | [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs (v0.1.3) |
-| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: an all-in-one bag with categories, search and quality borders (v1.7.8) |
+| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: an all-in-one bag with categories, search and quality borders (v1.7.18) |
 | [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: an animated elemental cast bar (frost, fire, shadow, nature, lightning, arcane, holy), different every cast, plus fishing, herbalism, mining, skinning, smelting, blacksmithing and alchemy looks and a plain Blizzard-style bar (v0.4.0) |
 | [`wow-addon-kit`](wow-addon-kit) | Claude Code plugin (`wow-forever-addons`) for scaffolding, testing, reviewing and releasing addons, plus a `HelloForever` example |
 
@@ -44,28 +44,28 @@ In Edit Mode, click an orb for its own settings: liquid and accent colours, numb
 
 ### Dave's Sack
 
-One bag window for all your bags, styled like Blizzard's Edit Mode window. Items are sorted into collapsible categories, such as Consumables split into Alchemy, Food & Drink and First Aid, and Reagents split by profession. It has search, sort, quality-coloured slots, backpack currencies and corner resizing.
+One bag window for all your bags, styled like Blizzard's Edit Mode window. Items are sorted into collapsible categories, such as Consumables split into Alchemy, Food & Drink and First Aid, and Reagents split by profession. It has search, sort, quality-coloured slots, reagent bag routing, an item destroy button (with optional confirmation), backpack currencies and corner resizing.
 
 <!-- Screenshot: add docs/images/daves_sack.png (an in-game capture of the open bag) and uncomment:
 ![Dave's Sack](docs/images/daves_sack.png) -->
 
 ```text
 /sack                    open or close the bags
-/sack options            settings (also the gear button in the window): columns, scale, categories, start collapsed, extras
+/sack options            settings (also the gear button in the window, plus Esc > Options > AddOns > Dave's Sack)
 ```
 
 More in [its notes](wowaddons/daves_sack/NOTES.md).
 
-The cast bar and orb pictures are rendered from the addons' own art (`tools/Show-Preview.ps1`, `tools/Preview-Orb.ps1`), not taken in the game.
+The cast bar and orb pictures are rendered from the addons' own art (`tools/Show-Preview.ps1`, `tools/Preview-Orb.py`), not taken in the game.
 
 ## After cloning (or pulling)
 
 Link every addon in `wowaddons/` into the game, so it loads straight from the repo. Run from the repo root; re-run after a pull that adds an addon (existing links are left alone).
 
-Windows (PowerShell, no admin needed; makes junctions):
+Windows (`py -3`, no admin needed; makes junctions):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.ps1
+py -3 .\wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.py
 ```
 
 Mac (makes symlinks; looks for the game in `/Applications/World of Warcraft`, override with `--wow-root` or `WOW_ROOT`):

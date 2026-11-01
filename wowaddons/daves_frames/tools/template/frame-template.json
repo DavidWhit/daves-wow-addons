@@ -3,11 +3,17 @@
   "scale": 2,
   "canvas": {
     "w": 1024,
-    "h": 272
+    "h": 300
   },
   "image": {
     "w": 2048,
-    "h": 544
+    "h": 600
+  },
+  "aiImage": {
+    "w": 2048,
+    "h": 1152,
+    "padY": 276,
+    "aspect": "16:9"
   },
   "atlas": {
     "w": 2048,
@@ -16,8 +22,25 @@
       0,
       1,
       0,
-      0.53125
-    ]
+      0.585938
+    ],
+    "strip": [
+      0,
+      0.292969,
+      0.59375,
+      0.808594
+    ],
+    "stripY": 608,
+    "stripPx": {
+      "w": 600,
+      "h": 220
+    },
+    "stripSlice": {
+      "top": 56,
+      "right": 56,
+      "bottom": 56,
+      "left": 56
+    }
   },
   "center": {
     "cx": 512,
@@ -30,6 +53,12 @@
   },
   "lip": 5,
   "outer": 22,
+  "board": {
+    "top": 28,
+    "right": 28,
+    "bottom": 28,
+    "left": 28
+  },
   "health": {
     "l": 35,
     "t": 108,
@@ -56,7 +85,7 @@
   },
   "layout": {
     "w": 1024,
-    "h": 272,
+    "h": 300,
     "cx": 512,
     "cy": 136,
     "rIn": 105,
@@ -83,29 +112,41 @@
       0,
       1,
       0,
-      0.53125
+      0.585938
+    ],
+    "strip": [
+      0,
+      0.292969,
+      0.59375,
+      0.808594
     ]
   },
   "level": {
     "cx": 512,
     "cy": 252,
     "dy": 116,
-    "atlas": "UI-HUD-UnitFrame-SmallCircle"
+    "outer": 92,
+    "band": 16,
+    "d": 60
   },
   "colours": {
     "outside": "#FF00FF",
     "game": "#0000FF",
     "lip": "#00FF00",
     "frame": "#808080",
-    "ring": "#FF8000"
+    "ring": "#FF8000",
+    "levelRing": "#FFFFFF",
+    "levelHole": "#FFFF00"
   },
   "paint": [
     "lip",
     "frame",
-    "ring"
+    "ring",
+    "levelRing"
   ],
   "doNotPaint": [
     "outside",
-    "game"
+    "game",
+    "levelHole"
   ]
 }

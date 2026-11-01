@@ -12,6 +12,8 @@
 -- Blizzard's tracker (ObjectiveTrackerManager:SetModuleContainer)? Adding to it from addon code would taint the whole
 -- tracker, and its quest item buttons are secure: they'd be blocked in combat. So our section is a plain frame on
 -- UIParent that only reads where the tracker's contents end and sits below them (Place, below).
+-- Warcraft Classic has QuestWatchFrame and no ObjectiveTrackerFrame, so that section is never built. Ready quests
+-- stay on the watch frame there. Pulling them off would hide them.
 
 local _, ns = ...
 
@@ -47,23 +49,22 @@ local function ZoneNames()
 end
 
 local function IsReady(q)
-	if C_QuestLog.ReadyForTurnIn then return C_QuestLog.ReadyForTurnIn(q) and true or false end
-	return C_QuestLog.IsComplete(q) and true or false
+	return ns.QuestReady(q)
 end
 
 -- the quests in your log: all of them, the set that is this zone's, and the ones ready to turn in (in log order)
 local function LogQuests()
 	local names, all, here, ready = ZoneNames(), {}, {}, {}
 	local header
-	for idx = 1, C_QuestLog.GetNumQuestLogEntries() do
-		local info = C_QuestLog.GetInfo(idx)
+	for idx = 1, ns.NumQuestLogEntries() do
+		local info = ns.QuestInfo(idx)
 		if info then
 			if info.isHeader then
 				header = info.title
 			elseif not info.isHidden and info.questID and info.questID ~= 0 then
 				local q = info.questID
 				all[#all + 1] = q
-				if (header and names[header]) or C_QuestLog.IsOnMap(q) then here[q] = true end
+				if (header and names[header]) or ns.QuestOnMap(q, info) then here[q] = true end
 				if IsReady(q) then ready[#ready + 1] = q end
 			end
 		end
@@ -74,7 +75,7 @@ end
 ---------------------------------------------------------------------------
 -- Which quests Blizzard's tracker follows
 ---------------------------------------------------------------------------
-local function Watched(q) return C_QuestLog.GetQuestWatchType(q) ~= nil end
+local function Watched(q) return ns.QuestWatched(q) end
 
 -- Each ready quest is moved out of Blizzard's tracker once, when it's first seen ready. Tracking it again yourself
 -- sticks (it was untracked again on every quest log update, which fought you).
@@ -87,20 +88,33 @@ local accepted = {}   -- [questID] = true: just accepted, tracked by the game's 
 local keepFocus = {}
 function ns.KeepingFocus(q) return keepFocus[q] end   -- (Layer.lua: the focus at 0 for a moment, not let go)
 local function Unwatch(q)
-	if C_SuperTrack.GetSuperTrackedQuestID() == q then
+	if ns.SuperTrackedQuest() == q then
 		keepFocus[q] = true
 		C_Timer.After(2, function() keepFocus[q] = nil end)
 	end
-	C_QuestLog.RemoveQuestWatch(q)
+	ns.RemoveQuestWatch(q)
 end
 
 local function MoveReadyOut(ready)
+	-- Classic has nowhere else to show a quest once it leaves QuestWatchFrame.
+	if not ObjectiveTrackerFrame then return end
 	for _, q in ipairs(ready) do
 		if not movedOut[q] then
 			movedOut[q] = true
 			if Watched(q) then Unwatch(q) end
 		end
 	end
+end
+
+-- Classic's watch frame holds 5 (MAX_WATCHABLE_QUESTS). Adding while it is still full fails, and shift-click
+-- reads QUEST_WATCH_LIST, which AddQuestWatch does not update. Set while QuestWatch_OnLogin runs, so rebuilding
+-- that list does not look like the player pinned every watched quest.
+local rebuildingWatch
+local function SyncClassicWatch()
+	rebuildingWatch = true
+	QuestWatch_OnLogin()
+	if QuestWatch_Update then QuestWatch_Update() end
+	rebuildingWatch = false
 end
 
 -- `unpinned`: a quest you've just unpinned, checked whether it's focused or not (its pin was what kept it here)
@@ -113,15 +127,36 @@ local function TrackZoneQuests(unpinned)
 	MoveReadyOut(ready)
 	if not db.trackMyZone or UnitOnTaxi("player") then return end   -- on a flight the landing comes back here
 	if not next(ZoneNames()) then return end                          -- a loading screen: leave the tracker alone
-	local focused = C_SuperTrack.GetSuperTrackedQuestID()
+	local focused = ns.SuperTrackedQuest()
+	-- QuestWatchFrame (TBC): drop other zones first, then fill the free slots. Forever keeps the loop below.
+	if QuestWatch_OnLogin and not ObjectiveTrackerFrame then
+		local remove, add = {}, {}
+		for _, q in ipairs(all) do
+			if not isReady[q] and not db.pinned[q] and (q ~= focused or q == unpinned) then
+				local watched = Watched(q)
+				if not here[q] and watched then remove[#remove + 1] = q
+				elseif here[q] and not watched then add[#add + 1] = q end
+			end
+		end
+		for _, q in ipairs(remove) do ns.RemoveQuestWatch(q) end
+		local cap = (type(MAX_WATCHABLE_QUESTS) == "number" and MAX_WATCHABLE_QUESTS) or 5
+		for _, q in ipairs(add) do
+			local n = GetNumQuestWatches and GetNumQuestWatches() or 0
+			if n >= cap then break end
+			ourAdd[q] = true; C_Timer.After(2, function() ourAdd[q] = nil end)
+			ns.AddQuestWatch(q)
+		end
+		SyncClassicWatch()
+		return
+	end
 	for _, q in ipairs(all) do
 		-- the zone tracking ignores ready quests, pinned ones and the focused one (unless you've just unpinned it)
 		if not isReady[q] and not db.pinned[q] and (q ~= focused or q == unpinned) then
 			local watched = Watched(q)
 			if here[q] and not watched then
 				ourAdd[q] = true; C_Timer.After(2, function() ourAdd[q] = nil end)   -- its event, not a later one of yours
-				C_QuestLog.AddQuestWatch(q)
-			elseif not here[q] and watched then C_QuestLog.RemoveQuestWatch(q) end   -- (the focused one only when unpinned)
+				ns.AddQuestWatch(q)
+			elseif not here[q] and watched then ns.RemoveQuestWatch(q) end   -- (the focused one only when unpinned)
 		end
 	end
 end
@@ -197,7 +232,7 @@ local function UpdatePins()
 			if m and m.usedBlocks and m:IsVisible() then
 				for _, blocks in pairs(m.usedBlocks) do
 					for id, block in pairs(blocks) do
-						if type(id) == "number" and block:IsVisible() and not C_QuestLog.IsComplete(id) then
+						if type(id) == "number" and block:IsVisible() and not ns.QuestComplete(id) then
 							n = n + 1
 							local b = PinButton(n)
 							-- just left of the quest's map icon (its POI button sits left of the title:
@@ -253,7 +288,7 @@ local function ShowQuest(q)
 		ns.QuestClicked(q, "toggle", true)   -- (its sound too: after combat a second click shows it, not lets go)
 		return
 	end
-	C_SuperTrack.SetSuperTrackedQuestID(q)
+	ns.SetSuperTrackedQuest(q)
 	if InCombatLockdown() then
 		ns.Print("tracking it; can't open the map in combat, click it again after.")
 		return
@@ -432,7 +467,7 @@ function ns.UpdateReady()
 	for _, q in ipairs(ready) do
 		local e = TurnInPin(q)
 		local zone = e and ns.IsCalibrated and ns.IsCalibrated() and ns.ZoneName(e) or "~"   -- unknown turn-ins last
-		key[q] = zone .. "\1" .. (C_QuestLog.GetTitleForQuestID(q) or "") .. "\1" .. q
+		key[q] = zone .. "\1" .. (ns.QuestTitle(q) or "") .. "\1" .. q
 	end
 	table.sort(ready, function(a, b) return key[a] < key[b] end)
 	if #ready == 0 then section.want = false; section:Hide(); Place(true) return end
@@ -447,7 +482,7 @@ function ns.UpdateReady()
 	for n, q in ipairs(collapsed and {} or ready) do
 		local r = Row(n)
 		r.questID, r.turnIn = q, TurnInPin(q)
-		r.title:SetText(C_QuestLog.GetTitleForQuestID(q) or ("Quest " .. q))
+		r.title:SetText(ns.QuestTitle(q) or ("Quest " .. q))
 		r.title:SetTextColor(1, .82, 0)
 		local where = r.turnIn and ns.DATA.title[r.turnIn]
 		local zone = r.turnIn and ns.IsCalibrated and ns.IsCalibrated() and ns.ZoneName(r.turnIn)
@@ -490,11 +525,13 @@ events.ZONE_CHANGED_NEW_AREA = function() ns.TrackZoneQuests(); Queue(true) end 
 -- frame: DirtiableMixin), so it never shows the quests it is about to drop; then again a second later in case the
 -- quest log was still filling in.
 events.PLAYER_ENTERING_WORLD = function()
-	if C_QuestLog.GetNumQuestLogEntries() > 0 then ns.TrackZoneQuests() end
+	if ns.NumQuestLogEntries() > 0 then ns.TrackZoneQuests() end
 	Queue(true)
 end
 events.PLAYER_CONTROL_GAINED = function() Queue(true) end
-events.QUEST_ACCEPTED = function(_, q)
+-- Forever's payload is the quest id. Classic's is the log index, then the quest id (QuestLogDocumentation, QuestAccepted).
+events.QUEST_ACCEPTED = function(_, questIndex, questID)
+	local q = questID or questIndex
 	if q then accepted[q] = true; C_Timer.After(2, function() accepted[q] = nil end) end   -- the game may auto-track it
 	Queue(true)
 end
@@ -504,12 +541,12 @@ events.QUEST_REMOVED = function(_, q) if q then ns.db.pinned[q] = nil end; Queue
 -- (the quest log, its shift-click, the map): pinned, so the zone tracking keeps it. Not when the zone tracking tracked
 -- it, when the game did on accepting it (autoQuestWatch), or when it's ready to turn in (those aren't pinnable).
 events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
-	if not q then return end
+	if rebuildingWatch or not q then return end
 	if added == false and keepFocus[q] then   -- (Unwatch: focused again, after Blizzard's handler for this has let it go)
 		C_Timer.After(0, function()
 			keepFocus[q] = nil   -- (only now: Layer.lua keeps the click's focus through the moment it's 0)
-			if C_SuperTrack.GetSuperTrackedQuestID() == 0 and C_QuestLog.GetLogIndexForQuestID(q) then
-				C_SuperTrack.SetSuperTrackedQuestID(q)
+			if ns.SuperTrackedQuest() == 0 and ns.QuestLogIndex(q) then
+				ns.SetSuperTrackedQuest(q)
 			end
 		end)
 	end
@@ -535,9 +572,8 @@ end
 ---------------------------------------------------------------------------
 -- a quest ready to hand in from its pop-up (auto-complete): Blizzard's click opens its complete window
 local function HandInFromPopUp(q)
-	if type(q) ~= "number" or issecretvalue(q) or not C_QuestLog.IsComplete(q) then return false end
-	local idx = C_QuestLog.GetLogIndexForQuestID(q)
-	local info = idx and C_QuestLog.GetInfo(idx)
+	if type(q) ~= "number" or issecretvalue(q) or not ns.QuestComplete(q) then return false end
+	local info = ns.QuestInfo(ns.QuestLogIndex(q))
 	return info and info.isAutoComplete or false
 end
 
@@ -590,7 +626,7 @@ function ns.ReportZone()
 		UnitOnTaxi("player") and "yes" or "no"))
 	ns.Print("this zone goes by: " .. (#list > 0 and table.concat(list, ", ") or "(nothing)"))
 	local mine = {}
-	for _, q in ipairs(all) do if here[q] then mine[#mine + 1] = C_QuestLog.GetTitleForQuestID(q) or tostring(q) end end
+	for _, q in ipairs(all) do if here[q] then mine[#mine + 1] = ns.QuestTitle(q) or tostring(q) end end
 	ns.Print(("your log: %d quests, %d for this zone%s; %d ready to turn in"):format(#all, #mine,
 		#mine > 0 and (": " .. table.concat(mine, ", ")) or "", #ready))
 end

@@ -168,10 +168,10 @@ end
 local focusSet, focusFor
 function ns.SetClickFocus(q) daves_mapCharDB.focusClick = q end
 function ns.ClickFocus() return daves_mapCharDB.focusClick end
-function ns.ClickFocused(q) return q == daves_mapCharDB.focusClick and q == C_SuperTrack.GetSuperTrackedQuestID() end
+function ns.ClickFocused(q) return q == daves_mapCharDB.focusClick and q == ns.SuperTrackedQuest() end
 -- true when the set changed (so the pins need placing again)
 local function UpdateFocus()
-	local q = D and ns.db.focusQuest and C_SuperTrack.GetSuperTrackedQuestID()
+	local q = D and ns.db.focusQuest and ns.SuperTrackedQuest()
 	if not q or q == 0 or issecretvalue(q) or q ~= daves_mapCharDB.focusClick then q = nil end
 	if q == focusFor then return false end
 	focusFor, focusSet = q, nil
@@ -639,15 +639,17 @@ ns.Sound = Sound
 
 function ns.SetWaypoint(i)
 	local zone = P.zone[i]
-	if not zone or not C_Map.CanSetUserWaypointOnMap(zone) then
+	if not zone then
 		ns.Print("can't set a waypoint there.")
 		return
 	end
 	local c = ns.PinsOnMap(zone)
 	local x, y = c.x[i], c.y[i]
 	if not x then return end
-	C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(zone, x, y))
-	C_SuperTrack.SetSuperTrackedUserWaypoint(true)
+	if not ns.PlaceUserWaypoint(zone, x, y) then
+		ns.Print("can't set a waypoint there.")
+		return
+	end
 	Sound("UI_MAP_WAYPOINT_CLICK_TO_PLACE", true)
 	ns.Print(("waypoint: %s (%s %.1f, %.1f)."):format(D.title[i], ns.ZoneName(i) or "?", x * 100, y * 100))
 end
@@ -776,7 +778,7 @@ local ownOpen       -- our QuestMapFrame_OpenToQuestDetails under way (its hook 
 local lastFlight, lastFlightAt   -- the quest the OpenToQuestDetails hook last flew to, and when
 function ns.QuestClicked(q, how, toggleSound)
 	if not (ns.db.focusQuest and type(q) == "number" and q ~= 0) or issecretvalue(q) then return end
-	local now = C_SuperTrack.GetSuperTrackedQuestID()
+	local now = ns.SuperTrackedQuest()
 	local reopen = pendingOpen == q and not InCombatLockdown()
 	pendingOpen = nil
 	local letGo
@@ -787,7 +789,7 @@ function ns.QuestClicked(q, how, toggleSound)
 	if toggleSound then Sound(letGo and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON") end
 	if letGo then
 		ns.SetClickFocus(nil)
-		if now == q then C_SuperTrack.SetSuperTrackedQuestID(0) end
+		if now == q then ns.SetSuperTrackedQuest(0) end
 		-- (not when Blizzard's own click has just opened it and flown there: a tracker name's)
 		if not (lastFlight == q and lastFlightAt == GetTime()) then CentreQuest(q) end
 		return true
@@ -796,7 +798,7 @@ function ns.QuestClicked(q, how, toggleSound)
 	-- (a "..." clicked again after combat: Blizzard's click let it go with its "off" sound; focused again, so "on")
 	if how == "focused" and reopen and now ~= q then Sound("IG_MAINMENU_OPTION_CHECKBOX_ON", true) end
 	if now ~= q then
-		C_SuperTrack.SetSuperTrackedQuestID(q)   -- (its event refreshes the map's filter)
+		ns.SetSuperTrackedQuest(q)   -- (its event refreshes the map's filter)
 	elseif UpdateFocus() then   -- (already focused, by Blizzard just now or before: our click's filter now)
 		ns.Refresh()
 	end
@@ -863,7 +865,7 @@ function ns.ShowQuestOnMap(q)
 	local i = ns.QuestPin(q)
 	if not i then return false end
 	local e = D.endp[i]
-	local ready = C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(q)
+	local ready = ns.QuestReady(q)
 	-- silent: the quest was opened elsewhere (the tracker, the quest log), and that click's own sound speaks for it
 	local was = muted
 	muted = true
@@ -877,9 +879,9 @@ end
 
 -- the zone a quest is filed under in the quest log: the header above it
 local function QuestHeader(q)
-	local idx = C_QuestLog.GetLogIndexForQuestID(q)
+	local idx = ns.QuestLogIndex(q)
 	for k = idx or 0, 1, -1 do
-		local info = C_QuestLog.GetInfo(k)
+		local info = ns.QuestInfo(k)
 		if info and info.isHeader then return info.title end
 	end
 end
@@ -942,7 +944,7 @@ local function OnQuestDetails(q)
 	if ns.ShowQuestOnMap(q) ~= false then return end
 	local zone = QuestHeader(q)
 	local mapID = zone and MapNamed(zone)
-	local title = C_QuestLog.GetTitleForQuestID(q) or tostring(q)
+	local title = ns.QuestTitle(q) or tostring(q)
 	if not mapID then ShowVeil(title, zone) return end
 	ShowMap(mapID)
 	if not toldNoMap[q] then
@@ -1132,7 +1134,9 @@ local function Init()
 	-- right-clicks go on to the map (zoom out / up a level), as on Blizzard's pins. A left-drag that starts on a pin
 	-- doesn't pan: left clicks are the pin's. SetPassThroughButtons is restricted on protected frames in combat; ours is
 	-- a plain button, but it is set outside combat all the same.
-	if InCombatLockdown() then ns.events:RegisterEvent("PLAYER_REGEN_ENABLED") else hot:SetPassThroughButtons("RightButton") end
+	if hot.SetPassThroughButtons then
+		if InCombatLockdown() then ns.events:RegisterEvent("PLAYER_REGEN_ENABLED") else hot:SetPassThroughButtons("RightButton") end
+	end
 	hot:SetScript("OnClick", function()
 		if not hoverPin then return end
 		if IsShiftKeyDown() then ns.SetWaypoint(hoverPin) else ns.Focus(hoverPin) end
@@ -1140,7 +1144,7 @@ local function Init()
 
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
-	ns.events:RegisterEvent("SUPER_TRACKING_CHANGED")   -- a quest focused or unfocused: the map's pins follow
+	ns.RegisterSuperTracking(ns.events)   -- a quest focused or unfocused: the map's pins follow
 	UpdateFocus()
 	-- opening a quest's details page (the quest log, the tracker's menu, its pop-up): stand in for a missing map location
 	if QuestMapFrame_ShowQuestDetails then hooksecurefunc("QuestMapFrame_ShowQuestDetails", OnQuestDetails) end
@@ -1202,16 +1206,20 @@ function ns:SUPER_TRACKING_CHANGED()
 	-- another quest focused, or the focus let go (Blizzard's menu, a map icon, its own on accepting one): the click's
 	-- focus is over, so focusing that quest again some other way doesn't filter the map. Not the moment it's 0 while
 	-- Tracker.lua's Unwatch keeps the focus through a quest moving to Ready to Turn In
-	local q, mine = C_SuperTrack.GetSuperTrackedQuestID(), ns.ClickFocus()
+	local q, mine = ns.SuperTrackedQuest(), ns.ClickFocus()
 	if mine and q and not issecretvalue(q) and q ~= mine and not (q == 0 and ns.KeepingFocus(mine)) then
 		ns.SetClickFocus(nil)
 	end
 	if UpdateFocus() then ns.Refresh() end   -- (most focus changes aren't ours: then the pins stay as they are)
 end
 
+function ns:SUPER_TRACKED_QUEST_CHANGED()
+	return self:SUPER_TRACKING_CHANGED()
+end
+
 function ns:PLAYER_REGEN_ENABLED()
 	ns.events:UnregisterEvent("PLAYER_REGEN_ENABLED")
-	if hot then hot:SetPassThroughButtons("RightButton") end
+	if hot and hot.SetPassThroughButtons then hot:SetPassThroughButtons("RightButton") end
 end
 
 -- Without the companion data addon there is nothing to draw: say so on the map itself, every time it opens.

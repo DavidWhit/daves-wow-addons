@@ -1,5 +1,0 @@
-# Overridden. The paint mask is one image, not these crops.
-# guides/frame-template.png is 2048 x 544 (2x of the 1024 x 272 layout).
-# guides/frame-template-1x.png is the same mask at 1x.
-# Sizes: tools/template/frame-template.json
-# Draw it again with: py -3 tools/Build-FrameTemplate.py

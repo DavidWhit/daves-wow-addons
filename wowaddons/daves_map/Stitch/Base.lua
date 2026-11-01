@@ -5,7 +5,7 @@
 -- Combat.lua (Blizzard's pins in combat) are OpenMap's files with as few changes as possible, so a new OpenMap release
 -- can be taken in by comparing them; each change is marked "daves_map". This file stands in for OpenMap's Core.lua.
 --
--- The art and data tables are the drop-in addon daves_map_textures (tools\Update-MapTextures.ps1; not in git). It
+-- The art and data tables are the drop-in addon daves_map_textures (tools\Update-MapTextures.py; not in git). It
 -- leaves its namespace behind as DAVES_MAP_TEXTURES, and OpenMap's code runs in that namespace (ns.OM), apart from
 -- daves_map's own: no name of OpenMap's can clash with one of ours. Without the drop-in, ns.OM is nil, the files
 -- below return at once and the map is Blizzard's, as before.

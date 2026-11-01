@@ -6,12 +6,13 @@ emptying toward the portrait, with your debuffs and their buffs on boards hangin
 Targets: forever (`## Interface: 16001`). Blizzard's own target frame stays as it is.
 
 Players and ordinary NPCs use the plain frame. A rare is the same frame in silver. An elite and a
-world boss use that same box. The paint mask is
-[tools/template/guides/frame-template.png](tools/template/guides/frame-template.png). The standard
-is in [NOTES.md](NOTES.md). How that plate was painted is in
-[tools/template/PAINT-LAYERS.md](tools/template/PAINT-LAYERS.md). The level is Blizzard's circle,
-centred on the lower ring, drawn above the plate. `Media/frame-*.tga` has that plate in
-the top of the atlas. The board strip under it is still the previous one.
+world boss use that same box. The exact paint mask is
+[tools/template/guides/frame-template.png](tools/template/guides/frame-template.png) (`2048 × 600`), with
+an exact `16:9` AI-padded guide at
+[tools/template/guides/frame-template-ai.png](tools/template/guides/frame-template-ai.png) (`2048 × 1152`).
+The standard is in [NOTES.md](NOTES.md). How a plate is painted and packed is in
+[tools/template/PAINT-LAYERS.md](tools/template/PAINT-LAYERS.md) (automated via the `daves-frames-paint` skill in [`../../.claude/skills/daves-frames-paint/SKILL.md`](../../.claude/skills/daves-frames-paint/SKILL.md)). The level ring is the white band on the template, drawn above the plate. The number sits in the yellow hole. `Media/frame-*.tga` has that plate in
+the top `2048 × 600` of the atlas and its matching 2× `600 × 220` aura board strip directly below it.
 
 ## Use
 
@@ -31,7 +32,8 @@ the top of the atlas. The board strip under it is still the previous one.
 | Check the addon | `Test-WowAddon.py -Path . -Flavor forever` |
 | Link into the game | `Link-WowAddons.py -Path .` |
 | Reload after editing Lua | `/reload` in game (new files, TOC or texture changes need a full restart) |
-| Redraw the paint mask | `py -3 tools\Build-FrameTemplate.py` |
+| Redraw the paint masks | `py -3 tools\Build-FrameTemplate.py` |
+| Pack an AI-painted plate into `Media/` | `py -3 tools\Pack-FrameTemplate.py --source painted.png --out Media\frame-plain.tga --silver-out Media\frame-rare.tga` |
 | Check a texture without the game | `tools\Preview-Tga.ps1 -Tga Media\frame-plain.tga -Png preview.png` |
 
 | File | What it does |
@@ -43,4 +45,4 @@ the top of the atlas. The board strip under it is still the previous one.
 | `Cast.lua` | The cast over the resource, or in its strip when Stacked |
 | `Auras.lua` | The boards: lanes, wrapping, max rows with an ellipsis, chains, swing |
 | `EditMode.lua` | The Edit Mode dialog (the kit's `EditModeDialog.lua`) |
-| `tools\` | `Build-FrameTemplate.py` draws the paint mask. `template\guides\frame-template.png` is that mask |
+| `tools\` | `Build-FrameTemplate.py` draws the paint masks (`guides\frame-template*.png`). `Pack-FrameTemplate.py` registers, keys, and packs AI paintings into `Media\frame-*.tga` |

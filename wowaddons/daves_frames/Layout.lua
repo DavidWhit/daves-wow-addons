@@ -2,14 +2,15 @@
 -- Where everything sits, and the colours. All positions are layout pixels from the frame's top-left
 -- corner (y grows downward here; Frame.lua flips it for SetPoint). One geometry for every unit.
 -- The box is tools/template/frame-template.json, drawn by tools/Build-FrameTemplate.py.
--- guides/frame-template.png is the paint mask at 2x. Media/frame-*.tga is still the previous
--- painting, so the picture will not line up until a frame is painted on that mask and packed.
+-- guides/frame-template.png is the paint mask at 2x. Media/frame-*.tga is that plate in the
+-- top of the atlas.
 
 local _, ns = ...
 
 local MEDIA = "Interface\\AddOns\\daves_frames\\Media\\"
 ns.MEDIA = MEDIA
 ns.STRIPES = MEDIA .. "stripes.tga"
+ns.CIRCLE = MEDIA .. "circle.tga"   -- full-bleed disc. Portrait mask and the level circle.
 
 -- Shared standard (NOTES.md sections 3-6): the same for every variant.
 ns.STD = {
@@ -22,27 +23,27 @@ ns.STD = {
 	chainTail = 36,     -- chain carries on behind the board
 	slot = 40, slotGap = 10, rowGap = 6, timerGap = 5, timerH = 10,
 	boardPad = { top = 9, bottom = 6, side = 2 },
-	-- 9-slice corner, in layout px. stripSlice is that corner in atlas pixels. The side cap
-	-- covers the pointed finial up to the bar slot. One layout px is about 1.39 atlas px.
-	board = { top = 42, right = 86, bottom = 44, left = 86 },
+	-- 9-slice corner, in layout px. stripSlice is that corner in 2x atlas pixels (28 layout px =
+	-- 22 outer frame + 5 lip + 1 inset margin, enclosing each mitered corner).
+	board = { top = 28, right = 28, bottom = 28, left = 28 },
 	plainPad = { top = 6, side = 6, bottom = 6, border = 2 },
 	underGap = 6,       -- "right under the bar": gap below the plate
-	-- Blizzard's level circle (TargetFrame LevelBackgroundCircle). dy is the centre of the
-	-- lower ring band, halfway from rIn to rOut. d is that circle in layout px, so two digits fit.
-	-- The addon draws it above the plate. The ring is painted underneath.
-	badge = { dy = 116, d = 48, atlas = "UI-HUD-UnitFrame-SmallCircle" },
+	-- Level placeholder. The painted border is the white ring on the template,
+	-- on top of the portrait ring: outer diameter 92, band 16. dy is the middle
+	-- of that ring at the bottom. d is the yellow hole the number sits in.
+	badge = { dy = 116, d = 60 },
 }
 ns.STD.chainIn = (ns.STD.slot + ns.STD.slotGap + ns.STD.board.left + ns.STD.board.right + 2 * ns.STD.boardPad.side) / 2
 
 -- The name is 44 layout px. Scale stops at 0.65 so that stays at least 14 screen px (see ns.MinSize).
--- Art slot: the 2x mask is 2048 x 544, the top of the 2048 x 1024 atlas (544/1024 = 0.531250).
--- The board strip stays where the current atlas already has it, under that slot.
+-- Art slot: the 2x mask is 2048 x 600, the top of the 2048 x 1024 atlas (600/1024 = 0.585938).
+-- The 600 x 220 board strip sits 8 px below it (y 608..828), sliced at 2x from the plate's ends.
 local GEO = {
-	art = { 0, 1, 0, 0.531250 },
-	strip = { 0, 0.292969, 0.789062, 0.980469 },
-	stripPx = { w = 600, h = 196 },
-	stripSlice = { top = 59, right = 120, bottom = 61, left = 120 },
-	w = 1024, h = 272,
+	art = { 0, 1, 0, 0.585938 },
+	strip = { 0, 0.292969, 0.59375, 0.808594 },
+	stripPx = { w = 600, h = 220 },
+	stripSlice = { top = 56, right = 56, bottom = 56, left = 56 },
+	w = 1024, h = 300,
 	cx = 512, cy = 136, rIn = 105, rOut = 128,
 	winL = 35, winR = 989, winT = 108, winB = 164,
 	cut = { 35, 989, 108, 164 },

@@ -180,11 +180,11 @@ local boards = {}
 ns.boards = boards
 
 local function NewBoard(side, length)
-	local f, L = ns.frame, ns.L
+	local f, L, S = ns.frame, ns.L, ns.STD
 	local b = { side = side, slots = {}, byId = {}, th = 0, w = 0, L = length, sign = side == "L" and 1 or -1, alpha = 0 }
 	b.frame = CreateFrame("Frame", nil, f.boardLayer)
 	b.frame:SetFrameLevel(f.boardLayer:GetFrameLevel() + 2)
-	b.frame:SetSize(104, 120)
+	b.frame:SetSize(2 * S.chainIn, 120)
 	b.ornate = NineSlice(b.frame, L)
 	b.plain = PlainBoard(b.frame, L)
 	b.chains = {}
@@ -399,7 +399,8 @@ local function LayoutBoard(b, dt)
 	-- It eases in and out like the rest of the board.
 	b.timerRow = Ease(b.timerRow or (timed and 1 or 0), timed and 1 or 0, math.min(1, dt * 9), 0.002)
 	local rowH = S.slot + b.timerRow * (S.timerGap + (ns.timerH or S.timerH))
-	local w = math.max(under and 60 or 104, maxRowW + pad)
+	local minW = 2 * S.chainIn
+	local w = math.max(under and 60 or minW, maxRowW + pad)
 	local h = B.top + B.bottom + rows * rowH + (rows - 1) * S.rowGap
 	if w ~= b.fw or h ~= b.fh then b.frame:SetSize(w, h); b.fw, b.fh = w, h end
 
@@ -442,7 +443,7 @@ local function LayoutBoard(b, dt)
 	local ci = S.chainIn
 	local one = live <= 1
 	local outer = (b.side == "L") and (laneA + ci) or (laneB - ci)
-	local targetW = math.max(104, math.min(live, perRow) * cell + pad)
+	local targetW = math.max(minW, math.min(live, perRow) * cell + pad)
 	local tx0 = (b.side == "L") and laneA or (laneB - targetW)
 	local innerTop = one and outer or ((b.side == "L") and (tx0 + targetW - ci) or (tx0 + ci))
 	local innerEnd = one and outer or ((b.side == "L") and (x0 + w - ci) or (x0 + ci))

@@ -8,17 +8,17 @@ argument-hint: "[find | tools | link-all | link <folder> | unlink <folder> | ref
 
 Arguments: `$ARGUMENTS`. With none, do the full setup (1 → 3, then 5).
 
-All scripts are Windows PowerShell 5.1 and need no admin rights. Run them as:
+On Windows, run the Python scripts with `py -3`. They take the same arguments as the PowerShell originals and need no admin rights:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "${CLAUDE_PLUGIN_ROOT}/scripts/<Script>.ps1" <args>
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/<Script>.py" <args>
 ```
 
 On a Mac only linking is supported: `Link-WowAddons.ps1` and `Find-WowInstall.ps1` run under PowerShell 7 (`pwsh -File ...`), and `link-wow-addons.sh` needs nothing but bash. The game is looked for at `/Applications/World of Warcraft`.
 
 ## 1. Find the game (`find`)
 
-`Find-WowInstall.ps1` lists every installed client with its build and TOC Interface number. It reads Blizzard's `.build.info` and `.flavor.info`, so the numbers are the installed build's own. Example output on the Forever beta:
+`Find-WowInstall.py` lists every installed client with its build and TOC Interface number. It reads Blizzard's `.build.info` and `.flavor.info`, so the numbers are the installed build's own. Example output on the Forever beta:
 
 ```
 Folder         Flavor  Product          Version      Interface AddOns
@@ -29,22 +29,22 @@ The Forever beta installs as `_classic_beta_`. The launch folder name isn't conf
 
 ## 2. Install tools (`tools`)
 
-`Install-WowDevTools.ps1`:
+`Install-WowDevTools.py`:
 - **luacheck v1.2.0**, from the official lunarmodules/luacheck GitHub release. Goes to `%LOCALAPPDATA%\wow-addon-kit\bin\luacheck.exe`; the size is checked against the release asset and the SHA256 is printed. PATH is unchanged.
-- **API index** for Forever (`Update-WowApiIndex.ps1 -Branch forever`), built from Blizzard's UI source (Gethe/wow-ui-source). Skipped if it is less than 7 days old.
+- **API index** for Forever (`Update-WowApiIndex.py -Branch forever`), built from Blizzard's UI source (Gethe/wow-ui-source). Skipped if it is less than 7 days old.
 - Prints the optional VS Code extension command: `code --install-extension ketho.wow-api`.
 
-`refresh-api`: after a game patch, run `Update-WowApiIndex.ps1 -Branch forever` to rebuild the index. Other branches: `live` (Retail), `classic_era`, `classic`, `classic_anniversary`, `classic_titan`. Also run `Update-WowUiSource.ps1` to refresh the local Blizzard UI source and its `INDEX.tsv`.
+`refresh-api`: after a game patch, run `Update-WowUiSource.py` to refresh the local Blizzard UI source and its `INDEX.tsv`, then `Update-WowApiIndex.py -Branch forever -FromLocal` (or omit `-FromLocal` to fetch directly from GitHub). Other branches: `live` (Retail), `classic_era`, `classic`, `classic_anniversary`, `classic_titan`.
 
 ## 3. Link every addon after cloning or pulling (`link-all`)
 
-Use this on a fresh clone of the addons repo, and after a pull that added addons. `Link-WowAddons.ps1` links every folder in the repo's `wowaddons/` that holds a `<Folder>.toc` (or `<Folder>_<Flavor>.toc`) into each installed client whose game the TOC's `## Interface` lists: a junction on Windows, a symlink on a Mac. Run `-WhatIf` first and show the user the table. Every run also links the kit's error recorder `devaddons/!WowKitErrors` into the same clients (shown as "kit error recorder"), so in-game Lua errors and blocked actions are always on file for `Get-WowScriptErrors.ps1`. `-NoDevAddons` leaves it out.
+Use this on a fresh clone of the addons repo, and after a pull that added addons. `Link-WowAddons.py` links every folder in the repo's `wowaddons/` that holds a `<Folder>.toc` (or `<Folder>_<Flavor>.toc`) into each installed client whose game the TOC's `## Interface` lists: a junction on Windows, a symlink on a Mac. Run `-WhatIf` first and show the user the table. Every run also links the kit's error recorder `devaddons/!WowKitErrors` into the same clients (shown as "kit error recorder"), so in-game Lua errors and blocked actions are always on file for `Get-WowScriptErrors.py`. `-NoDevAddons` leaves it out.
 
 ```powershell
-Link-WowAddons.ps1 -WhatIf                 # what would change
-Link-WowAddons.ps1                         # link everything (finds wowaddons/ by walking up from the current folder)
-Link-WowAddons.ps1 -Path "<addons folder>" -Flavor forever   # another folder; only the Forever client
-Link-WowAddons.ps1 -Remove                 # unlink them all
+py -3 Link-WowAddons.py -WhatIf                 # what would change
+py -3 Link-WowAddons.py                         # link everything (finds wowaddons/ by walking up from the current folder)
+py -3 Link-WowAddons.py -Path "<addons folder>" -Flavor forever   # another folder; only the Forever client
+py -3 Link-WowAddons.py -Remove                 # unlink them all
 ```
 
 On a Mac, from the repo root:
@@ -59,9 +59,9 @@ The shell script doesn't read TOCs: it links every addon into every `_*_` client
 ## 4. Link one addon into the game (`link` / `unlink`)
 
 ```powershell
-Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever               # junction: edits live after /reload
-Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever -Mode Copy    # release-like copy without dev files
-Deploy-WowAddon.ps1 -Path "<addon folder>" -Flavor forever -Remove       # unlink (never deletes your source)
+py -3 Deploy-WowAddon.py -Path "<addon folder>" -Flavor forever               # junction: edits live after /reload
+py -3 Deploy-WowAddon.py -Path "<addon folder>" -Flavor forever -Mode Copy    # release-like copy without dev files
+py -3 Deploy-WowAddon.py -Path "<addon folder>" -Flavor forever -Remove       # unlink (never deletes your source)
 ```
 
 Linking or copying also links the kit's error recorder (`!WowKitErrors`) into that client.
@@ -73,4 +73,4 @@ Safety rules built into both link scripts, which you should keep when doing anyt
 
 ## 5. Check it worked
 
-Run `Test-WowAddon.ps1` on the linked addon. Then tell the user to restart the client fully once (new TOC) and enable the addon in the AddOns list.
+Run `Test-WowAddon.py` on the linked addon. Then tell the user to restart the client fully once (new TOC) and enable the addon in the AddOns list.

@@ -2,9 +2,9 @@
 
 One widget box for every unit. Players, ordinary NPCs, rares, and elites share it. A rare is the same shape in silver. An elite uses the elite key in that same shape. A world boss uses that same box. The mask below is the template. Paint the lip, the outer frame, and the ring.
 
-The paint mask is [`tools/template/guides/frame-template.png`](tools/template/guides/frame-template.png), built by [`tools/Build-FrameTemplate.py`](tools/Build-FrameTemplate.py) from [`tools/template/frame-template.json`](tools/template/frame-template.json). The numbers below are that file, and they are the numbers in `Layout.lua`. The 2× PNG is 2048 × 544.
+The paint mask is [`tools/template/guides/frame-template.png`](tools/template/guides/frame-template.png) (`2048 × 600`), alongside the `16:9` AI-padded guide [`tools/template/guides/frame-template-ai.png`](tools/template/guides/frame-template-ai.png) (`2048 × 1152`), built by [`tools/Build-FrameTemplate.py`](tools/Build-FrameTemplate.py) from [`tools/template/frame-template.json`](tools/template/frame-template.json). The numbers below are that file, and they are the numbers in `Layout.lua`.
 
-`Media/frame-plain.tga` and `frame-elite.tga` have this gold plate in the top 2048×544. `frame-rare.tga` and `frame-rareelite.tga` are that same plate in silver. The board strip under that slot is still the previous one.
+`Media/frame-plain.tga` and `frame-elite.tga` have this gold plate in the top `2048×600` (including the level ring) and its matching 2× `600×220` aura board strip at `y = 608..828`, packed by [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.py). `frame-rare.tga` and `frame-rareelite.tga` are that same plate and board strip graded in silver.
 
 Units: **layout pixels** (the frame before the 0.5 real-scale factor). One layout pixel is 2 pixels on the 2× mask.
 
@@ -12,15 +12,15 @@ Units: **layout pixels** (the frame before the 0.5 real-scale factor). One layou
 
 ## 1. The box
 
-One box, 1024 × 272 layout px. The ring is the tallest part. The bars sit in a plate across the middle.
+One box, 1024 × 300 layout px. The level ring sets the height. The bars sit in a plate across the middle.
 
 | Part | Position (layout px) | Paint |
 | --- | --- | --- |
-| Art | 0,0 to 1024,272 | `w`, `h`. Atlas slot 2048×544 at the top of 2048×1024 (`art` bottom 0.531250) |
+| Art | 0,0 to 1024,300 | `w`, `h`. Atlas slot 2048×600 at the top of 2048×1024 (`art` bottom 0.585938) |
 | Ring centre | 512, 136 | `cx`, `cy` |
 | Portrait opening | radius 105 | Blue. The game draws the portrait. It is 4 px bigger so it tucks under the ring |
 | Portrait ring | radius 105 to 128 | Orange. Paintable, including the lower band |
-| Level | centre 512, 252 (`badge.dy` 116) | Not on the mask. Blizzard's circle, drawn on top of the plate |
+| Level ring | centre 512, 252 (`badge.dy` 116). Outer 92, band 16, hole 60 | White paint, on top of the portrait ring. Yellow hole is the placeholder |
 | Health hole | 35,108 to 379,164 | Blue. 344 × 56. The game draws health here |
 | Mana hole | 645,108 to 989,164 | Blue. Same size. The ring is the gap between the holes |
 | 5 px lip | around each hole, and out to the ring on the inner end | Green. Paintable |
@@ -36,7 +36,7 @@ The name is 44 layout px in a 56 px window, so scale 0.65 still leaves it about 
 
 ## 2. Layers and draw order
 
-Paint only the green lip, the grey outer frame, and the orange ring. Leave blue and magenta alone. The level circle is drawn on top of the painted ring.
+Paint the green lip, the grey outer frame, the orange portrait ring, and the white level ring. Leave blue, magenta, and the yellow level hole alone. The level ring sits on top of the portrait ring, centred on the middle of that ring at the bottom.
 
 | Region | Colour on the mask | What |
 | --- | --- | --- |
@@ -45,9 +45,11 @@ Paint only the green lip, the grey outer frame, and the orange ring. Leave blue 
 | 5 px lip | Green `#00FF00` | The border around each bar |
 | Outer frame | Grey `#808080` | The thicker frame around that lip. 22 layout px |
 | Portrait ring | Orange `#FF8000` | The band the portrait sits inside, including the lower band |
-| Outside | Magenta `#FF00FF` | Do not paint |
+| Level ring | White `#FFFFFF` | Painted 16 px border (outer 92) stamped on top of the portrait ring at `512, 252` |
+| Level hole | Yellow `#FFFF00` | 60 px hole inside the level ring where the level number sits. Do not paint |
+| Outside | Magenta `#FF00FF` | Exterior. Do not paint |
 
-What the addon draws, from the back to the front: aura boards and chains, then the bar troughs and the bars, then the inset and the portrait, then the art, then the text, then Blizzard's level circle.
+What the addon draws, from the back to the front: aura boards and chains, then the bar troughs and the bars, then the inset, portrait, and dark level disc, then the art, then the text and level number.
 
 **Stitching.** Where the bar meets the lip, the bar runs on under the paint:
 
@@ -77,9 +79,8 @@ How the plain plate was painted is in [`tools/template/PAINT-LAYERS.md`](tools/t
 
 | Bar | Colours |
 | --- | --- |
-| Hostile | `#ff8a76` `#d1301f` `#5e0c06` |
-| Neutral | `#fff09a` `#e0b522` `#6a4e04` |
-| Friendly player | Class colour (for example mage `#a9ecff` `#3fc7eb` `#0d4d63`) |
+| Health (connected) | Blizzard's target-frame green (`ns.ShadesOf(0, 1, 0)`); grey (`ns.COLORS.tapped`) while disconnected |
+| Reaction palette (`ns.COLORS`) | Hostile `#ff8a76` `#d1301f` `#5e0c06`, Neutral `#fff09a` `#e0b522` `#6a4e04`, Friendly `#8cf28c` `#33b840` `#0d4d14` |
 | Mana | `#a9c8ff` `#2e6fe0` `#0b2766` |
 | Cast, can be interrupted | `#ffe39a` `#f0a12a` `#a85a06` |
 | Cast, can't be interrupted | `#e2e6ea` `#9aa3ad` `#5b636c`, with a small shield before the spell name |
@@ -138,7 +139,7 @@ into Blizzard's number abbreviation, never into addon maths.
 ### Fonts
 
 All text uses Blizzard's own unit-frame text (`TextStatusBarText`: Friz Quadrata, outlined, the right font for the
-client's language). The name is 44 layout px. The frame's smallest scale is 0.65, which is a real scale of 0.325, so that name is still about 14 screen px. The window is tall enough for those 44 px (the overlay cap is the window height minus 8, which is 48). The portrait's "Both" line ("12.3k · 74%") is smaller than that on purpose: growing the portrait to fit it would grow the whole frame. The level uses Blizzard's circle (`UI-HUD-UnitFrame-SmallCircle`, 48 layout px) centred on the lower ring, with the number 0.5 px low, and that pair is drawn above the plate.
+client's language). The name is 44 layout px. The frame's smallest scale is 0.65, which is a real scale of 0.325, so that name is still about 14 screen px. The window is tall enough for those 44 px (the overlay cap is the window height minus 8, which is 48). The portrait's "Both" line ("12.3k · 74%") is smaller than that on purpose: growing the portrait to fit it would grow the whole frame. The level ring is white on the template, 92 px across with a 16 px band, centred at 512, 252, on top of the portrait ring. The number sits in the 60 px yellow hole, 0.5 px low, above the plate.
 
 ---
 
@@ -149,7 +150,7 @@ in the frame's metal.
 
 ### Board art
 
-Made from the plate, never painted separately: the left 150 and right 150 source px of the plate, at 2×, side by side (a 600 × 196 strip). Drawn as a 9-slice. The slice insets are 59 / 120 / 61 / 120 atlas px (top / right / bottom / left). On screen the corners are 42 / 86 / 44 / 86 layout px (`ns.STD.board`). The side cap covers the pointed finial up to the bar slot. A board with several rows stretches that point vertically.
+Made from the plate by [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.py), never painted separately: the left `150` and right `150` layout px (`300` + `300` atlas px at 2×) of the plate (`y = 81..191` layout px → `220` atlas px tall), placed side by side over a dark recessed billboard backing (`600 × 220` strip at `y = 608..828` of the `2048 × 1024` atlas). Drawn as a 9-slice. The slice insets are `56 / 56 / 56 / 56` atlas px (`top / right / bottom / left`), which is `28 / 28 / 28 / 28` layout px (`ns.STD.board`: `22` outer frame + `5` lip + `1` inset margin, enclosing each 45° mitered corner at exact 2× sharpness and fitting `6` aura icons per row in the `360 px` lane). The dark recessed backing hides the `36 px` chain tail behind the board and backs the timer numbers.
 
 ### Contents
 
@@ -207,20 +208,21 @@ Made from the plate, never painted separately: the left 150 and right 150 source
 
 ## 8. Art files and the checks they must pass
 
-The frame art in `Media/frame-*.tga` is the plate painted on this mask. The board strip under that slot, the chains, and the stripes are still the previous ones.
+The frame art in `Media/frame-*.tga` is the plate painted on this mask plus the matching 2× `600 × 220` board strip sliced from its ends by `Pack-FrameTemplate.py`.
 
 | File | Size | Content |
 | --- | --- | --- |
-| `Media/frame-plain.tga` | 2048 x 1024 | This gold plate in the top 2048×544. The strip below is the previous board |
-| `Media/frame-rare.tga` | 2048 x 1024 | The same plate, silver |
-| `Media/frame-elite.tga` | 2048 x 1024 | The same gold plate as plain |
-| `Media/frame-rareelite.tga` | 2048 x 1024 | The same plate, silver |
+| `Media/frame-plain.tga` | 2048 x 1024 | Aged-gold plate in the top `2048×600` (including the level ring) and its matching `600×220` gold board strip at `y = 608` |
+| `Media/frame-rare.tga` | 2048 x 1024 | The plain plate and board strip, graded in silver |
+| `Media/frame-elite.tga` | 2048 x 1024 | Blackrock obsidian & molten-gold rune Boss plate (`tools/template/paintings/boss.png`) on this exact same `2048×600` box + matching magma-veined `600×220` board strip at `y = 608` |
+| `Media/frame-rareelite.tga` | 2048 x 1024 | Silver-graded runic Boss version of `frame-elite.tga` and its board strip |
 | `Media/chain-gold.tga`, `chain-silver.tga` | 32 x 64 | One chain repeat, tiling vertically. The link has a hole |
 | `Media/stripes.tga` | 32 x 32 | Shield stripes |
+| `Media/circle.tga` | 256 x 256 | Full-bleed anti-aliased disc for the portrait mask and level hole |
 
-The new art slot is the top 2048 × 544 of that atlas (`art` in `Layout.lua`). A 600 × 196 board strip stays under it (`strip`). Every atlas is packed the same way, so a classification change is `SetTexture` plus the chain and the plain-board metal colour. It is not a frame rebuild.
+The art slot is the top `2048 × 600` of that atlas (`art` in `Layout.lua`). The `600 × 220` board strip sits `8 px` below it (`strip`, `y = 608..828`). Every atlas is packed the same way, so a classification change is `SetTexture` plus the chain and the plain-board metal colour. It is not a frame rebuild.
 
-A later repaint starts from `guides/frame-template.png`, the way [`PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md) describes.
+A later repaint starts from `guides/frame-template-ai.png` (`2048 × 1152`, exact `16:9`), the way [`PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md) describes.
 
 Plain and elite share the gold metal. Rare and rare elite share the silver. Dead is not a painting: the addon desaturates the art.
 
@@ -241,11 +243,12 @@ Nothing in sections 1 to 7 changes between variants.
 
 ---
 
-## 10. In this addon (0.2.1)
+## 10. In this addon (0.2.2)
 
 - **Art follows the unit** (`Unit.lua` `ns.ArtFor`, applied by `ns:ApplyArt`). Saved `db.variant` is cleared on load.
-- **Textures:** `py -3 tools\Build-FrameTemplate.py` redraws the mask. It checks that `Layout.lua` still matches. It does not write `Media/`. Imagine paints the metal onto that mask. The keying step keeps only the green, grey, and orange. See `tools/template/PAINT-LAYERS.md`.
-- **Level:** Blizzard's `UI-HUD-UnitFrame-SmallCircle`, centred on the lower ring, on its own frame above the plate. The number sits on the circle, 0.5 px low.
+- **Textures:** `py -3 tools\Build-FrameTemplate.py` redraws `guides/frame-template.png` (`2048 × 600`), `frame-template-1x.png` (`1024 × 300`), and `frame-template-ai.png` (`2048 × 1152`, exact `16:9`) and checks that `Layout.lua` matches. Gemini Nano Banana / Imagine paints onto `frame-template-ai.png`, and `py -3 tools\Pack-FrameTemplate.py` registers the holes, keeps only the green, grey, orange, and white plate regions, builds the matching 2× `600 × 220` board strip, and writes `Media/frame-*.tga`. See `tools/template/PAINT-LAYERS.md`.
+- **Level:** the template's white ring is the painted border (outer 92, band 16, centre 512, 252, on top of the portrait ring). The number sits in the 60 px hole on `Media/circle.tga`, 0.5 px low. The font string is that hole, so the digits center in it.
+- **Portrait button:** `Frame.lua` `ns:BuildPortraitButton` places a `SecureUnitButtonTemplate` on `UIParent` over the portrait (`RegisterUnitWatch` out of Edit Mode, synced out of combat) so left-click targets and right-click opens the unit menu.
 - **Secret values:** health, absorbs and heals go straight into the bars and text; cast times into
   `SetMinMaxValues`/`SetValue`; "can't be interrupted" through `SetVertexColorFromBoolean`. Aura times use
   `C_UnitAuras.GetAuraDuration` with a duration text binding, and stacks use
@@ -258,5 +261,4 @@ Nothing in sections 1 to 7 changes between variants.
   - the time left on a cast whose times are secret
   - the stack badge's pop
   - hiding Blizzard's target frame
-  - clicking the frame to target or open the menu (it's a display frame; that needs a secure button)
-  - a class frame: another paint on this box, with a short animation. Players use the plain plate until that paint exists
+  - a class frame: another paint on this exact same `frame-template-ai.png` box, one per class. Players use the plain plate until that paint exists

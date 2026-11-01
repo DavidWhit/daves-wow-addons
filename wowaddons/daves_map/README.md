@@ -33,8 +33,8 @@ The map data lives in a separate, generated addon, **`wowaddons/daves_map_data`*
 **First time on a machine** (after cloning or pulling):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File wowaddons\daves_map\tools\Update-MapData.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.ps1 -Path wowaddons\daves_map_data
+py -3 wowaddons\daves_map\tools\Update-MapData.py
+py -3 wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.py -Path wowaddons\daves_map_data
 ```
 
 Then restart the client fully, and make sure **Dave's Map (data)** is enabled in the AddOns list.
@@ -53,8 +53,8 @@ Everything downloaded is read as data, never run. The script saves downloads int
 The stitched map is [OpenMap](https://www.curseforge.com/wow/addons/openmap)'s (MIT licence). Its code is copied into `Stitch\` (`Stitch\LICENSE-OpenMap.txt`); its art and data tables are a drop-in addon of their own, **`wowaddons/daves_map_textures`**, built from an OpenMap release for WoW Forever. It is **not in git** (Blizzard's map art, about 125 MB). Without it daves_map uses Blizzard's map as before.
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File wowaddons\daves_map\tools\Update-MapTextures.ps1 -Source <OpenMap folder or zip>
-powershell -NoProfile -ExecutionPolicy Bypass -File wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.ps1 -Path wowaddons\daves_map_textures
+py -3 wowaddons\daves_map\tools\Update-MapTextures.py -Source <OpenMap folder or zip>
+py -3 wow-addon-kit\plugins\wow-forever-addons\scripts\Link-WowAddons.py -Path wowaddons\daves_map_textures
 ```
 
 `-Source` defaults to `OpenMap\` at the repo root (gitignored). `-Zip` also writes `daves_map_textures.zip` for a tester. Left out on purpose: Santiago Reyes' paintings, which he lets OpenMap use, not us (the sea chart, the hand-painted gaps between zones and the baked zone tiles that carry them, Forever's own dungeon maps). The gaps show plain map paper, as OpenMap's own "Filled gaps" off does.
@@ -73,11 +73,11 @@ The pins are plain textures on a frame of ours on the map canvas. One small butt
 
 | Task | Command |
 | --- | --- |
-| Rebuild the data | `tools\Update-MapData.ps1` (`-KeepRaw` keeps the downloads, `-NoQuestDb` skips pfQuest) |
-| Rebuild the seamless map's art | `tools\Update-MapTextures.ps1 -Source <OpenMap folder or zip>` (`-Zip` for a tester) |
-| Repaint the textures | `tools\Make-Media.ps1` |
-| Check the addon | `Test-WowAddon.ps1 -Path . -Flavor forever` |
-| Link into the game | `Link-WowAddons.ps1 -Path .` |
+| Rebuild the data | `tools\Update-MapData.py` (`-KeepRaw` keeps the downloads, `-NoQuestDb` skips pfQuest) |
+| Rebuild the seamless map's art | `tools\Update-MapTextures.py -Source <OpenMap folder or zip>` (`-Zip` for a tester) |
+| Repaint the textures | `tools\Make-Media.py` |
+| Check the addon | `Test-WowAddon.py -Path . -Flavor forever` |
+| Link into the game | `Link-WowAddons.py -Path .` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
 | File | Purpose |
@@ -90,4 +90,4 @@ The pins are plain textures on a frame of ours on the map canvas. One small butt
 | `Options.lua` | Settings page: layer on/off, panel, pin size, seamless map |
 | `Stitch/Base.lua` | The seamless map's base (in place of OpenMap's Core.lua): the drop-in's namespace, settings, start |
 | `Stitch/Stitch.lua`, `WorldMap.lua`, `Close.lua`, `Combat.lua` | OpenMap's map: the stitched art, the view and zoom, the closest zooms, Blizzard's pins in combat |
-| `../daves_map_textures/` | Generated, not in git: OpenMap's textures and data tables (`tools/Update-MapTextures.ps1`) |
+| `../daves_map_textures/` | Generated, not in git: OpenMap's textures and data tables (`tools/Update-MapTextures.py`) |

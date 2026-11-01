@@ -210,7 +210,9 @@ function ns:UpdateIdentity()
 end
 
 function ns:UpdatePortrait()
-	if ns.unit then SetPortraitTexture(ns.frame.portrait, ns.unit) end
+	-- The third argument turns off the engine's own circle. That circle sits inside the
+	-- texture and left a gap between the portrait and the ring. Our mask does the crop.
+	if ns.unit then SetPortraitTexture(ns.frame.portrait, ns.unit, true) end
 end
 
 function ns:UpdateTargetOfTarget()
