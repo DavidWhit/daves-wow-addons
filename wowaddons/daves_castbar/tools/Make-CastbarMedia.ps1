@@ -3449,23 +3449,6 @@ public static class CastbarArt
 		}
 		return img;
 	}
-	// An essence mote (concept drawEssence): a bright core in a soft glow with a thin flat ring of light round it. White,
-	// tinted to the palette's accent; the addon adds a wider glow in the main colour under it. 64 px = 4 mote radii.
-	public static Img Essence()
-	{
-		var img = new Img(64, 64);
-		double r = 16;
-		for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
-		{
-			double dx = (x - 31.5)/r, dy = (y - 31.5)/r, d = Math.Sqrt(dx*dx + dy*dy);
-			double mid = 0.55*Math.Exp(-d*d/(1.4*1.4)*1.6), core = 0.9*Math.Exp(-d*d/(0.6*0.6)*1.4);
-			double e = Math.Sqrt(dx*dx/(1.9*1.9) + dy*dy/(0.55*0.55));
-			double ring = 0.45*Smooth(0.22, 0.08, Math.Abs(e - 1));
-			double a = 1 - (1 - mid)*(1 - core)*(1 - ring);
-			img.Set(x, y, 1, 1, 1, Clamp(a));
-		}
-		return img;
-	}
 
 	// ================================================================ preview composite
 	static void Add(double[] dst, double r, double g, double b) { dst[0] += r; dst[1] += g; dst[2] += b; }
@@ -3583,7 +3566,6 @@ $jobs = [ordered]@{
 	'ench_velvet' = { [CastbarArt]::EnchVelvet() }; 'ench_velvet_hi' = { [CastbarArt]::EnchVelvetHi() }
 	'ench_flow1' = { [CastbarArt]::EnchFlow(0) };   'ench_flow2'  = { [CastbarArt]::EnchFlow(1) }
 	'p_vortex'   = { [CastbarArt]::Vortex() };      'p_dot'       = { [CastbarArt]::Dot() }
-	'p_essence'  = { [CastbarArt]::Essence() }
 	'fa_wound'   = { [CastbarArt]::FaWound() };     'fa_gloss'    = { [CastbarArt]::FaGloss() }
 	'fa_band'    = { [CastbarArt]::FaBand() }
 	'fa_blot'    = { [CastbarArt]::FaBlots() }

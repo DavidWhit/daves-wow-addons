@@ -1,4 +1,4 @@
-"""Keep a local copy of one branch of Blizzard's UI source. Matches Update-WowUiSource.ps1.
+"""Keep a local copy of one branch of Blizzard's UI source.
 
 The download hits GitHub. Pass -OutDir so a run does not replace data\\ui-source.
 """

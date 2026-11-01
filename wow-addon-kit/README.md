@@ -27,7 +27,7 @@ After editing the plugin, bump `version` in `plugins/wow-forever-addons/.claude-
 
 ## Scripts (usable without Claude)
 
-On Windows, run them with `py -3` from `plugins/wow-forever-addons/scripts`. The PowerShell originals are still there. On macOS, link with `pwsh` on `Link-WowAddons.ps1`, or with `link-wow-addons.sh`:
+Run them with Python 3 (`py -3` on Windows, `python3` on macOS) from `plugins/wow-forever-addons/scripts` (or use `link-wow-addons.sh` on macOS without Python):
 
 | Script | Purpose |
 | --- | --- |
@@ -39,16 +39,17 @@ On Windows, run them with `py -3` from `plugins/wow-forever-addons/scripts`. The
 | `Get-WowScriptErrors.py [-Addon X] [-Session n]` | Lua errors (with stacks), blocked/forbidden actions (each with a taint probe: what an addon wrote where the action read, via `issecurevariable`; `/wkprobe` runs it by hand) and Lua warnings recorded in game by the dev addon `devaddons/!WowKitErrors` (installed by every kit link: `Link-WowAddons.py`, `Deploy-WowAddon.py`, and by this script when it's missing). Read first when something breaks in game (the order: wow-addon-test step 0) |
 | `Get-WowTaintLog.py [-Addon X]` | The client's `Logs\taint.log`: which addon tainted what, and the blocked call. Read when nothing was recorded, or when the taint probe names nothing. Reads the live log while the game runs (a `/reload` starts a new one) |
 | `Deploy-WowAddon.py -Path X [-Mode Link/Copy] [-Remove]` | Junction or copy into `Interface\AddOns`; never deletes real folders |
-| `Link-WowAddons.py [-Path dir] [-Flavor ...] [-Remove] [-NoDevAddons] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into each client its TOC targets, plus the kit's error recorder; real folders go to `AddOns.backup`. On macOS use `pwsh` with `Link-WowAddons.ps1`, or the bash script below |
-| `link-wow-addons.sh [--dry-run] [--remove] [--no-dev-addons] [--wow-root DIR] [dir]` | The same for a Mac without PowerShell (bash, symlinks, every addon into every client, error recorder included) |
+| `Link-WowAddons.py [-Path dir] [-Flavor ...] [-Remove] [-NoDevAddons] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into each client its TOC targets, plus the kit's error recorder; real folders go to `AddOns.backup` (junctions on Windows, symlinks on macOS) |
+| `link-wow-addons.sh [--dry-run] [--remove] [--no-dev-addons] [--wow-root DIR] [dir]` | Pure-bash macOS fallback (symlinks every addon into every client, error recorder included) |
 | `Install-WowDevTools.py` | luacheck from its official GitHub release, plus the API index |
+| `Update-WowUiSource.py [-Branch forever]` | Download/refresh a local copy of Blizzard's UI source and `INDEX.tsv` under `data/ui-source/<branch>` |
 | `Update-WowApiIndex.py [-Branch forever] [-FromLocal]` | Rebuild `data/api-<branch>.json` from Blizzard's UI source (GitHub zip, or local `data/ui-source/<branch>` with `-FromLocal`) |
 
 Self-test: `py -3 plugins/wow-forever-addons/tests/Invoke-KitSelfTest.py` checks that every planted bug in `tests/fixtures/BrokenAddon` is caught, that a fresh scaffold and the example come out clean, and that `Link-WowAddons.py` links, re-points, backs up and unlinks correctly in a fake install, error recorder included.
 
 ## Example addon
 
-`examples/HelloForever`: a movable character panel (name, level, zone, gold, health bar) built with the scaffold. It shows the secret-value-safe patterns for Forever. It's linked into the Forever client's AddOns folder (`_classic_beta_`); restart the client, enable it, and type `/hf`.
+`examples/HelloForever`: a movable character panel (name, level, zone, gold, health bar) built with the scaffold (`Core.lua`, `Options.lua`, `Panel.lua`), demonstrating secret-value-safe patterns for Forever. Link it on demand with `py -3 plugins/wow-forever-addons/scripts/Deploy-WowAddon.py -Path examples/HelloForever -Flavor forever`, restart the client, enable it, and type `/hf`.
 
 ## What the validator checks
 

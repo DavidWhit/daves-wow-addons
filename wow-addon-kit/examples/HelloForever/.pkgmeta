@@ -5,6 +5,9 @@ package-as: HelloForever
 
 ignore:
   - README.md
+  - NOTES.md
   - .luacheckrc
   - .vscode
   - tests
+  - tools
+  - __pycache__

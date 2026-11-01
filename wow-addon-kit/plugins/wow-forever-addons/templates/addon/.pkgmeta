@@ -5,6 +5,9 @@ package-as: {{NAME}}
 
 ignore:
   - README.md
+  - NOTES.md
   - .luacheckrc
   - .vscode
   - tests
+  - tools
+  - __pycache__

@@ -58,7 +58,7 @@ What the addon draws, from the back to the front: aura boards and chains, then t
 | Bars / lip | Bars run 5 px under the lip at each end, 2 px at the top and bottom (`ns.STD.sideX`, `sideY`) |
 | Portrait / ring | The portrait is 4 px bigger than the opening |
 
-How the plain plate was painted is in [`tools/template/PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md).
+How plates are painted on `guides/frame-template-ai.png` is in [`tools/template/PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md).
 
 ---
 
@@ -66,11 +66,9 @@ How the plain plate was painted is in [`tools/template/PAINT-LAYERS.md`](tools/t
 
 - Health on the left, resource on the right. Both **empty toward the portrait**: the full end is the outer end.
 - The bar widget runs from 5 px outside the hole to the ring's outer edge (`hidden` 128). The blue hole is the part the mask leaves open.
-- Animation: 0.45 s, `cubic-bezier(.3, .7, .2, 1)`.
-- **Damage trail:** a pale bar behind the health that catches up 0.55 s after a hit, over 0.9 s.
+- **Damage trail:** a pale bar behind the health that holds for 0.55 s after a hit, then eases to the current health (`Enum.StatusBarInterpolation.ExponentialEaseOut`).
 - **Incoming heal:** pale green, from the end of the health outward.
-- **Shield:** white diagonal stripes beyond the heal. If health + heal + shield is more than full, a glowing white
-  tick shows at the outer end.
+- **Shield:** white diagonal stripes beyond the heal (the shield-overflow white tick is listed under Section 10 "Not in yet").
 - **Empty part:** never blank. It's the bar's own colour mixed dark (30% of the mid colour, 38% of the dark colour).
 - **Outer end:** the bar tucks 5 px under the green lip.
 - Inner end: the bar stops at the ring's outer edge. The green lip covers the last 5 px. The ring starts there.
@@ -80,7 +78,6 @@ How the plain plate was painted is in [`tools/template/PAINT-LAYERS.md`](tools/t
 | Bar | Colours |
 | --- | --- |
 | Health (connected) | Blizzard's target-frame green (`ns.ShadesOf(0, 1, 0)`); grey (`ns.COLORS.tapped`) while disconnected |
-| Reaction palette (`ns.COLORS`) | Hostile `#ff8a76` `#d1301f` `#5e0c06`, Neutral `#fff09a` `#e0b522` `#6a4e04`, Friendly `#8cf28c` `#33b840` `#0d4d14` |
 | Mana | `#a9c8ff` `#2e6fe0` `#0b2766` |
 | Cast, can be interrupted | `#ffe39a` `#f0a12a` `#a85a06` |
 | Cast, can't be interrupted | `#e2e6ea` `#9aa3ad` `#5b636c`, with a small shield before the spell name |
@@ -112,7 +109,7 @@ Radius 5 at the outer end, square at the inner end (under the ring).
 | Setting | Left window | Right window |
 | --- | --- | --- |
 | **Overlay** | The name over the health | The cast fills over the resource, which dims to 38% brightness. Spell name by the ring, time left at the outer end |
-| **Stacked** | A 30 px strip on top: the name in the reaction colour. Health below | A 30 px strip on top: the cast, or "on Dave" (who they target) when not casting. Resource below |
+| **Stacked** | A 30 px strip on top: the name in Blizzard's target-frame green (grey while disconnected). Health below | A 30 px strip on top: the cast, or "on Dave" (who they target) when not casting. Resource below |
 
 Stacked needs room: scaling below 0.85 switches the setting to Overlay (and numbers in the bars to the portrait),
 and Edit Mode hides Stacked there with a note.
@@ -134,7 +131,7 @@ into Blizzard's number abbreviation, never into addon maths.
 
 - **Opacity** (a setting, 0 to 100%): the portrait fades over a dark disc so the numbers stand out. 0% leaves
   just the disc.
-- Dead: the portrait goes grey, the health reads "Dead", and the boards fade out.
+- Dead: the portrait and plate desaturate, health and power numbers hide, `"Dead"` shows at the outer right end of the right (resource) bar, and the boards fade out.
 
 ### Fonts
 
@@ -155,10 +152,9 @@ A 2 layout px hairline (`ns.STD.plainPad.border`) in a dimmed version of the pla
 ### Contents
 
 - One slot per aura: a 40 px icon, then its time left 5 px below it. Slots are 10 px apart, with 6 px between rows.
-- Icon border by type: magic `#3c8cff`, curse `#9b30ff`, enrage `#ff7a1a`, physical `#c0261a`.
-- Time left turns red under 5 s.
-- **Stacks:** one icon per aura, never repeats. From 2 stacks a count badge shows in the bottom-right corner, and
-  it pops when the count changes.
+- Icon border by dispel type (`Layout.lua` `ns.DISPEL`): Magic `#3c8cff`, Curse `#9b30ff`, Poison `#32b432`, Disease `#b87822`, none/physical `#c0261a`, buff `#6c6050`.
+- Time left uses `C_DurationUtil.CreateDurationTextBinding()` in warm pale text (`0.95, 0.9, 0.8`).
+- **Stacks:** one icon per aura, never repeats. From 2 stacks a count badge shows in the bottom-right corner.
 - An aura arriving or leaving eases in or out over 0.4 s (width, fade, scale from 0.55). The board's width follows.
 
 ### Lanes, growth and chains
@@ -185,22 +181,18 @@ A 2 layout px hairline (`ns.STD.plainPad.border`) in a dimmed version of the pla
 
 - Each board is a pendulum and stays level. Gravity 2000, length 118 (left) and 134 (right), so the two never move
   in step. Damping 2.3, gain 0.55, and a hard limit of 8 degrees.
-- **What moves them:** starting and stopping, a gentle sway while walking (1.7 steps a second), a lean while
-  turning, and dragging the frame.
-- **In game:** `IsPlayerMoving()` and the change in `GetPlayerFacing()` per frame. Facing returns nil in
-  instances, so there it sways on movement only.
+- **What moves them:** starting and stopping, a gentle sway while walking (1.7 steps a second), and a lean while turning (`IsPlayerMoving()` and the change in `GetPlayerFacing()` per frame; `GetPlayerFacing()` returns nil in instances, so there it sways on movement only).
 
 ---
 
 ## 7. Placement, Edit Mode and size
 
-- **Pinned:** the top of the whole frame sits on the screen's top edge. Nothing is clipped or hidden.
-- **Floating:** anywhere on screen.
+- **Pinned:** the top of the `1024 × 300` frame canvas sits on the screen's top edge (`8` layout px above the portrait ring). Nothing is clipped or hidden.
+- **Floating:** anywhere on screen (dragging unpins; `"Pin to top edge"` in Edit Mode or right-click reset pins it back).
 - **Edit Mode:** uses the kit's `templates/editmode/EditModeDialog.lua`, as every addon frame must. Blizzard's
   outline covers the whole frame: blue, yellow while dragging. It snaps within 8 screen px to
-  the 50 px grid, the screen centre, the screen edges and Blizzard's frames, and Shift places it freely. Dropping
-  it on the top edge pins it.
-- **Scale:** 0.65 to 1 (default 0.8), step 0.05. 1 sets a real scale of 0.5. 0.65 is the floor where the 44 px name is still about 14 screen px, and the frame is about 333 x 88. A saved size below that is raised on load. It scales around the centre and keeps a pinned frame on the top edge. Pinned, the top of the ring sits on the screen edge. The art stays sharp up to scale 1.
+  the 50 px grid, the screen centre, the screen edges and Blizzard's frames, and Shift places it freely.
+- **Scale:** 0.65 to 1 (default 0.8), step 0.05. 1 sets a real scale of 0.5. 0.65 is the floor where the 44 px name is still about 14 screen px, and the frame is about 333 x 88. A saved size below that is raised on load. The art stays sharp up to scale 1.
 
 ---
 
@@ -255,7 +247,7 @@ Nothing in sections 1 to 7 changes between variants.
 
 - **Aura boards** are a 2 px dim metal hairline and a faint dark fill (`Auras.lua` `ThinBoard`). They do not sample the atlas strip. Chains still hang the boards.
 - **Art follows the unit** (`Unit.lua` `ns.ArtFor`, applied by `ns:ApplyArt`). A readable player class uses `frame-<class>.tga`. Saved `db.variant` is cleared on load.
-- **Class plates:** `tools/template/paintings/warrior.png` (`1376×768`) was painted via Gemini Nano Banana (`daves-frames-paint` skill) on `guides/frame-template-ai.png` and registers directly via `Pack-FrameTemplate.py`'s blob fitter (`max_err = 1.20 px`, `aspect_drift = 0.26%`). The remaining eight class plates were Imagine edits of `guides/frame-template-ai.png` (`1280×720`) sampled with fixed scale (`width / 2048`, plate rows starting after the `276 px` pad) because Imagine softened the `#0000FF` blue; re-pack those eight from `tools/template/preview/<class>-plate.png` to keep that registration unless repainted with `daves-frames-paint`. Detail stays inside the grey, green, orange, and white bands.
+- **Class & plain plates:** `tools/template/paintings/warrior.png` (`1376×768`) and `tools/template/paintings/boss.png` were painted via Gemini Nano Banana (`daves-frames-paint` skill) on `guides/frame-template-ai.png` and register directly via `Pack-FrameTemplate.py`'s blob fitter (`max_err <= 1.20 px`, `aspect_drift <= 0.26%`). Pre-aligned `2048×600` RGBA source plates for `plain` (`tools/template/plates/plain-plate.png`) and the remaining eight class plates (`tools/template/plates/<class>-plate.png`, sampled from Imagine edits of `guides/frame-template-ai.png`) live in `tools/template/plates/` (`tools/template/preview/` is gitignored for `--preview` QA renders); re-pack those from `tools/template/plates/<name>-plate.png` unless repainted with `daves-frames-paint`. Detail stays inside the grey, green, orange, and white bands.
 - **Textures:** `py -3 tools\Build-FrameTemplate.py` redraws `guides/frame-template.png` (`2048 × 600`), `frame-template-1x.png` (`1024 × 300`), and `frame-template-ai.png` (`2048 × 1152`, exact `16:9`) and checks that `Layout.lua` matches. Gemini Nano Banana / Imagine paints onto `frame-template-ai.png`, and `py -3 tools\Pack-FrameTemplate.py` registers the holes, keeps only the green, grey, orange, and white plate regions, builds the matching 2× `600 × 220` board strip, and writes `Media/frame-*.tga`. See `tools/template/PAINT-LAYERS.md`.
 - **Level:** the template's white ring is the painted border (outer 92, band 16, centre 512, 252, on top of the portrait ring). The number sits in the 60 px hole on `Media/circle.tga`, 0.5 px low. The font string is that hole, so the digits center in it.
 - **Portrait masking:** `SetPortraitTexture(f.portrait, unit)` must keep `disableMasking` omitted/`false` — the C++ engine caches one shared dynamic portrait texture per unit, so passing `true` unmasks Blizzard's stock unit frames into an opaque `#000E21` square. Instead, `f.portrait` is sized to `L.rOut` (`128`) so the engine's baked circular margin sits outside `L.rIn + portraitPad` (`109`), and `f.portraitMask` (`Media/circle.tga`) crops it cleanly under the ring.

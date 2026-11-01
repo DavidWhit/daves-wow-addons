@@ -40,7 +40,7 @@ On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Va
 | TOC game type | `camelot`, inside the `mainline` family | Blizzard's own TOCs, e.g. `Blizzard_UnitFrame.toc` |
 | TOC path variables | `[Family]` → `Mainline`, `[Game]` → `Camelot` | same |
 | Client-specific TOC | `<Name>_Camelot.toc` | warcraft.wiki.gg TOC_format |
-| Beta install folder | `_classic_beta_` (product `wow_classic_beta`) | local install; the launch folder may differ, so use `Find-WowInstall.py` |
+| Install folder | `_forever_` (product `wowf`; early beta used `_classic_beta_`) | local install; always confirm via `Find-WowInstall.py` |
 
 The Interface number can change at launch (expected November 2026) or with any patch. `Find-WowInstall.py` reads it from the installed build, so prefer that over this table.
 

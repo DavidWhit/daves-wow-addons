@@ -34,7 +34,7 @@ Load order in `daves_chat.toc`:
 | `Window.lua` | Background styles & `ns:ApplyBackground` (outer dialog fill, recessed `ns.tabColumnFill` & `ns.chatBoxFill`, light/dark divider contrast, `Window Settings` fill), shared `MakeSnapMover` (`ResetButtonVisual` + `dragStopTime` so draggable buttons never stick pushed), outer dialog border + `BACKGROUND` `ns.fill`, left `ns.tabColumn`, bordered inner `ns.chatBox` (`InsetFrameTemplate`), corner resize grips, draggable message-bubble open icon (`DavesChatToggle`), `ns.messageWheel`, `ns.SetButtonPulse` / whisper pulse, `GLOBAL_MOUSE_DOWN` click-to-clear Say box, faint fader (`StartFaintFader`, `ns:ApplyFaint`, `ns.chromeAlpha`), single-pass `ns:LayoutWindow`, `ns:ApplyEnabled`, `ns:SetCollapsed`, `ns:Init` |
 | `EditMode.lua` | `ns:ApplyPosition`, `ns:ResetPosition`, `ns:InitEditMode` (`Text direction` button grid, `Faint` checkbox; `d.OpenFor` keeps `"Window Settings"` title; `d.Layout` adds `8px` inner padding while keeping `Divider` centered) |
 | `Options.lua` | `Esc > Options > AddOns > Dave's Chat` checkboxes (`enabled`, `routeChannels`, `whisperAlert`) and combat-guarded `ns:OpenOptions` |
-| `Media/gear.tga`, `Media/grip.tga` | Uncompressed 32-bit `.tga` icons (`grip.tga` used on bottom resize corners; `gear.tga` retained on disk so `/reload` requires no client restart) |
+| `Media/grip.tga` | Uncompressed 32-bit `32×32` `.tga` resize corner grip icon used on both bottom corners |
 
 ---
 
@@ -98,5 +98,8 @@ Load order in `daves_chat.toc`:
   - Type some text **without** pressing `Enter`, then click the top-right **`X`** close button: verify the unsent text clears, focus releases, and the window closes immediately on the first click down to the message-bubble icon. Press `Enter` (or click the message-bubble icon and send a chat message) to verify chat reopens and sends messages cleanly with zero taint errors.
 - **Draggable Message-Bubble Open Icon & Header Settings Icons**:
   - While collapsed, drag the **message-bubble icon**: verify it stays unpressed (normal visual state) while and after dragging, and opens chat on the very next single click.
-  - In the header, click the **chat-bubble icon** on the right to open **Chat Settings**, and click the **window icon** next to it to open **Window Settings** (verifying no AddOn Options button appears in the window header).
+  - In the header, click the **chat-bubble icon** on the right to open **Chat Settings**, and click the **window icon** next to it to open **Window Settings** (verifying no AddOn Options button appears in the window header, and header tooltips open directly beside their buttons).
+- **Text Direction, Faint Mode, Default Window & Click-to-Clear Say Box (`0.3.4`)**:
+  - In **Window Settings**, toggle **Text direction** between `Bottom` and `Top` and verify message flow, wheel scrolling, and scrollbar orientation follow immediately; tick **Faint** and verify only chat text remains visible after moving the mouse off the window, with full chrome returning on hover.
+  - Right-click a non-temporary tab → tick **Default Window** (gold star appears) and verify `/reload` and reopening from the message-bubble icon select that tab; click any header/tab/grip control while the Say box holds unsent text to verify `GLOBAL_MOUSE_DOWN` clears the Say box cleanly while shift-clicking links in chat text still inserts them.
 - Run `python wow-addon-kit/plugins/wow-forever-addons/scripts/Get-WowScriptErrors.py -Addon daves_chat` (and `Get-WowTaintLog.py -Addon daves_chat` if anything is blocked).

@@ -8,24 +8,24 @@ argument-hint: "[find | tools | link-all | link <folder> | unlink <folder> | ref
 
 Arguments: `$ARGUMENTS`. With none, do the full setup (1 → 3, then 5).
 
-On Windows, run the Python scripts with `py -3`. They take the same arguments as the PowerShell originals and need no admin rights:
+Run the Python 3 kit scripts (`py -3` on Windows, `python3` on macOS; no admin rights needed):
 
 ```powershell
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/<Script>.py" <args>
 ```
 
-On a Mac only linking is supported: `Link-WowAddons.ps1` and `Find-WowInstall.ps1` run under PowerShell 7 (`pwsh -File ...`), and `link-wow-addons.sh` needs nothing but bash. The game is looked for at `/Applications/World of Warcraft`.
+On macOS, the Python scripts (`Find-WowInstall.py`, `Link-WowAddons.py`, `Test-WowAddon.py`, `Find-WowApi.py`, `Prepare-WowReview.py`) look for `/Applications/World of Warcraft` and create symlinks natively, and `link-wow-addons.sh` provides a pure-bash linking fallback (`Install-WowDevTools.py` downloads a Windows `luacheck.exe`; on macOS install `luacheck` via Homebrew/LuaRocks).
 
 ## 1. Find the game (`find`)
 
-`Find-WowInstall.py` lists every installed client with its build and TOC Interface number. It reads Blizzard's `.build.info` and `.flavor.info`, so the numbers are the installed build's own. Example output on the Forever beta:
+`Find-WowInstall.py` lists every installed client with its build and TOC Interface number. It reads Blizzard's `.build.info` and `.flavor.info`, so the numbers are the installed build's own. Example output on WoW: Forever:
 
 ```
-Folder         Flavor  Product          Version      Interface AddOns
-_classic_beta_ forever wow_classic_beta 1.60.1.70205     16001 C:\Program Files (x86)\World of Warcraft\_classic_beta_\Interface\AddOns
+Folder     Flavor  Product  Version      Interface AddOns
+_forever_  forever wowf     1.60.1.70707     16001 C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns
 ```
 
-The Forever beta installs as `_classic_beta_`. The launch folder name isn't confirmed yet, so always detect it rather than hard-coding it. If the game isn't found, ask for the install path and pass `-Root`.
+WoW: Forever installs under `_forever_` (product `wowf`; early beta builds used `_classic_beta_`). Always detect the client path with `Find-WowInstall.py` rather than hard-coding it. If the game isn't found, ask for the install path and pass `-Root`.
 
 ## 2. Install tools (`tools`)
 
@@ -50,11 +50,11 @@ py -3 Link-WowAddons.py -Remove                 # unlink them all
 On a Mac, from the repo root:
 
 ```sh
-pwsh wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.ps1     # with PowerShell 7
-bash wow-addon-kit/plugins/wow-forever-addons/scripts/link-wow-addons.sh     # without; --dry-run, --remove, --no-dev-addons, --wow-root DIR
+python3 wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.py    # TOC-aware symlinks
+bash wow-addon-kit/plugins/wow-forever-addons/scripts/link-wow-addons.sh      # pure-bash fallback; --dry-run, --remove, --no-dev-addons, --wow-root DIR
 ```
 
-The shell script doesn't read TOCs: it links every addon into every `_*_` client folder. Both scripts leave a correct link alone, re-point a link that points elsewhere, and move a real folder to `Interface/AddOns.backup/<Name>-<timestamp>` before linking. `-Flavor all` links every addon into every client. When run from `${CLAUDE_PLUGIN_ROOT}` outside the repo, pass `-Path`.
+The bash script doesn't read TOCs: it links every addon into every `_*_` client folder. Both scripts leave a correct link alone, re-point a link that points elsewhere, and move a real folder to `Interface/AddOns.backup/<Name>-<timestamp>` before linking. `-Flavor all` links every addon into every client. When run from `${CLAUDE_PLUGIN_ROOT}` outside the repo, pass `-Path`.
 
 ## 4. Link one addon into the game (`link` / `unlink`)
 

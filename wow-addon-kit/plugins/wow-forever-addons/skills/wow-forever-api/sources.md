@@ -14,7 +14,7 @@ Use these, in this order, when a question about the WoW API comes up. Don't rely
 
 ## Facts checked and where (2026-10-03)
 
-- Forever = 1.60.1, Interface 16001: Warcraft Wiki Public_client_builds, and the installed `_classic_beta_` build 1.60.1.70205.
+- Forever = 1.60.1, Interface 16001: Warcraft Wiki Public_client_builds, and the installed `_forever_` build 1.60.1.70707 (early beta `_classic_beta_` build 1.60.1.70205).
 - `WOW_PROJECT_CAMELOT = 18`: `Blizzard_ProjectConstants/Camelot/ProjectConstants.lua`.
 - `mainline` includes `camelot`; `[Family]`=Mainline and `[Game]`=Camelot: `Blizzard_UnitFrame.toc` on the forever branch.
 - CLEU registration errors on 12.x: Warcraft Wiki Patch_12.0.0/API_changes. Forever shares the Midnight API one-for-one (Blizzard developer statements reported by Icy Veins and Kami Labs, September 2026).

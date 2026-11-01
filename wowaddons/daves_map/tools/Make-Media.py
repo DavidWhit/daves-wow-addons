@@ -1,4 +1,4 @@
-"""Paint daves_map's dot.tga and ring.tga. Matches Make-Media.ps1.
+"""Paint daves_map's dot.tga and ring.tga.
 
 Both are uncompressed 32-bit TGA, 64x64, top-left origin.
 """

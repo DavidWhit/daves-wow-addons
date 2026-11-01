@@ -10,7 +10,7 @@ A replacement for the default bags: one combined window styled like WoW's **HUD 
 
 - Unzip so the folder is `World of Warcraft\_<version>_\Interface\AddOns\daves_sack\`, replacing the old folder.
 - **If the update adds new image files (`.tga`), fully restart WoW.** `/reload` doesn't pick up new files.
-- `/sack` opens the bags. `/sack options` opens Options. Everything else is in the Options window (⚙ Settings button). Drag an item onto the delete button beside Settings to destroy it.
+- `/sack` (or `/davessack`) opens the bags. `/sack options` (or `/sack settings`, `/sack config`) opens **Bag Settings** (⚙ Settings button in the toolbar; `"Confirm delete (trash)"` is also in `Esc > Options > AddOns > Dave's Sack`). Drag an item onto the delete button beside Settings (or click it while holding an item) to destroy it.
 
 ## Files
 
@@ -76,8 +76,11 @@ A replacement for the default bags: one combined window styled like WoW's **HUD 
 - **Categories:**
   - Junk = grey quality.
   - Quest items are detected by the game's quest flag.
+  - Keys = keyring-only section (`KEYRING_CONTAINER`, shown when `HasKey()`).
   - Profession tools are a short list of item IDs, plus fishing poles.
   - Reagents and Consumables use the game's item subclass. Very old item data with generic subclasses falls back to name keywords (potion, elixir, flask…) and the item's use-spell (Food/Drink).
+  - Reagent-bag routing (`Prefer the reagent bag`, v1.7.8) places reagents into bag 5 (`Enum.BagIndex.ReagentBag`) using item/bag family bits and splits Free Space & footer counters into normal + reagent parts.
+  - Taint-safe secure controls & item destroy (v1.7.10–1.7.18): close (`MainMenuBarBackpackButton`) and currency (`CharacterMicroButton`) clicks use `SecureActionButtonTemplate` buttons parked off-window on `PLAYER_REGEN_DISABLED`; the toolbar Destroy button uses a taint-free HUD Edit Mode confirmation dialog (`DavesSackConfirm`, controlled by `"Confirm delete (trash)"`).
 - **Primary over secondary professions** for shared materials (user rule).
 - **Start collapsed:** categories ticked in Settings start collapsed every time the bags open. Unticked ones open expanded. You can still collapse or expand during a session. (Saved internally as `startFolded`.)
 - **WoW: Forever facts (checked in Blizzard's own Forever UI source, branch `forever`, build 1.60.1, internal game type "camelot"):**
@@ -92,7 +95,7 @@ A replacement for the default bags: one combined window styled like WoW's **HUD 
   - The item area is never shorter than about 3 rows.
 - **Width snaps to whole columns** while resizing.
 - **Hard size limits** (user rule, v1.7.8): sizes that don't make sense aren't allowed anywhere. `ns.MinColumns` / `ns.MaxColumns` / `ns.MaxViewHeight` are the single source: the corner grips, the Settings sliders (whose ranges are re-read on every refresh), `Layout`, `Restore Defaults` and the saved values at load all go through `ns.ClampColumns` / `ns.ClampViewHeight`. The floor is 8 columns (v1.7.15): that is the narrowest width where Sort, Settings, the delete button and the search box all fit, with the scrollbar reserved. The footer can still force the window wider.
-- **Background** (v1.7.8): one setting drives the alpha of Blizzard's dialog border background on both windows. 80% is the translucent template Blizzard's Edit Mode uses; 100% matches its opaque dialogs.
+- **Background & Background style** (v1.7.8–1.7.16): drive the alpha and texture (`Dark`, `Light paper`, `Dark paper`, `Marble`, `Rock`) of Blizzard's dialog border background across all three windows (`DavesSackFrame`, `Bag Settings`, and `DavesSackConfirm`). 80% is the translucent template Blizzard's Edit Mode uses; 100% matches its opaque dialogs.
 - The window is anchored by its **bottom-right corner**, like the default bags, so it grows up and to the left.
 
 ### Third advisor review (v1.7) — what was fixed
@@ -121,16 +124,13 @@ Checked and fine by the reviewer: `bit.band` (used by Blizzard's own UI on this 
 
 ## Testing
 
-`run_all.py` (kept outside the addon) runs 42 checks against a simulated WoW API in three setups:
-1. WoW: Forever with Blizzard's scrollbar.
-2. A Retail-like client.
-3. A Classic-like client with no currency API and the fallback scrollbar.
-
-It covers categories and sub-groups, camping, item-slot layering (tooltips), currencies (including wrapping), drop-anywhere, split stacks, merge refresh vs. vendor gap-holding, size locked while open, the scrollbar crash replay, Settings, start-collapsed, defaults and minimum height. A parser-based scan also confirms no accidental global variables.
+Validation and debugging run through `wow-addon-kit` and the live WoW: Forever (`16001`) client:
+1. Static validation & review packets: `Test-WowAddon.py` and `Prepare-WowReview.py -Path wowaddons/daves_sack`.
+2. In-game error & taint inspection: `!WowKitErrors` (`Get-WowScriptErrors.py -Addon daves_sack`) plus `Get-WowTaintLog.py -Addon daves_sack` (used across v1.7.7–v1.7.18 to diagnose and eliminate bag/vendor/bank/combat taint).
 
 ## Lessons learned
 
-- **Never call Blizzard's bag functions (`CloseAllBags`, `ToggleAllBags`) from addon code.** They run tainted and taint Blizzard's bag state, which spreads to the merchant window and blocks item use there (v1.7.7).
+- **Never call Blizzard's bag or panel functions (`CloseAllBags`, `ToggleAllBags`, `ToggleCharacter`) from addon code, and never `UnregisterEvent` on Blizzard's parked container frames.** Doing so taints Blizzard's bag/bank/mail state (`BankPanel.bankType`, `UseContainerItem`, `C_Bank.PurchaseBankTab`); use `SecureActionButtonTemplate` buttons parked on `PLAYER_REGEN_DISABLED` when a click must invoke Blizzard UI (v1.7.7, v1.7.10–1.7.14).
 - **Never change the scroll position inside a scroll callback** when using Blizzard's scroll frame. Its bar and frame update each other, and only stop when nothing changes (v1.6 crash).
 - **Blizzard's item button template pins frame level 10.** Anything we create must sit above it explicitly, or the window steals the mouse (v1.5 tooltip bug).
 - **Don't depend on Blizzard art or add-ons for our own icons.** The help-plate "i" didn't render on the user's client (v1.3).
@@ -139,20 +139,15 @@ It covers categories and sub-groups, camping, item-slot layering (tooltips), cur
 
 ## Performance notes
 
-- Item buttons are created once and reused.
-- Bag events only mark bags "dirty". Work happens at most once per frame, and never while the window is closed.
+- Item buttons are pre-created outside combat (`PrepareButtons` on login, world entry, bag change, and `PLAYER_REGEN_DISABLED`) and reused so items remain usable during combat lockdown (v1.7.12).
+- Bag events only mark bags "dirty". Slot scanning and layout happen at most once per frame while the window is open.
 - A lock change repaints one slot. Cooldowns are batched. Buttons are only repainted or moved when something visibly changed.
-- Blizzard's own (hidden) bag frames have their events switched off while they hold your bags, and restored for bank bags.
+- Blizzard's own container frames are parked on a hidden parent so their `OnShow` never runs, while keeping their load-time events intact so Blizzard's own bag/bank bookkeeping stays untainted (v1.7.14).
 - While the mouse is over the window **and** a merchant, mailbox, trade, bank or auction window is open, emptied slots stay as gaps instead of the grid sliding, so the next item never slides under a right-click. It tidies up when the mouse leaves. Otherwise (e.g. merging stacks) it refreshes immediately.
 - The Options window isn't built until first opened.
 
 ## Known limits / things to verify in game
 
-- Everything is tested in a simulated version of the WoW API, not the real client. Check in game after each update.
+- Check in game after each update (`Get-WowScriptErrors.py -Addon daves_sack` and `Get-WowTaintLog.py -Addon daves_sack`).
 - Consumable fallback words (potion, elixir, flask…) and the Food/Drink spell names only match English clients. Modern item data uses subclasses, which work in any language.
-- Combat: using items from the bags in combat should be checked with `/console taintLog 1` (advisor flag).
-- WoW: Forever was in beta at the time of writing (launch November 2026); its interface number may change at launch. If the AddOns list says "out of date", add the new number to the first line of the `.toc`.
-
-## Design canvas
-
-Concepts A–E (and the Forged vs. Edit Mode comparison) live in the "WoW Bags Concepts" canvas artifact.
+- If the WoW: Forever client updates its Interface number on a patch and the AddOns list says "out of date", check `Find-WowInstall.py` and update the first line of `daves_sack.toc`.

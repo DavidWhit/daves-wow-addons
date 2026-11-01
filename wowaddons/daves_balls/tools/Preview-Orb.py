@@ -1,4 +1,4 @@
-"""Composite the orb TGA layers to a PNG. Matches Preview-Orb.ps1's pixel math.
+"""Composite the orb TGA layers to a PNG.
 
 The PNG container is written with the stdlib. It will not be byte-identical to a
 System.Drawing PNG. The pixels are the same sequence the PowerShell script stores.

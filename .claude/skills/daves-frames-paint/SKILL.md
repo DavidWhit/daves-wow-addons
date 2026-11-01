@@ -64,9 +64,10 @@ Run `Pack-FrameTemplate.py`:
 
 ```powershell
 # Example: boss / elite plate + matching forged-silver rareelite atlas
+# (QA --preview renders go to gitignored tools/template/preview/; pre-aligned 2048x600 RGBA plates live in tools/template/plates/)
 py -3 "wowaddons/daves_frames/tools/Pack-FrameTemplate.py" `
   --source "wowaddons/daves_frames/tools/template/paintings/<theme>.png" `
-  --plate-out "wowaddons/daves_frames/tools/template/preview/<theme>-plate.png" `
+  --plate-out "wowaddons/daves_frames/tools/template/plates/<theme>-plate.png" `
   --preview "wowaddons/daves_frames/tools/template/preview/<theme>-preview.png" `
   --out "wowaddons/daves_frames/Media/frame-elite.tga" `
   --silver-out "wowaddons/daves_frames/Media/frame-rareelite.tga"

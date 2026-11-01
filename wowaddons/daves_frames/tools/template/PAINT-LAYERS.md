@@ -65,11 +65,11 @@ The name is `44` layout px inside the `56 px` window. Scale `0.65` keeps that na
      >    - **White (`#FFFFFF`) lower circular level ring:** `<matching signet bezel>` sitting cleanly on top of the lower portrait ring around the flat `#FFFF00` yellow hole.
 2. **Pack into `Media/` with `Pack-FrameTemplate.py`:**
    ```powershell
-   # Standard gold plate + automatic silver rare grading:
-   py -3 tools\Pack-FrameTemplate.py --source painted.png --plate-out tools\template\preview\mask-plain.png --preview tools\template\preview\mask-plain-preview.png --out Media\frame-plain.tga --silver-out Media\frame-rare.tga
+   # Standard gold plate + automatic silver rare grading (canonical RGBA plate saved in tools/template/plates/; QA preview in gitignored tools/template/preview/):
+   py -3 tools\Pack-FrameTemplate.py --source painted.png --plate-out tools\template\plates\plain-plate.png --preview tools\template\preview\plain-preview.png --out Media\frame-plain.tga --silver-out Media\frame-rare.tga
 
    # Dedicated boss / elite plate + silver rareelite grading:
-   py -3 tools\Pack-FrameTemplate.py --source tools\template\paintings\boss.png --plate-out tools\template\preview\boss-plate.png --preview tools\template\preview\boss-preview.png --out Media\frame-elite.tga --silver-out Media\frame-rareelite.tga
+   py -3 tools\Pack-FrameTemplate.py --source tools\template\paintings\boss.png --preview tools\template\preview\boss-preview.png --out Media\frame-elite.tga --silver-out Media\frame-rareelite.tga
    ```
    - **Rounded or sculpted outer corners (optional):**
      - `--outer-radius <layout_px>` (e.g. `--outer-radius 8` or `12`, up to `28`): punches a mathematically identical signed-distance corner radius on all four outer corners of both the plate and the 9-slice aura board strip.

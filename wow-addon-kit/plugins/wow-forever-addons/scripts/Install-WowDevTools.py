@@ -1,4 +1,4 @@
-"""Install luacheck and refresh the Forever API index. Matches Install-WowDevTools.ps1."""
+"""Install luacheck and refresh the Forever API index."""
 
 from __future__ import annotations
 

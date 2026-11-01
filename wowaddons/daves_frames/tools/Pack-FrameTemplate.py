@@ -17,7 +17,7 @@ already-aligned 2048 x 600 RGBA plate:
    (`--silver-out`) for rare / rareelite.
 
 Usage:
-    py -3 tools/Pack-FrameTemplate.py --source painted.png --out Media/frame-plain.tga --silver-out Media/frame-rare.tga --preview tools/template/preview/mask-plain-preview.png
+    py -3 tools/Pack-FrameTemplate.py --source painted.png --out Media/frame-plain.tga --silver-out Media/frame-rare.tga --preview tools/template/preview/plain-preview.png
 """
 
 from __future__ import annotations

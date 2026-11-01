@@ -1,4 +1,4 @@
-"""Static checks for a WoW addon folder. Behavior matches Test-WowAddon.ps1."""
+"""Static checks for a WoW addon folder."""
 
 from __future__ import annotations
 

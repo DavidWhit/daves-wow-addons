@@ -5,6 +5,7 @@ package-as: daves_chat
 
 ignore:
   - README.md
+  - NOTES.md
   - .luacheckrc
   - .vscode
   - tests

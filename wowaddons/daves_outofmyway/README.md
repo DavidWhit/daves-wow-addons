@@ -1,8 +1,8 @@
-# Dave's Out Of My Way (daves_outofmyway)
+# Dave's Out Of My Way (`daves_outofmyway`)
 
-Blizzard frames that get in the way, moved or opened up.
+Blizzard frames that get in the way, moved or opened up (`v0.1.4`).
 
-Targets: Forever (`## Interface: 16001`).
+Targets: Forever, Classic Era, Anniversary (`## Interface: 16001, 11509, 20506`; designed for WoW: Forever `16001`).
 
 ## What it does
 
@@ -13,11 +13,11 @@ Targets: Forever (`## Interface: 16001`).
   - If something turns one back on, it's switched off again at the next logout. If they come back after a reload anyway (the client doesn't keep them), the addon says so once and leaves them alone; tick the option again to retry.
   - With both off, every buff shows, up to 32. Edit Mode's Icon Limit on the buff frame only sets how many sit in each row.
   - `/oomw buffs` shows the state.
-- **The flight-path dismount button** (MainMenuBarVehicleLeaveButton, "request early landing") is not moved by this addon on purpose. It is one of Blizzard's own Edit Mode frames on Forever: tick **Vehicle Leave Button** in Edit Mode's settings (click Expand options, then Misc) and drag it there. An addon can't hold it anywhere. Edit Mode places it again with the action bars every time it appears, and moving it from addon code would taint the action bars, so actions would be blocked in combat. Opening Edit Mode reminds you once if that setting is off.
+- **The flight-path dismount button** (`MainMenuBarVehicleLeaveButton`, "request early landing") is not moved by this addon on purpose. It is one of Blizzard's own Edit Mode frames on Forever: tick **Vehicle Leave Button** in Edit Mode's settings (click Expand options, then Misc) and drag it there. An addon can't hold it anywhere. Edit Mode places it again with the action bars every time it appears, and moving it from addon code would taint the action bars, so actions would be blocked in combat. Opening Edit Mode reminds you once if that setting is off.
 
 One known limit: while a roll is open, Blizzard's own roll container still takes its usual space, empty, above the action bars. Loot toasts stack above that gap. Changing the container would taint the managed layout it shares with protected frames, so it's left alone.
 
-`/oomw` opens the options. Also `/oomw reset` (loot rolls back to Blizzard's spot), `/oomw buffs` (the buff frame's state), `/oomw leave` (the dismount-button tip) and `/oomw version`.
+`/oomw` (or `/davesoutofmyway`, `/oomw options`) opens the options. Also `/oomw reset` (loot rolls back to Blizzard's spot), `/oomw buffs` (the buff frame's state), `/oomw leave` (the dismount-button tip) and `/oomw version`.
 
 ## How (and why it's taint-safe)
 
@@ -31,8 +31,9 @@ One known limit: while a roll is open, Blizzard's own roll container still takes
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `Test-WowAddon.py -Path . -Flavor forever` |
-| Link into the game | `Link-WowAddons.py -Path .` |
+| Check the addon | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py -Path wowaddons/daves_outofmyway -Flavor forever` |
+| Prepare review packet | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Prepare-WowReview.py -Path wowaddons/daves_outofmyway` |
+| Link into the game | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.py -Path wowaddons/daves_outofmyway` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
 | File | Purpose |

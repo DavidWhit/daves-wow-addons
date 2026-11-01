@@ -1,4 +1,4 @@
-"""Put one addon into a client's AddOns folder. Matches Deploy-WowAddon.ps1."""
+"""Put one addon into a client's AddOns folder."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wowkit
 
 # robocopy /XD and /XF are case-insensitive on Windows.
-EXCLUDE_DIRS = {".git", ".vscode", "tests", ".release"}
-EXCLUDE_FILES = [".luacheckrc", ".pkgmeta", ".gitignore", "README.md", "*.zip"]
+EXCLUDE_DIRS = {".git", ".vscode", "tests", "tools", "__pycache__", ".release"}
+EXCLUDE_FILES = [".luacheckrc", ".pkgmeta", ".gitignore", "README.md", "NOTES.md", "*.zip"]
 
 
 def _excluded_dir(name):
