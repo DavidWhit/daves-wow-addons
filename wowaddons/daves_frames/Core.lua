@@ -214,7 +214,10 @@ SlashCmdList["DAVES_FRAMES"] = function(msg)
 			ns:ApplyArt(which)
 			ns.Print("art: " .. which .. ".  /davesframes art auto puts it back on the unit.")
 		else
-			ns.Print("art: plain, rare, elite, rareelite, or auto.")
+			local names = {}
+			for key in pairs(ns.VARIANTS) do names[#names + 1] = key end
+			table.sort(names)
+			ns.Print("art: " .. table.concat(names, ", ") .. ", or auto.")
 		end
 	else
 		ns.Print("commands: /davesframes [options | test | art | version]")

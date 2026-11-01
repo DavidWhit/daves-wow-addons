@@ -206,7 +206,10 @@ function ns:BuildFrame(variant)
 	f.portraitBack:SetColorTexture(1, 1, 1, 1)
 	f.portraitBack:SetGradient("VERTICAL", CreateColor(0.03, 0.02, 0.015, 1), CreateColor(0.14, 0.11, 0.075, 1))
 	f.portrait = overlay:CreateTexture(nil, "ARTWORK")
-	f.portrait:SetAllPoints(f.portraitBack)
+	-- Oversized to L.rOut so SetPortraitTexture's built-in circular margin sits past pr2 while
+	-- f.portraitMask crops cleanly under the ring (passing disableMasking=true would unmask the
+	-- engine's shared per-unit portrait texture on Blizzard's stock unit frames).
+	Rect(f.portrait, f, L.cx - L.rOut, L.cy - L.rOut, L.cx + L.rOut, L.cy + L.rOut)
 	local mask = overlay:CreateMaskTexture()
 	mask:SetAllPoints(f.portraitBack)
 	mask:SetTexture(ns.CIRCLE, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
@@ -290,18 +293,13 @@ function ns:ApplyArt(key)
 	if not f then return end
 	f.art:SetTexture(L.texture)
 	f.art:SetTexCoord(unpack(L.art))
-	local mid = L.metal[2]
 	if ns.boards then
 		for _, b in pairs(ns.boards) do
-			for _, t in ipairs(b.ornate) do
-				t:SetTexture(L.texture)
-				if t.tc then t:SetTexCoord(unpack(t.tc)) end
-			end
 			for _, t in ipairs(b.chains) do
 				t:SetTexture(L.chain, "CLAMP", "REPEAT")
 			end
 			if b.plain and b.plain[1] then
-				b.plain[1]:SetColorTexture(mid[1], mid[2], mid[3], 1)
+				b.plain[1]:SetColorTexture(ns.BoardEdgeColor(L))
 			end
 		end
 	end

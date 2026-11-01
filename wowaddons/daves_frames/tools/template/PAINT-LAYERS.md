@@ -1,6 +1,6 @@
 # Painting a frame
 
-One single-box template for every unit (`plain`, `rare`, `elite` / `worldboss`, `rareelite`, and future class frames):
+One single-box template for every unit (`plain`, `rare`, `elite` / `worldboss`, `rareelite`, and the nine class frames):
 
 - **Exact 2× canvas mask:** [`guides/frame-template.png`](guides/frame-template.png) (`2048 × 600`, two image pixels per layout pixel).
 - **16:9 AI-padded mask (for Gemini Nano Banana / Imagine):** [`guides/frame-template-ai.png`](guides/frame-template-ai.png) (`2048 × 1152`, exact `16:9` with `276` image px of `#FF00FF` magenta padding top and bottom so `16:9` AI image editors keep exact `1:1` proportions with zero stretching or crown clipping).
@@ -11,7 +11,7 @@ One single-box template for every unit (`plain`, `rare`, `elite` / `worldboss`, 
 py -3 tools\Build-FrameTemplate.py
 ```
 
-After painting, [`../Pack-FrameTemplate.py`](../Pack-FrameTemplate.py) registers the AI output back onto the `2048 × 600` mask, strips key fringes, builds the matching 2× `600 × 220` aura board strip, and writes `Media/frame-*.tga`.
+After painting, [`../Pack-FrameTemplate.py`](../Pack-FrameTemplate.py) registers the AI output back onto the `2048 × 600` mask, strips key fringes, builds the matching 2× `600 × 220` aura board strip, and writes `Media/frame-*.tga`. The frame does not draw that strip. Buffs and debuffs use a thin border in `Auras.lua`.
 
 ## Colours
 
@@ -44,7 +44,7 @@ Layout pixels, y downward. The 2× PNG is twice this (`2048 × 600`), and `frame
 | Lip | `5 px` around each hole. On the inner end it runs out to the ring, so the gap meets the circle |
 | Outer frame | Plate `8,81` to `1016,191`. It stops where the ring overlaps the middle |
 | Level ring | White band on top of the portrait ring, centre `512, 252`. Outer diameter `92`, band `16`. Yellow hole inside, `60 px` across |
-| Board strip | `600 × 220` at `y = 608` in the `2048 × 1024` atlas (left `150` + right `150` layout px of the plate at 2× over a dark recessed backing; 9-slice corners `56` atlas px / `28` layout px) |
+| Board strip | `600 × 220` at `y = 608` in the `2048 × 1024` atlas (left `150` + right `150` layout px of the plate at 2× over a dark recessed backing; 9-slice corners `56` atlas px / `28` layout px). Packed, not drawn. The live boards are a 2 px border |
 
 The two bars are gapped by the ring. Each ends on the ring the same way: a `5 px` lip, then the orange band. The grey frame is the border around that lip, on the outside of the plate.
 

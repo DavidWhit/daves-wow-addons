@@ -109,6 +109,7 @@ Looked up for daves_frames (a target frame) in `Blizzard_APIDocumentationGenerat
 | Aura time left | `C_UnitAuras.GetAuraDuration(u, id)` is **not** secret → `C_DurationUtil.CreateDurationTextBinding()`: `:SetFontString(fs)`, `:SetDuration(d)`, `:SetEnabled(not d:IsZero())` | Blizzard's pattern: `Blizzard_AuraContainer/Blizzard_CustomAuraButton.lua`. `Cooldown:SetCooldownFromDurationObject` is a **protected** function: avoid in addon code |
 | Aura stacks | `C_UnitAuras.GetAuraApplicationDisplayCount(u, id, 2, 99)` → string ("" below 2) into `SetText` | |
 | Dispel colour | `C_UnitAuras.GetAuraDispelTypeColor(u, id, colorCurve)` with a `C_CurveUtil.CreateColorCurve()` keyed by dispel type ID | Untainted-only arguments; read `auraData.dispelName` when it isn't secret instead |
+| Unit 2D portrait | `SetPortraitTexture(tex, u)` (leave 3rd arg `disableMasking` omitted/`false`; oversize `tex` slightly and crop with `MaskTexture`) | Passing `true` unmasks the engine's shared per-unit portrait texture in VRAM and puts a dark `#000E21` square behind Blizzard's stock unit frames |
 | Player movement | `IsPlayerMoving()`, `GetPlayerFacing()` (nil in instances) | |
 
 ## Other Midnight/Forever restrictions

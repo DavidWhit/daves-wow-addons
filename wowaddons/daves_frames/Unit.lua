@@ -169,14 +169,23 @@ local function HealthShades(unit)
 	return HEALTH
 end
 
--- Players and ordinary NPCs share the plain frame. A rare is the same frame in silver.
--- An elite (and a world boss) uses the elite key, still in the same box. A secret classification
--- can't be read, so the frame stays plain rather than guessing.
+-- A player uses their class plate when the class token can be read. UnitClass is secret when
+-- unit identity is restricted, and a secret can't be a table key, so that frame stays plain.
+-- NPCs follow classification. A secret classification stays plain rather than guessing.
 function ns.ArtFor(unit)
 	if ns.artForce and ns.VARIANTS[ns.artForce] then return ns.artForce end
 	if not unit then return "plain" end
 	local player = UnitIsPlayer(unit)
-	if Secret(player) or player then return "plain" end
+	if Secret(player) then return "plain" end
+	if player then
+		local _, classFile = UnitClass(unit)
+		if Secret(classFile) then return "plain" end
+		if classFile then
+			local key = classFile:lower()
+			if ns.VARIANTS[key] then return key end
+		end
+		return "plain"
+	end
 	local class = UnitClassification(unit)
 	if Secret(class) then return "plain" end
 	if class == "rareelite" then return "rareelite" end
@@ -210,9 +219,10 @@ function ns:UpdateIdentity()
 end
 
 function ns:UpdatePortrait()
-	-- The third argument turns off the engine's own circle. That circle sits inside the
-	-- texture and left a gap between the portrait and the ring. Our mask does the crop.
-	if ns.unit then SetPortraitTexture(ns.frame.portrait, ns.unit, true) end
+	-- Never pass disableMasking=true (3rd arg): SetPortraitTexture updates a shared per-unit
+	-- engine texture, which turns Blizzard's stock unit-frame portrait into a dark square.
+	-- Frame.lua sizes f.portrait to L.rOut so the engine's circle clears the opening and our mask crops it.
+	if ns.unit then SetPortraitTexture(ns.frame.portrait, ns.unit) end
 end
 
 function ns:UpdateTargetOfTarget()

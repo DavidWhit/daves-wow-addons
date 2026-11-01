@@ -5,7 +5,7 @@ description: Paint, generate, restyle, or pack an AI target unit frame theme (pl
 
 # Paint and pack a `daves_frames` target frame
 
-Every unit variant in `wowaddons/daves_frames/` (`plain`, `rare`, `elite` / `worldboss`, `rareelite`, and future class frames) shares **one exact single-box geometry** (`1024 × 300` layout px; `2048 × 600` 2× canvas) packed into a `2048 × 1024` 32-bit `.tga` atlas (`Media/frame-*.tga`) with its matching 2× `600 × 220` 9-slice aura board strip at `y = 608`.
+Every unit variant in `wowaddons/daves_frames/` (`plain`, `rare`, `elite` / `worldboss`, `rareelite`, and the nine class frames) shares **one exact single-box geometry** (`1024 × 300` layout px; `2048 × 600` 2× canvas) packed into a `2048 × 1024` 32-bit `.tga` atlas (`Media/frame-*.tga`) with its matching 2× `600 × 220` 9-slice aura board strip at `y = 608`.
 
 Full pixel coordinates live in `wowaddons/daves_frames/tools/template/PAINT-LAYERS.md` and `wowaddons/daves_frames/NOTES.md`.
 
@@ -85,19 +85,20 @@ py -3 "wowaddons/daves_frames/tools/Pack-FrameTemplate.py" `
 | `--organic-edge` | Optional chroma-keyed outer contour mode for chipped/bevelled outer corners while keeping the inner `7 px` bar/ring seal airtight |
 
 Built-in `Layout.lua` variants:
-- `Media/frame-plain.tga` (`plain`: players and normal NPCs)
+- `Media/frame-plain.tga` (`plain`: ordinary NPCs, and players whose class token is secret)
 - `Media/frame-rare.tga` (`rare`: normal rares, typically `--silver-out` of `plain`)
 - `Media/frame-elite.tga` (`elite`: elites and world bosses)
 - `Media/frame-rareelite.tga` (`rareelite`: rare-elites, typically `--silver-out` of `elite`)
+- `Media/frame-<class>.tga` (`warrior`, `paladin`, `hunter`, `rogue`, `priest`, `shaman`, `mage`, `warlock`, `druid`: players when `UnitClass` returns a non-secret token)
 
-If adding a new art key (such as a class frame), wire it into `Layout.lua` (`VARIANTS`), `Core.lua` (`/davesframes art`), and `daves_frames/README.md` + `NOTES.md`.
+If adding a brand-new art key beyond the built-in variants above, wire it into `Layout.lua` (`VARIANTS`), `Core.lua` (`/davesframes art`), and `daves_frames/README.md` + `NOTES.md`.
 
 ## 4. Check the result
 
 - **Registration fit:** Check the `registered ... -> 2048x600:` line printed by `Pack-FrameTemplate.py`:
-  - Good `16:9` single-box renders hit `max_err <= 2.0 px` (typically `< 1 px`) and `aspect_drift < 2.0%` (typically `0.1%–0.5%`).
+  - Good `16:9` single-box renders hit `max_err <= 2.0 px` (typically `< 1.5 px`) and `aspect_drift < 2.0%` (typically `0.1%–0.5%`).
   - If `Pack-FrameTemplate.py` prints `WARNING: high geometry drift detected` (`max_err > 6 px` or `aspect_drift > 4%`), do **not** ship the texture — re-run Step 2 with stricter stencil adherence on `guides/frame-template-ai.png`.
-- **Visual inspection:** View the `--preview` PNG with `read_file` (and optionally convert the `.tga` atlas via `wowaddons/daves_frames/tools/Preview-Tga.ps1` to inspect the `600 × 220` 9-slice aura board strip at `y = 608`). Verify:
+- **Visual inspection:** View the `--preview` PNG with `read_file` (and optionally convert the `.tga` atlas via `wowaddons/daves_frames/tools/Preview-Tga.ps1` to inspect the `600 × 220` 9-slice aura board strip packed at `y = 608`; note that live aura boards use `Auras.lua` `ThinBoard` rather than drawing the strip). Verify:
   - Crisp outer edges with zero `#FF00FF` magenta or `#0000FF` blue halo;
   - Complete, symmetrical `5 px` inner bar lips on both left and right bar openings;
   - Concentric portrait ring (including the upper crown) and lower circular level ring;
@@ -110,10 +111,10 @@ If adding a new art key (such as a class frame), wire it into `Layout.lua` (`VAR
 
 - Report the saved source painting (`tools/template/paintings/<theme>.png`), the packed `Media/frame-*.tga` files, and the registration metrics (`max_err` and `aspect_drift`).
 - Remind the user that **new or updated `.tga` files require a full WoW client restart** (not `/reload`).
-- In game, preview any variant immediately on yourself without hunting for a mob:
+- In game, preview any variant immediately on yourself without hunting for a mob or rerolling a class:
   ```text
   /davesframes test
+  /davesframes art warrior
   /davesframes art elite
-  /davesframes art rareelite
   /davesframes art auto
   ```

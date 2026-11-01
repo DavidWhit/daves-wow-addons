@@ -4,7 +4,7 @@ One widget box for every unit. Players, ordinary NPCs, rares, and elites share i
 
 The paint mask is [`tools/template/guides/frame-template.png`](tools/template/guides/frame-template.png) (`2048 × 600`), alongside the `16:9` AI-padded guide [`tools/template/guides/frame-template-ai.png`](tools/template/guides/frame-template-ai.png) (`2048 × 1152`), built by [`tools/Build-FrameTemplate.py`](tools/Build-FrameTemplate.py) from [`tools/template/frame-template.json`](tools/template/frame-template.json). The numbers below are that file, and they are the numbers in `Layout.lua`.
 
-`Media/frame-plain.tga` and `frame-elite.tga` have this gold plate in the top `2048×600` (including the level ring) and its matching 2× `600×220` aura board strip at `y = 608..828`, packed by [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.py). `frame-rare.tga` and `frame-rareelite.tga` are that same plate and board strip graded in silver.
+`Media/frame-plain.tga` and `frame-elite.tga` have this gold plate in the top `2048×600` (including the level ring). [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.py) still packs a 2× `600×220` strip at `y = 608..828`, and `frame-rare.tga` and `frame-rareelite.tga` grade that plate and strip in silver. The aura boards do not draw the strip. They are a thin border.
 
 Units: **layout pixels** (the frame before the 0.5 real-scale factor). One layout pixel is 2 pixels on the 2× mask.
 
@@ -145,18 +145,16 @@ client's language). The name is 44 layout px. The frame's smallest scale is 0.65
 
 ## 6. Aura boards
 
-Your debuffs on the target on the **left** board, their buffs on the **right**. Each board is its own billboard
-in the frame's metal.
+Your debuffs on the target on the **left** board, their buffs on the **right**. Each board is a thin border
+around the icons, the same on chains and right under the bar.
 
 ### Board art
 
-Made from the plate by [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.py), never painted separately: the left `150` and right `150` layout px (`300` + `300` atlas px at 2×) of the plate (`y = 81..191` layout px → `220` atlas px tall), placed side by side over a dark recessed billboard backing (`600 × 220` strip at `y = 608..828` of the `2048 × 1024` atlas). Drawn as a 9-slice. The slice insets are `56 / 56 / 56 / 56` atlas px (`top / right / bottom / left`), which is `28 / 28 / 28 / 28` layout px (`ns.STD.board`: `22` outer frame + `5` lip + `1` inset margin, enclosing each 45° mitered corner at exact 2× sharpness and fitting `6` aura icons per row in the `360 px` lane). The dark recessed backing hides the `36 px` chain tail behind the board and backs the timer numbers.
+A 2 layout px hairline (`ns.STD.plainPad.border`) in a dimmed version of the plate's mid metal (`ns.BoardEdgeColor`, 45% of the mid tone at 85% alpha), with a faint dark fill (alpha 0.35) inside it. At Scale 1 that line is about one screen pixel. Padding is 4 px top and bottom and 3 px on the sides, outside that line. The icon's 2 px border sits inside the top padding. The atlas still holds the old `600 × 220` 9-slice strip at `y = 608..828` (`ns.L.board` is the 28 px corner the packer uses). The boards do not sample it.
 
 ### Contents
 
 - One slot per aura: a 40 px icon, then its time left 5 px below it. Slots are 10 px apart, with 6 px between rows.
-- Padding is 9 px at the top and 6 px at the bottom. The icon's 3 px border sits in the top padding, so the space
-  above the icons matches the space below the timers.
 - Icon border by type: magic `#3c8cff`, curse `#9b30ff`, enrage `#ff7a1a`, physical `#c0261a`.
 - Time left turns red under 5 s.
 - **Stacks:** one icon per aura, never repeats. From 2 stacks a count badge shows in the bottom-right corner, and
@@ -170,7 +168,7 @@ Made from the plate by [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.
 - **Two vertical chains**, `ns.STD.chainIn` in from each end (half a one-aura board: slot, gap, the board's side insets and padding). A single aura hangs centred under the outer chain alone.
 - **Chain sizes:** each chain hooks on 14 px above its pivot. The pivot is `pivotY` 189. The plate bottom is `plateB` 191.
   The board's top hangs 36 px below the pivot. The painted lip ends above `plateB`, so the chain shows below the plate.
-  Each chain carries on 36 px behind the board so it never looks unhooked.
+  Each chain tucks under the top edge by the border plus the top padding (`chainTail`, 6 px) and stops before the icons.
 - **Growing and shrinking:** the outer chain never moves. The inner chain's top slides along its track first and
   the board's edge follows, so the chain leans briefly (/ when growing to the right, \ when shrinking) and then
   hangs straight. On the right board it's the mirror image.
@@ -180,8 +178,8 @@ Made from the plate by [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.
 
 | Setting | |
 | --- | --- |
-| **On chains** | Hanging below the plate as above |
-| **Right under the bar** | No chains, no swing. A plain board: 2 px metal border, 5 px radius, dark fill, padding 8 / 6 / 5. It sits 6 px below the plate, so its lane runs up to the ring |
+| **On chains** | The same thin border, hanging below the plate as above |
+| **Right under the bar** | No chains, no swing. The same thin border. It sits 6 px below the plate, so its lane runs up to the ring |
 
 ### Swing (a setting: Off or Subtle)
 
@@ -208,7 +206,7 @@ Made from the plate by [`tools/Pack-FrameTemplate.py`](tools/Pack-FrameTemplate.
 
 ## 8. Art files and the checks they must pass
 
-The frame art in `Media/frame-*.tga` is the plate painted on this mask plus the matching 2× `600 × 220` board strip sliced from its ends by `Pack-FrameTemplate.py`.
+The frame art in `Media/frame-*.tga` is the plate painted on this mask. `Pack-FrameTemplate.py` still slices a matching 2× `600 × 220` strip from the plate's ends into the atlas. The aura boards do not draw that strip.
 
 | File | Size | Content |
 | --- | --- | --- |
@@ -216,11 +214,20 @@ The frame art in `Media/frame-*.tga` is the plate painted on this mask plus the 
 | `Media/frame-rare.tga` | 2048 x 1024 | The plain plate and board strip, graded in silver |
 | `Media/frame-elite.tga` | 2048 x 1024 | Blackrock obsidian & molten-gold rune Boss plate (`tools/template/paintings/boss.png`) on this exact same `2048×600` box + matching magma-veined `600×220` board strip at `y = 608` |
 | `Media/frame-rareelite.tga` | 2048 x 1024 | Silver-graded runic Boss version of `frame-elite.tga` and its board strip |
+| `Media/frame-warrior.tga` | 2048 x 1024 | Forged dark-iron riveted armor & burnished-bronze warrior plate with martial weapon/shield reliefs (`tools/template/paintings/warrior.png`) and its board strip |
+| `Media/frame-paladin.tga` | 2048 x 1024 | Rose-gold and silver paladin plate with a sunburst ring |
+| `Media/frame-hunter.tga` | 2048 x 1024 | Leather-and-brass hunter plate, moss in the corners, bark level ring |
+| `Media/frame-rogue.tga` | 2048 x 1024 | Blackened-steel rogue plate with venom-green scratches |
+| `Media/frame-priest.tga` | 2048 x 1024 | Moonstone priest plate with gothic arches and a pale-gold level ring |
+| `Media/frame-shaman.tga` | 2048 x 1024 | Copper shaman plate, verdigris bars, wave ring, wax-seal level ring |
+| `Media/frame-mage.tga` | 2048 x 1024 | Violet-silver mage plate, filigree bars, a small rune on the ring |
+| `Media/frame-warlock.tga` | 2048 x 1024 | Dark-iron warlock plate with a fel-green inner lip |
+| `Media/frame-druid.tga` | 2048 x 1024 | Bark-and-bronze druid plate, leaf inlay, amber beads, crescent on the ring |
 | `Media/chain-gold.tga`, `chain-silver.tga` | 32 x 64 | One chain repeat, tiling vertically. The link has a hole |
 | `Media/stripes.tga` | 32 x 32 | Shield stripes |
 | `Media/circle.tga` | 256 x 256 | Full-bleed anti-aliased disc for the portrait mask and level hole |
 
-The art slot is the top `2048 × 600` of that atlas (`art` in `Layout.lua`). The `600 × 220` board strip sits `8 px` below it (`strip`, `y = 608..828`). Every atlas is packed the same way, so a classification change is `SetTexture` plus the chain and the plain-board metal colour. It is not a frame rebuild.
+The art slot is the top `2048 × 600` of that atlas (`art` in `Layout.lua`). The `600 × 220` board strip sits `8 px` below it (`strip`, `y = 608..828`) and is not shown. Every atlas is packed the same way, so a classification change is `SetTexture` plus the chain and the hairline colour. It is not a frame rebuild.
 
 A later repaint starts from `guides/frame-template-ai.png` (`2048 × 1152`, exact `16:9`), the way [`PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md) describes.
 
@@ -230,29 +237,33 @@ Plain and elite share the gold metal. Rare and rare elite share the silver. Dead
 
 | Key | Who | Metal | Crest |
 | --- | --- | --- | --- |
-| `plain` | Ordinary NPCs, and a secret classification. Players, until a class frame exists | Gold | No |
+| `plain` | Ordinary NPCs, and a secret classification or a secret class token | Gold | No |
 | `rare` | `UnitClassification` `"rare"` | Silver | No |
 | `elite` | `"elite"` or `"worldboss"` | Gold | No |
 | `rareelite` | `"rareelite"` | Silver | No |
+| `warrior` `paladin` `hunter` `rogue` `priest` `shaman` `mage` `warlock` `druid` | A player, when `UnitClass` returns that token | Class colour, dimmed for the aura hairline | No |
 
-These four are reused. An ordinary unit, a rare, and an elite are the same box. Gold and silver are the only differences. "Plain" is the name of the key.
+An ordinary unit, a rare, and an elite are the same box. The nine class plates are the same box again. "Plain" is the name of the key.
 
-A class frame is a later paint on this same mask, one per class, with a short animation. A player is plain until then, even a rare player. Dead uses the same art, desaturated by the addon. `/davesframes art plain|rare|elite|rareelite|auto` forces a look, because a preview on yourself is a player and would always show plain.
+A player uses the class plate (`Unit.lua` `ns.ArtFor`). `UnitClass` is secret when unit identity is restricted, and a secret token stays plain. NPCs still follow classification. Dead uses the same art, desaturated by the addon. There is no class animation yet. `/davesframes art <key>|auto` forces a look. `auto` follows the unit. A preview on yourself is a player, so it shows your class.
 
 Nothing in sections 1 to 7 changes between variants.
 
 ---
 
-## 10. In this addon (0.2.2)
+## 10. In this addon (0.2.5)
 
-- **Art follows the unit** (`Unit.lua` `ns.ArtFor`, applied by `ns:ApplyArt`). Saved `db.variant` is cleared on load.
+- **Aura boards** are a 2 px dim metal hairline and a faint dark fill (`Auras.lua` `ThinBoard`). They do not sample the atlas strip. Chains still hang the boards.
+- **Art follows the unit** (`Unit.lua` `ns.ArtFor`, applied by `ns:ApplyArt`). A readable player class uses `frame-<class>.tga`. Saved `db.variant` is cleared on load.
+- **Class plates:** `tools/template/paintings/warrior.png` (`1376×768`) was painted via Gemini Nano Banana (`daves-frames-paint` skill) on `guides/frame-template-ai.png` and registers directly via `Pack-FrameTemplate.py`'s blob fitter (`max_err = 1.20 px`, `aspect_drift = 0.26%`). The remaining eight class plates were Imagine edits of `guides/frame-template-ai.png` (`1280×720`) sampled with fixed scale (`width / 2048`, plate rows starting after the `276 px` pad) because Imagine softened the `#0000FF` blue; re-pack those eight from `tools/template/preview/<class>-plate.png` to keep that registration unless repainted with `daves-frames-paint`. Detail stays inside the grey, green, orange, and white bands.
 - **Textures:** `py -3 tools\Build-FrameTemplate.py` redraws `guides/frame-template.png` (`2048 × 600`), `frame-template-1x.png` (`1024 × 300`), and `frame-template-ai.png` (`2048 × 1152`, exact `16:9`) and checks that `Layout.lua` matches. Gemini Nano Banana / Imagine paints onto `frame-template-ai.png`, and `py -3 tools\Pack-FrameTemplate.py` registers the holes, keeps only the green, grey, orange, and white plate regions, builds the matching 2× `600 × 220` board strip, and writes `Media/frame-*.tga`. See `tools/template/PAINT-LAYERS.md`.
 - **Level:** the template's white ring is the painted border (outer 92, band 16, centre 512, 252, on top of the portrait ring). The number sits in the 60 px hole on `Media/circle.tga`, 0.5 px low. The font string is that hole, so the digits center in it.
+- **Portrait masking:** `SetPortraitTexture(f.portrait, unit)` must keep `disableMasking` omitted/`false` — the C++ engine caches one shared dynamic portrait texture per unit, so passing `true` unmasks Blizzard's stock unit frames into an opaque `#000E21` square. Instead, `f.portrait` is sized to `L.rOut` (`128`) so the engine's baked circular margin sits outside `L.rIn + portraitPad` (`109`), and `f.portraitMask` (`Media/circle.tga`) crops it cleanly under the ring.
 - **Portrait button:** `Frame.lua` `ns:BuildPortraitButton` places a `SecureUnitButtonTemplate` on `UIParent` over the portrait (`RegisterUnitWatch` out of Edit Mode, synced out of combat) so left-click targets and right-click opens the unit menu.
 - **Secret values:** health, absorbs and heals go straight into the bars and text; cast times into
   `SetMinMaxValues`/`SetValue`; "can't be interrupted" through `SetVertexColorFromBoolean`. Aura times use
   `C_UnitAuras.GetAuraDuration` with a duration text binding, and stacks use
-  `C_UnitAuras.GetAuraApplicationDisplayCount`. Classification is read only after `issecretvalue`; a secret stays plain. The kit's wow-forever-api skill has the full list
+  `C_UnitAuras.GetAuraApplicationDisplayCount`. Classification and the class token are read only after `issecretvalue`; a secret stays plain. The kit's wow-forever-api skill has the full list
   ("Unit frame toolbox").
 - **Not in yet:**
   - the shield-overflow tick
@@ -261,4 +272,4 @@ Nothing in sections 1 to 7 changes between variants.
   - the time left on a cast whose times are secret
   - the stack badge's pop
   - hiding Blizzard's target frame
-  - a class frame: another paint on this exact same `frame-template-ai.png` box, one per class. Players use the plain plate until that paint exists
+  - a short animation on the class plates. The plates themselves are in
