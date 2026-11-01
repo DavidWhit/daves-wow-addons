@@ -110,8 +110,22 @@ function ns:InitEditMode(frame)
 			ns:ApplyBackground()
 		end,
 		isActive = function(key) return (ns.db.backgroundStyle or "dark") == key end })
+	d:AddButtonGrid({ label = "Text direction", columns = 2,
+		buttons = { { key = "bottom", text = "Bottom" }, { key = "top", text = "Top" } },
+		onClick = function(key)
+			ns.db.textDirection = (key == "top") and "top" or "bottom"
+			ns:ApplyTextDirection()
+		end,
+		isActive = function(key) return (ns.db.textDirection or "bottom") == key end })
+	d:AddCheckbox({ label = "Faint",
+		tooltip = "While the mouse isn't over the window, hide the border, background, header, tabs, scrollbar, and idle input box so only the chat text shows. Hover the window to bring everything back.",
+		get = function() return ns.db.faint end,
+		set = function(v)
+			ns.db.faint = v and true or false
+			ns:ApplyFaint()
+		end })
 	d:AddCheckbox({ label = "Whisper alert",
-		tooltip = "Flashes the message-bubble open icon (when closed) or the Chat tab (when viewing another tab) when a whisper arrives. The usual whisper sound still plays while the window is closed.",
+		tooltip = "Flashes the message-bubble open icon (when closed) or the Chat tab / Show Tabs button (when viewing another tab) when a whisper arrives. The usual whisper sound still plays while the window is closed.",
 		get = function() return ns.db.whisperAlert end,
 		set = function(v) ns.db.whisperAlert = v and true or false end })
 
@@ -120,12 +134,18 @@ function ns:InitEditMode(frame)
 		ns.db.width, ns.db.height = ns.DEFAULTS.width, ns.DEFAULTS.height
 		ns.db.background = ns.DEFAULTS.background
 		ns.db.backgroundStyle = ns.DEFAULTS.backgroundStyle
+		ns.db.showTabs = ns.DEFAULTS.showTabs
+		ns.db.textDirection = ns.DEFAULTS.textDirection
+		ns.db.faint = ns.DEFAULTS.faint
+		if ns.SyncTabsToggleButton then ns:SyncTabsToggleButton() end
+		ns:ApplyTextDirection()
+		ns:ApplyFaint()
 		frame:SetSize(ns.db.width, ns.db.height)
 		ns:ApplyScale()
 		ns:ApplyBackground()
 		d:Refresh()
 	end })
-	d:AddNote({ text = "Drag the empty header bar or left tab list to move the window, or drag a bottom corner to resize it. Tabs sit in a scrollable list on the left (right-click a tab to rename, add, or close windows), with newest messages at the top. In the header, the chat bubble opens Chat Settings, the window icon opens Window Settings, and the top-right X closes chat down to a draggable message-bubble icon." })
+	d:AddNote({ text = "Drag the empty header bar or left tab list to move the window, or drag a bottom corner to resize it. Use the header eye button to show or hide your chat tabs (auto-fitted up to 1/3 of the window width, or full-width chat when hidden; right-click any tab to rename, add, close, or set it as the Default Window shown on login). Text direction picks where new messages appear: Bottom (stock WoW) or Top. Faint hides everything but the chat text until you hover the window. In the header, the chat bubble opens Chat Settings, the window icon opens Window Settings, and the top-right X closes chat down to a draggable message-bubble icon." })
 
 	d:AddButton({ text = "Reset tabs", onClick = function()
 		if ns:ApplyTabLayout() then

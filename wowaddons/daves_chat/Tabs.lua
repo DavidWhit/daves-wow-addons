@@ -155,20 +155,121 @@ function ns:ApplyTabLayout()
 end
 
 ---------------------------------------------------------------------------
--- Clean, scrollable left-side chat tab list (inside ns.tabColumn)
+-- Collapsible, auto-fitted (max 1/3 window width), scrollable left-side chat tab list
 ---------------------------------------------------------------------------
 local ROW_H = 24
 local ROW_GAP = 2
 local ROW_STEP = ROW_H + ROW_GAP
+local VIEWPORT_PAD_L = 4
+local VIEWPORT_PAD_R = 5
+local VIEWPORT_PAD_T = 4
+local VIEWPORT_PAD_B = 4
 
 local tabMaxScroll = 0
 local lastAutoScrollTab
+
+---------------------------------------------------------------------------
+-- Default window: the docked tab selected on login / reload and when reopening the window.
+-- Stored as the chat frame ID (ns.db.defaultTab). Temporary whisper tabs can't be the default
+-- because Blizzard reuses their IDs. Closing (deleting) the default window falls back to Chat.
+---------------------------------------------------------------------------
+local DEFAULT_STAR_ATLAS = (C_Texture and C_Texture.GetAtlasInfo) and (
+	(C_Texture.GetAtlasInfo("auctionhouse-icon-favorite") and "auctionhouse-icon-favorite")
+	or (C_Texture.GetAtlasInfo("PetJournal-FavoritesIcon") and "PetJournal-FavoritesIcon")) or nil
+local STAR_SIZE = 12
+local STAR_PAD = DEFAULT_STAR_ATLAS and (STAR_SIZE + 4) or 0
+
+local function DefaultTabID()
+	local id = ns.db and tonumber(ns.db.defaultTab) or 1
+	return id or 1
+end
+
+local function IsDefaultTab(frame)
+	return frame ~= nil and frame.GetID ~= nil and frame:GetID() == DefaultTabID()
+end
+
+local function SetDefaultTab(frame)
+	local id = (frame and frame.GetID and not frame.isTemporary) and frame:GetID() or 1
+	ns.db.defaultTab = id
+	if ns.RefreshTabs and ns.anchor and ns.anchor:IsShown() then
+		if ns.SeatChat then ns:SeatChat() end
+		ns:RefreshTabs()
+	end
+end
+
+-- FCF_PopInWindow (Blizzard's and our "Close Window") ends in FCF_Close (FloatingChatFrame.lua:1844-1858).
+if hooksecurefunc and type(FCF_Close) == "function" then
+	hooksecurefunc("FCF_Close", function(frame, fallback)
+		frame = fallback or frame
+		if not ns.db or not frame or not frame.GetID then return end
+		if frame ~= ChatFrame1 and frame:GetID() == DefaultTabID() then
+			ns.db.defaultTab = 1
+		end
+	end)
+end
+
+function ns:GetDockedFrames()
+	local frames = {}
+	if GENERAL_CHAT_DOCK and FCFDock_GetChatFrames then
+		for _, frame in ipairs(FCFDock_GetChatFrames(GENERAL_CHAT_DOCK)) do
+			frames[#frames + 1] = frame
+		end
+	end
+	if #frames == 0 and ChatFrame1 then frames[1] = ChatFrame1 end
+	return frames
+end
+
+-- Fits the left tab list to the widest docked tab name before truncating, capped at 1/3 of the window width.
+function ns:ComputeTabColumnWidth(windowWidth, availHeight)
+	if not ns.db or ns.db.showTabs == false then return 0 end
+	local column = ns.tabColumn
+	local minW = ns.MIN_TAB_WIDTH or 76
+	local maxW = math.max(minW, math.floor(((windowWidth and windowWidth > 0 and windowWidth) or 520) / 3))
+	if not column then
+		return ns.Clamp(ns.TAB_WIDTH or 96, minW, maxW)
+	end
+	local measureFS = column.measureFS
+	if not measureFS then
+		measureFS = column:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		measureFS:SetPoint("TOPLEFT", column, "TOPLEFT", 0, 0)
+		if measureFS.SetWordWrap then measureFS:SetWordWrap(false) end
+		measureFS:Hide()
+		column.measureFS = measureFS
+	end
+	local frames = ns:GetDockedFrames()
+	local maxTextW = 0
+	for i = 1, #frames do
+		local frame = frames[i]
+		local name = frame.GetName and frame:GetName()
+		local real = name and _G[name .. "Tab"]
+		local raw = real and real.GetText and real:GetText()
+		local isSecret = raw ~= nil and issecretvalue and issecretvalue(raw)
+		local starW = IsDefaultTab(frame) and STAR_PAD or 0
+		if isSecret then
+			maxTextW = math.max(maxTextW, 72 + starW)
+		else
+			local label = (type(raw) == "string" and raw ~= "") and raw or "Chat"
+			measureFS:SetText(label)
+			local w = (measureFS.GetUnboundedStringWidth and measureFS:GetUnboundedStringWidth())
+				or (measureFS.GetStringWidth and measureFS:GetStringWidth()) or 0
+			if not (issecretvalue and issecretvalue(w)) and type(w) == "number" and w + starW > maxTextW then
+				maxTextW = w + starW
+			end
+		end
+	end
+	local count = #frames
+	local totalH = count > 0 and (count * ROW_H + (count - 1) * ROW_GAP) or 0
+	local scrolling = (availHeight and availHeight > 0) and (totalH > availHeight) or false
+	local extraPad = scrolling and 34 or 28
+	return ns.Clamp(math.ceil(maxTextW) + extraPad, minW, maxW)
+end
 
 local function IsBuiltinTab(frame)
 	if not frame then return true end
 	if IsBuiltinChatWindow and IsBuiltinChatWindow(frame) then return true end
 	return frame == ChatFrame1 or frame == ChatFrame2 or frame == ChatFrame3
 end
+
 
 local function CloseExtraTab(frame)
 	if not frame or IsBuiltinTab(frame) then return end
@@ -213,6 +314,18 @@ local function OpenTabContextMenu(owner, frame)
 				StaticPopup_Show("NAME_CHAT", nil, nil, frame:GetID())
 			end)
 		end
+		if not frame.isTemporary and frame.GetID then
+			local function IsSelected() return IsDefaultTab(frame) end
+			local function Toggle()
+				-- Unticking the current default (or ticking Chat) goes back to the main Chat window.
+				SetDefaultTab(IsDefaultTab(frame) and ChatFrame1 or frame)
+			end
+			if rootDescription.CreateCheckbox then
+				rootDescription:CreateCheckbox("Default Window", IsSelected, Toggle)
+			else
+				rootDescription:CreateButton(IsSelected() and "Default Window (on)" or "Set as Default Window", Toggle)
+			end
+		end
 		if FCF_NewChatWindow then
 			local createBtn = rootDescription:CreateButton(NEW_CHAT_WINDOW or "Create New Window", function()
 				FCF_NewChatWindow()
@@ -233,6 +346,26 @@ local function OpenTabContextMenu(owner, frame)
 	end)
 end
 
+-- Selects the default window if it is a shown docked tab. When `final` is true (the last login pass,
+-- once Blizzard has docked every window) a default that no longer exists falls back to Chat.
+function ns:SelectDefaultTab(final)
+	if not ns.db or not ns.db.enabled then return end
+	local id = DefaultTabID()
+	local frame = _G["ChatFrame" .. id]
+	local usable = frame and (frame == ChatFrame1 or frame.isDocked) and frame.IsShown and frame:IsShown()
+		and not frame.isTemporary
+	if not usable then
+		if final and id ~= 1 then ns.db.defaultTab = 1 end
+		frame = ChatFrame1
+	end
+	if not frame then return end
+	local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
+	if selected ~= frame then
+		SelectTabFrame(frame)
+	end
+	if ns.RefreshTabs and ns.anchor and ns.anchor:IsShown() then ns:RefreshTabs() end
+end
+
 function ns:ScrollTabs(delta)
 	if not delta or delta == 0 or tabMaxScroll <= 0 then return end
 	local nextOffset = ns.Clamp((ns.tabScrollOffset or 0) - delta * ROW_STEP, 0, tabMaxScroll)
@@ -251,7 +384,8 @@ local function EnsureTabList(column)
 	end)
 
 	local viewport = CreateFrame("Frame", nil, column)
-	viewport:SetAllPoints(column)
+	viewport:SetPoint("TOPLEFT", column, "TOPLEFT", VIEWPORT_PAD_L, -VIEWPORT_PAD_T)
+	viewport:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", -VIEWPORT_PAD_R, VIEWPORT_PAD_B)
 	viewport:SetFrameLevel((column:GetFrameLevel() or 0) + 1)
 	if viewport.SetClipsChildren then viewport:SetClipsChildren(true) end
 	viewport:EnableMouse(false)
@@ -263,8 +397,8 @@ local function EnsureTabList(column)
 
 	local track = CreateFrame("Button", nil, column)
 	track:SetWidth(4)
-	track:SetPoint("TOPRIGHT", column, "TOPRIGHT", -3, -2)
-	track:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", -3, 2)
+	track:SetPoint("TOPRIGHT", column, "TOPRIGHT", -2, -VIEWPORT_PAD_T)
+	track:SetPoint("BOTTOMRIGHT", column, "BOTTOMRIGHT", -2, VIEWPORT_PAD_B)
 	track:SetFrameLevel((column:GetFrameLevel() or 0) + 16)
 	track:EnableMouseWheel(true)
 	track:SetScript("OnMouseWheel", function(_, delta)
@@ -426,10 +560,28 @@ local function CreateChatTab(viewport)
 	if text.SetMaxLines then text:SetMaxLines(1) end
 	tab.text = text
 
+	-- Small gold star on the default window's row.
+	if DEFAULT_STAR_ATLAS then
+		local star = tab:CreateTexture(nil, "OVERLAY")
+		star:SetSize(STAR_SIZE, STAR_SIZE)
+		star:SetPoint("RIGHT", tab, "RIGHT", -6, 0)
+		star:SetAtlas(DEFAULT_STAR_ATLAS, false)
+		star:SetAlpha(0.9)
+		star:Hide()
+		tab.star = star
+	end
+
 	tab:SetScript("OnEnter", function(self)
-		if not self.showTooltip or not self.fullLabel or self.fullLabel == "" then return end
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:SetText(self.fullLabel)
+		local hasLabel = self.showTooltip and self.fullLabel and self.fullLabel ~= ""
+		if not hasLabel and not self.isDefault then return end
+		ns.AnchorTooltip(self, "RIGHT")
+		GameTooltip:SetText(hasLabel and self.fullLabel or "Default window")
+		if hasLabel and self.isDefault then
+			GameTooltip:AddLine("Default window", 1, 0.82, 0)
+		end
+		if self.isDefault then
+			GameTooltip:AddLine("Selected on login and when the window reopens.", 1, 1, 1, true)
+		end
 		GameTooltip:Show()
 	end)
 	tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -462,22 +614,62 @@ function ns:RefreshTabs()
 		ns.anchor:SetClampRectInsets(0, 0, 0, 0)
 	end
 
-	local frames = {}
-	if GENERAL_CHAT_DOCK and FCFDock_GetChatFrames then
-		for _, frame in ipairs(FCFDock_GetChatFrames(GENERAL_CHAT_DOCK)) do
-			frames[#frames + 1] = frame
-		end
-	end
-	if #frames == 0 and ChatFrame1 then frames[1] = ChatFrame1 end
-
+	local frames = ns:GetDockedFrames()
 	local open = ns.db.enabled and (not ns.db.collapsed or ns.inEditMode)
+	local showTabs = open and (ns.db.showTabs ~= false)
 	local selected = GENERAL_CHAT_DOCK and FCFDock_GetSelectedWindow and FCFDock_GetSelectedWindow(GENERAL_CHAT_DOCK)
 	ns.seenTab = selected
 
+	if not showTabs then
+		for i = 1, #ns.tabs do
+			SyncTabPulse(ns.tabs[i], false)
+			ns.tabs[i]:Hide()
+		end
+		if column.scrollTrack then column.scrollTrack:Hide() end
+		if ns.SetButtonPulse then
+			if open then
+				if selected == ChatFrame1 then ns.hiddenTabAlertUntil = nil end
+				local now = GetTime()
+				local anyAlert = (ns.hiddenTabAlertUntil and now <= ns.hiddenTabAlertUntil) and true or false
+				if not anyAlert and ns.hiddenTabAlertUntil and now > ns.hiddenTabAlertUntil then
+					ns.hiddenTabAlertUntil = nil
+				end
+				if not anyAlert then
+					for i = 1, #frames do
+						local frame = frames[i]
+						if frame ~= selected and not (not selected and frame == ChatFrame1) then
+							local name = frame.GetName and frame:GetName()
+							local real = name and _G[name .. "Tab"]
+							local blizzardAlert = real and ((ChatFrameUtil and ChatFrameUtil.IsTabAlerting and ChatFrameUtil.IsTabAlerting(real)) or real.alerting)
+							if blizzardAlert then
+								anyAlert = true
+								break
+							end
+						end
+					end
+				end
+				ns.SetButtonPulse(ns.tabsToggleButton, anyAlert)
+			else
+				ns.SetButtonPulse(ns.tabsToggleButton, false)
+			end
+		end
+		return
+	end
+
+	ns.hiddenTabAlertUntil = nil
+	if ns.SetButtonPulse then ns.SetButtonPulse(ns.tabsToggleButton, false) end
+
 	local colW = (column.GetWidth and column:GetWidth()) or ns.TAB_WIDTH
 	if not colW or colW <= 0 then colW = ns.TAB_WIDTH end
-	local availH = (column.GetHeight and column:GetHeight()) or 0
-	if not availH or availH <= 0 then availH = 180 end
+	local viewW = (viewport.GetWidth and viewport:GetWidth()) or 0
+	if not viewW or viewW <= 0 then
+		viewW = math.max(36, colW - VIEWPORT_PAD_L - VIEWPORT_PAD_R)
+	end
+	local availH = (viewport.GetHeight and viewport:GetHeight()) or 0
+	if not availH or availH <= 0 then
+		local colH = (column.GetHeight and column:GetHeight()) or 188
+		availH = math.max(48, ((colH and colH > 0) and colH or 188) - VIEWPORT_PAD_T - VIEWPORT_PAD_B)
+	end
 
 	local count = #frames
 	local totalH = count > 0 and (count * ROW_H + (count - 1) * ROW_GAP) or 0
@@ -508,7 +700,7 @@ function ns:RefreshTabs()
 
 	local style = ns.BackgroundStyle and ns.BackgroundStyle(ns.db and ns.db.backgroundStyle)
 	local light = style and style.light and true or false
-	local rowW = scrolling and math.max(36, colW - 8) or colW
+	local rowW = scrolling and math.max(36, viewW - 6) or viewW
 	local innerTextW = math.max(20, rowW - 16)
 
 	for i, frame in ipairs(frames) do
@@ -535,6 +727,13 @@ function ns:RefreshTabs()
 
 		tab.chatFrame = frame
 		tab:SetSize(rowW, ROW_H)
+
+		local isDefault = IsDefaultTab(frame)
+		if tab.star then
+			tab.star:SetShown(isDefault)
+			tab.text:SetPoint("RIGHT", tab, "RIGHT", isDefault and -(6 + STAR_PAD) or -6, 0)
+		end
+		tab.isDefault = isDefault
 
 		local on = frame == selected or (not selected and frame == ChatFrame1)
 		tab.isSelected = on
@@ -645,19 +844,21 @@ end
 -- Login & channel routing events
 ---------------------------------------------------------------------------
 function ns:OnLogin()
-	local function Ready()
+	local function Ready(final)
 		if not ns.db.layoutVersion or ns.db.layoutVersion < 1 then
 			if ChatReady() and ns:ApplyTabLayout() then
 				ns.Print("tabs set: Chat, Combat Log, General.")
+				ns:SelectDefaultTab(final)
 				return
 			end
 		end
 		if ns.LayoutWindow then ns:LayoutWindow() end
+		ns:SelectDefaultTab(final)
 	end
-	Ready()
+	Ready(false)
 	if C_Timer and C_Timer.After then
-		C_Timer.After(0, Ready)
-		C_Timer.After(1, Ready)
+		C_Timer.After(0, function() Ready(false) end)
+		C_Timer.After(1, function() Ready(true) end)
 	end
 end
 

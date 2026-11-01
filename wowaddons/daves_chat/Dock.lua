@@ -1,23 +1,23 @@
 -- daves_chat / Dock.lua
 -- Seats Blizzard's chat dock inside our inner chat-text frame beside the left tab stack,
--- switches owned chat frames to top-down message growth (newest on top), scales owned frames,
+-- applies the chosen text direction (stock bottom-up by default, or newest on top), scales owned frames,
 -- and synchronizes chat chrome across open, closed, and restored states without flicker.
 -- We never SetParent, HookScript, SetScript, or UnregisterEvent on a chat frame.
 
 local _, ns = ...
 
-local TOP_EDGE = 10      -- top border inset above the header bar
-local HEADER_GAP = 6     -- breathing room below the header divider
-local EDGE = 14          -- outer dialog border inset
-local COL_GAP = 8        -- gap between left tab column and inner chat frame
-local BOTTOM_TAB = 17    -- bottom of left tab list (6px above the 11px inner dialog border lip)
-local BOTTOM_BOX = 47    -- bottom of inner chat frame (leaves 6px above & 6px below visible editBox)
-local BOX_INSET_L = 8    -- chat text left padding inside ns.chatBox
-local BOX_INSET_R = 22   -- right gutter inside ns.chatBox for MinimalScrollBar (6 + 8 + 8)
-local BOX_INSET_T = 8    -- top padding inside ns.chatBox (fits CombatLogQuickButtonFrame +3px offset)
-local BOX_INSET_B = 7    -- bottom padding inside ns.chatBox
+local TOP_EDGE = 12      -- top border inset above the header bar (clears the 11px top metal rail)
+local HEADER_GAP = 8     -- breathing room below the header divider
+local EDGE = 20          -- comfortable side margin inside the outer dialog border (11px metal + 9px margin)
+local COL_GAP = 10       -- gap between left tab column and inner chat frame when tabs are shown
+local BOTTOM_TAB = 19    -- bottom of left tab list (8px above the 11px inner dialog border lip)
+local BOTTOM_BOX = 51    -- bottom of inner chat frame (leaves equal 8px above & 8px below visible editBox)
+local BOX_INSET_L = 12   -- comfortable left text margin inside ns.chatBox
+local BOX_INSET_R = 24   -- right gutter inside ns.chatBox for MinimalScrollBar + margin (6 + 8 + 10)
+local BOX_INSET_T = 10   -- top text padding inside ns.chatBox (fits CombatLogQuickButtonFrame +3px offset)
+local BOX_INSET_B = 10   -- bottom text padding inside ns.chatBox
 local EDIT_PAD_X = 5     -- transparent left/right padding inside UI-ChatInputBorder-Left2 / Right2
-local EDIT_OFFSET_Y = 2  -- editBox frame top below ns.chatBox (32px frame has 4px top/bottom margin)
+local EDIT_OFFSET_Y = 4  -- editBox frame top below ns.chatBox (32px frame has 4px top/bottom margin -> 8px visual gap)
 
 local TOP_INSERT = SCROLLING_MESSAGE_FRAME_INSERT_MODE_TOP or "TOP"
 local BOTTOM_INSERT = SCROLLING_MESSAGE_FRAME_INSERT_MODE_BOTTOM or "BOTTOM"
@@ -145,18 +145,117 @@ function ns.DockEditFocused()
 	return focused
 end
 
+local function HasEditText(edit)
+	if not (edit and edit.GetText) then return false end
+	local txt = edit:GetText()
+	if txt == nil then return false end
+	if issecretvalue and issecretvalue(txt) then return true end
+	return txt ~= ""
+end
+
+local SyncEditBox -- defined below with the chrome helpers; used by ns:CloseOwnedEditBoxes(true)
+
+-- Uses only C++ widget setters on ChatFrameEditBox so we never invoke ClearChat/DeactivateChat
+-- -> SetChatType -> SetAttribute("chatType", ...), keeping C_ChatInfo.SendChatMessage untainted.
+local function DeactivateSingleEditBox(edit)
+	if not edit then return end
+	if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(edit) end
+	local hasFocus = edit.HasFocus and edit:HasFocus()
+	local hasText = HasEditText(edit)
+	if hasFocus then
+		if not hasText and edit.SetText then
+			-- Keep GetText() non-empty during ClearFocus() so OnEditFocusLost skips DeactivateChat.
+			edit:SetText(" ")
+			hasText = true
+		end
+		if edit.ClearFocus then edit:ClearFocus() end
+	end
+	if hasText and edit.SetText then
+		edit:SetText("")
+	end
+	if AutoCompleteBox and AutoCompleteBox.IsShown and AutoCompleteBox:IsShown() and AutoCompleteBox.parent == edit then
+		if AutoComplete_HideIfAttachedTo then
+			AutoComplete_HideIfAttachedTo(edit)
+		else
+			AutoCompleteBox:Hide()
+		end
+	end
+	if edit.SetFrameStrata then edit:SetFrameStrata("LOW") end
+	if edit.header and edit.header.Hide then edit.header:Hide() end
+	if edit.focusLeft and edit.focusLeft.Hide then edit.focusLeft:Hide() end
+	if edit.focusMid and edit.focusMid.Hide then edit.focusMid:Hide() end
+	if edit.focusRight and edit.focusRight.Hide then edit.focusRight:Hide() end
+	local editName = edit.GetName and edit:GetName()
+	local lang = editName and _G[editName .. "Language"]
+	if lang and lang.Hide then lang:Hide() end
+	if edit.SetAlpha then edit:SetAlpha(0) end
+	if edit.EnableMouse then edit:EnableMouse(false) end
+end
+
+-- Cleans up unsent text, autocomplete popups, and keyboard focus on any owned/docked edit box.
+-- keepOpen = false (X close): every edit box goes invisible with the window.
+-- keepOpen = true (clicking header/tab/settings controls while the window stays open): the inactive
+-- edit box returns to Blizzard's resting look (IM style 0.35 alpha, classic style hidden).
+function ns:CloseOwnedEditBoxes(keepOpen)
+	local cleaned = {}
+	local function Clean(edit)
+		cleaned[edit] = true
+		DeactivateSingleEditBox(edit)
+		if keepOpen and SyncEditBox then SyncEditBox(edit, false) end
+	end
+	local active = (ChatFrameUtil and ChatFrameUtil.GetActiveWindow and ChatFrameUtil.GetActiveWindow())
+		or _G.ACTIVE_CHAT_EDIT_BOX
+	if active then
+		local owner = active.chatFrame or (active.GetParent and active:GetParent())
+		if owner == ChatFrame1 or (owner and owner.isDocked) or ownedFrames[owner] then
+			Clean(active)
+		end
+	end
+	EachTrackedOrDocked(function(frame, isDocked)
+		local edit = frame and frame.editBox
+		if edit and not cleaned[edit] and (isDocked or ownedFrames[frame]) then
+			Clean(edit)
+		end
+	end)
+end
+
+-- True while any owned edit box is focused or holds unsent text (i.e. it may be floating at DIALOG strata).
+function ns:OwnedEditBoxActive()
+	local active = false
+	EachTrackedOrDocked(function(frame, isDocked)
+		local edit = frame and frame.editBox
+		if not active and edit and (isDocked or ownedFrames[frame]) then
+			if (edit.HasFocus and edit:HasFocus()) or HasEditText(edit) then
+				active = true
+			end
+		end
+	end)
+	return active
+end
+
 ---------------------------------------------------------------------------
--- Top-down message growth (ScrollingMessageFrameMixin:SetInsertMode)
+-- Text direction (ScrollingMessageFrameMixin:SetInsertMode)
 ---------------------------------------------------------------------------
--- SetInsertMode is an untainted secure barrier in ScrollingMessageFrame.lua:898-900.
--- INSERT_MODE_TOP anchors visibleLines[1] (the newest line at scrollOffset 0) at TOPLEFT
--- and grows older lines downward.
+-- SetInsertMode is an untainted secure barrier in ScrollingMessageFrame.lua:898-900 and marks the
+-- layout dirty (ScrollingMessageFrame.lua:297-301), so switching re-lays out existing lines live.
+-- "bottom" (default, stock WoW) keeps INSERT_MODE_BOTTOM. "top" uses INSERT_MODE_TOP, which anchors
+-- visibleLines[1] (the newest line at scrollOffset 0) at TOPLEFT and grows older lines downward.
 local function ApplyInsertMode(frame, own)
 	if not frame or not frame.SetInsertMode then return end
-	local want = own and TOP_INSERT or BOTTOM_INSERT
+	local top = own and ns.db and ns.db.textDirection == "top"
+	local want = top and TOP_INSERT or BOTTOM_INSERT
 	if not frame.GetInsertMode or frame:GetInsertMode() ~= want then
 		frame:SetInsertMode(want)
 	end
+end
+
+function ns:ApplyTextDirection()
+	if not ns.db.enabled then return end
+	ns.EachDocked(function(frame)
+		if frame == ChatFrame1 or frame.isDocked then
+			ApplyInsertMode(frame, true)
+		end
+	end)
 end
 
 ---------------------------------------------------------------------------
@@ -263,7 +362,7 @@ local function AnchorOwnedScroll(frame)
 end
 
 -- Anchors editBox directly beneath ns.chatBox (independent of MinimalScrollBar visibility/width)
--- so its visible metal border aligns flush left-to-right with ns.chatBox and keeps equal 6px
+-- so its visible metal border aligns flush left-to-right with ns.chatBox and keeps equal 8px
 -- visual margins above (to ns.chatBox) and below (to the outer dialog border's inner lip).
 local function AnchorOwnedEditBox(frame)
 	local edit = frame and frame.editBox
@@ -305,8 +404,10 @@ local function ShowOwnedScroll(frame)
 	local bar = frame.ScrollBar
 	if not bar or not bar.GetAlpha or not bar.SetAlpha then return end
 	if UIFrameFadeRemoveFrame then UIFrameFadeRemoveFrame(bar) end
-	if math.abs((bar:GetAlpha() or 0) - 0.65) > 0.01 then
-		bar:SetAlpha(0.65)
+	-- ns.chromeAlpha (Window.lua faint fader) is 1 normally and fades to 0 while the window isn't hovered.
+	local want = 0.65 * (ns.chromeAlpha or 1)
+	if math.abs((bar:GetAlpha() or 0) - want) > 0.01 then
+		bar:SetAlpha(want)
 	end
 end
 
@@ -319,21 +420,44 @@ local function HideOwnedScroll(frame)
 	end
 end
 
-local function SyncEditBox(edit, closed)
+SyncEditBox = function(edit, closed)
 	if not edit then return end
 	if closed then
 		if edit.HasFocus and edit:HasFocus() then return end
 		if edit.GetAlpha and (edit:GetAlpha() or 0) > 0 then edit:SetAlpha(0) end
 		if edit.EnableMouse then edit:EnableMouse(false) end
 	else
+		local focused = edit.HasFocus and edit:HasFocus()
+		local isVoice = ChatFrame3 ~= nil and (edit.chatFrame == ChatFrame3)
+		local classicInactive = (not focused) and (not isVoice) and (not edit.isGM)
+			and (GetCVar and GetCVar("chatStyle") == "classic")
+			and (not HasEditText(edit))
+		if classicInactive then
+			if edit.GetAlpha and (edit:GetAlpha() or 0) > 0 then edit:SetAlpha(0) end
+			if edit.EnableMouse then edit:EnableMouse(false) end
+			return
+		end
 		if edit.EnableMouse then edit:EnableMouse(true) end
-		if edit.HasFocus and edit:HasFocus() then
+		if focused then
 			edit:SetAlpha(1)
-		elseif edit.IsShown and edit:IsShown() and edit.GetAlpha and (edit:GetAlpha() or 0) < 0.34 then
-			-- ChatFrameEditBoxMixin:Deactivate (ChatFrameEditBox.lua:568) uses 0.35 in IM style.
-			edit:SetAlpha(0.35)
+		elseif edit.IsShown and edit:IsShown() and edit.GetAlpha and not HasEditText(edit) then
+			-- ChatFrameEditBoxMixin:Deactivate (ChatFrameEditBox.lua:568) uses 0.35 in IM style;
+			-- faint mode scales that resting alpha down with the rest of the window chrome.
+			local want = 0.35 * (ns.chromeAlpha or 1)
+			if math.abs((edit:GetAlpha() or 0) - want) > 0.01 then edit:SetAlpha(want) end
 		end
 	end
+end
+
+-- Re-applies scrollbar and resting edit-box alpha for the current ns.chromeAlpha (faint fader).
+function ns:ApplyOwnedChromeAlpha()
+	if not ns.db.enabled or (ns.db.collapsed and not ns.inEditMode) then return end
+	ns.EachDocked(function(frame)
+		if frame == ChatFrame1 or frame.isDocked then
+			ShowOwnedScroll(frame)
+			SyncEditBox(frame.editBox, false)
+		end
+	end)
 end
 
 -- CombatLogQuickButtonFrame_Custom is parented to ChatFrame2Tab (Blizzard_CombatLog.lua:1443).
@@ -642,18 +766,31 @@ function ns:SeatChat()
 	end
 
 	local top = ns:ContentTop()
-	local tabW = ns.TAB_WIDTH or 100
-	local boxLeft = EDGE + tabW + COL_GAP
+	local showTabs = (not closed) and (ns.db.showTabs ~= false)
+	local tabAvailH = math.max(48, anchor:GetHeight() - top - BOTTOM_TAB - 8)
+	local tabW = 0
+	if showTabs then
+		if ns.ComputeTabColumnWidth then
+			tabW = ns:ComputeTabColumnWidth(anchor:GetWidth(), tabAvailH)
+		else
+			tabW = ns.TAB_WIDTH or 96
+		end
+	end
+	local boxLeft = (showTabs and tabW > 0) and (EDGE + tabW + COL_GAP) or EDGE
 
 	if ns.tabColumn then
-		ns.tabColumn:ClearAllPoints()
-		ns.tabColumn:SetPoint("TOPLEFT", anchor, "TOPLEFT", EDGE, -top)
-		ns.tabColumn:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", EDGE, BOTTOM_TAB)
-		ns.tabColumn:SetWidth(tabW)
-		ns.tabColumn:SetShown(not closed)
+		if showTabs and tabW > 0 then
+			ns.tabColumn:ClearAllPoints()
+			ns.tabColumn:SetPoint("TOPLEFT", anchor, "TOPLEFT", EDGE, -top)
+			ns.tabColumn:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", EDGE, BOTTOM_TAB)
+			ns.tabColumn:SetWidth(tabW)
+			ns.tabColumn:Show()
+		else
+			ns.tabColumn:Hide()
+		end
 	end
 	if ns.tabColumnFill then
-		ns.tabColumnFill:SetShown(not closed)
+		ns.tabColumnFill:SetShown(showTabs and tabW > 0)
 	end
 
 	if ns.chatBox then

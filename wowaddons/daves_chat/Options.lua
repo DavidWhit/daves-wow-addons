@@ -22,7 +22,7 @@ function ns:InitOptions()
 	local whisper = Settings.RegisterAddOnSetting(category, ADDON .. "_whisperAlert", "whisperAlert", ns.db,
 		Settings.VarType.Boolean, "Alert when someone whispers you", true)
 	Settings.CreateCheckbox(category, whisper,
-		"Flashes the message-bubble open icon (when closed) or the Chat tab (when viewing another tab) when a whisper arrives. The usual whisper sound still plays while the window is closed.")
+		"Flashes the message-bubble open icon (when closed) or the Chat tab / Show Tabs button (when viewing another tab) when a whisper arrives. The usual whisper sound still plays while the window is closed.")
 
 	enabled:SetValueChangedCallback(function()
 		if ns.ApplyEnabled then ns:ApplyEnabled() end

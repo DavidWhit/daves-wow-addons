@@ -292,7 +292,7 @@ local function BuildWindow(anchor)
 	drag:SetFrameLevel(topLevel + 20)
 	WireDragHandle(drag, windowMover)
 	drag:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		ns.AnchorTooltip(self)
 		GameTooltip:SetText("Drag to move")
 		GameTooltip:AddLine("Right-click to reset the position.", 1, 1, 1, true)
 		GameTooltip:Show()
@@ -326,10 +326,12 @@ local function BuildWindow(anchor)
 			return
 		end
 		ns.Sound("IG_CHAT_EMOTE_BUTTON")
+		local opening = ns.db.collapsed
 		ns:SetCollapsed(not ns.db.collapsed)
+		if opening and ns.SelectDefaultTab then ns:SelectDefaultTab(false) end
 	end)
 	toggle:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		ns.AnchorTooltip(self, "RIGHT")
 		GameTooltip:SetText("Open chat")
 		GameTooltip:AddLine("Drag to move this icon.", 1, 1, 1, true)
 		GameTooltip:Show()
@@ -359,6 +361,7 @@ local function BuildWindow(anchor)
 		if not resizer:IsShown() then return end
 		resizer:Hide()
 		rs.x = nil
+		ns.resizing = nil
 		local point, _, relPoint, x, y = anchor:GetPoint(1)
 		if point then ns.db.pos = { point = point, relPoint = relPoint, x = x, y = y } end
 		if ns.editDialog and ns.editDialog:IsShown() then ns.editDialog:Refresh() end
@@ -406,6 +409,7 @@ local function BuildWindow(anchor)
 		else
 			anchor:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", rightX, top)
 		end
+		ns.resizing = true
 		resizer:Show()
 	end
 	for _, right in ipairs({ true, false }) do
@@ -422,7 +426,7 @@ local function BuildWindow(anchor)
 		g:SetScript("OnMouseUp", StopResize)
 		g:SetScript("OnHide", StopResize)
 		g:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			ns.AnchorTooltip(self)
 			GameTooltip:SetText("Drag to resize")
 			GameTooltip:Show()
 		end)
@@ -451,8 +455,15 @@ end
 ---------------------------------------------------------------------------
 -- Whisper button / tab pulse alert (reads no secret message/sender payload)
 ---------------------------------------------------------------------------
-local function PulseButton(button)
+function ns.SetButtonPulse(button, active, duration)
 	if not button then return end
+	if not active then
+		button.alerting = false
+		button.alertUntil = nil
+		if button.glow then button.glow:SetAlpha(0) end
+		if button.pulse then button.pulse:Hide() end
+		return
+	end
 	if not button.glow then
 		local glow = button:CreateTexture(nil, "OVERLAY")
 		glow:SetTexture("Interface\\Buttons\\UI-Common-MouseHilight")
@@ -463,7 +474,9 @@ local function PulseButton(button)
 		local pulse = CreateFrame("Frame", nil, button)
 		pulse:Hide()
 		pulse:SetScript("OnUpdate", function()
-			if not button.alertUntil or GetTime() > button.alertUntil then
+			local timed = button.alertUntil and GetTime() <= button.alertUntil
+			if not button.alerting and not timed then
+				button.alertUntil = nil
 				glow:SetAlpha(0)
 				pulse:Hide()
 				return
@@ -472,20 +485,33 @@ local function PulseButton(button)
 		end)
 		button.pulse = pulse
 	end
-	button.alertUntil = GetTime() + 8
+	if duration then
+		button.alertUntil = GetTime() + duration
+	else
+		button.alerting = true
+	end
 	button.pulse:Show()
+end
+
+local function PulseButton(button)
+	ns.SetButtonPulse(button, true, 8)
 end
 
 function ns:AlertWhisper()
 	if not ns.db.whisperAlert then return end
 	PulseButton(ns.toggle)
 	local selected = ns.VisibleChatFrame and ns.VisibleChatFrame()
-	if selected ~= ChatFrame1 and ns.tabs then
-		for i = 1, #ns.tabs do
-			local tab = ns.tabs[i]
-			if tab and tab.chatFrame == ChatFrame1 then
-				tab.alertUntil = GetTime() + 8
-				break
+	if selected ~= ChatFrame1 then
+		if ns.db.showTabs == false then
+			ns.hiddenTabAlertUntil = GetTime() + 8
+		end
+		if ns.tabs then
+			for i = 1, #ns.tabs do
+				local tab = ns.tabs[i]
+				if tab and tab.chatFrame == ChatFrame1 then
+					tab.alertUntil = GetTime() + 8
+					break
+				end
 			end
 		end
 		if ns.RefreshTabs and (not ns.db.collapsed or ns.inEditMode) then
@@ -500,6 +526,94 @@ end
 
 function ns:CHAT_MSG_BN_WHISPER()
 	ns:AlertWhisper()
+end
+
+---------------------------------------------------------------------------
+-- Clicking any window control (header icons, Social/Channels, tab list, drag strip, resize grips,
+-- close X, or the Window Settings dialog) clears the Say box so it never floats above them.
+-- Clicks on the chat text itself are left alone so shift-clicking links into the box still works.
+---------------------------------------------------------------------------
+local function MouseOverShown(frame)
+	if not (frame and frame.IsShown and frame:IsShown() and frame.IsMouseOver) then return false end
+	local over = frame:IsMouseOver()
+	if issecretvalue and issecretvalue(over) then return false end
+	return over and true or false
+end
+
+local function MouseOverWindowControls()
+	if MouseOverShown(ns.settingsBar) or MouseOverShown(ns.closeButton)
+		or MouseOverShown(ns.dragStrip) or MouseOverShown(ns.tabColumn)
+		or MouseOverShown(ns.editDialog) then
+		return true
+	end
+	if ns.grips then
+		for i = 1, #ns.grips do
+			if MouseOverShown(ns.grips[i]) then return true end
+		end
+	end
+	return false
+end
+
+function ns:GLOBAL_MOUSE_DOWN()
+	if not ns.db.enabled or (ns.db.collapsed and not ns.inEditMode) then return end
+	if not (ns.OwnedEditBoxActive and ns:OwnedEditBoxActive()) then return end
+	if MouseOverWindowControls() then
+		ns:CloseOwnedEditBoxes(true)
+	end
+end
+
+---------------------------------------------------------------------------
+-- Faint mode: while the window isn't hovered, fade every piece of window chrome (border, background,
+-- header, tab list, inner frame border, scrollbar, resting edit box, grips) so only chat text shows.
+-- Runs on its own UIParent child frame (EditMode.Attach owns the anchor's OnUpdate while dragging).
+---------------------------------------------------------------------------
+local FAINT_FADE_IN = 0.15   -- seconds to fade chrome back in on hover
+local FAINT_FADE_OUT = 0.4   -- seconds to fade chrome out after the hover delay
+local FAINT_DELAY = 0.6      -- seconds the chrome stays after the mouse leaves
+
+ns.chromeAlpha = 1
+
+local function SetChromeAlpha(a)
+	ns.chromeAlpha = a
+	if ns.anchor then ns.anchor:SetAlpha(a) end
+	if ns.fill then ns.fill:SetAlpha(a) end
+	if ns.ApplyOwnedChromeAlpha then ns:ApplyOwnedChromeAlpha() end
+end
+
+local function KeepChromeVisible()
+	if ns.inEditMode or ns.resizing then return true end
+	if MouseOverShown(ns.anchor) then return true end
+	if ns.editDialog and ns.editDialog.IsShown and ns.editDialog:IsShown() then return true end
+	if ns.OwnedEditBoxActive and ns:OwnedEditBoxActive() then return true end
+	return false
+end
+
+local function StartFaintFader()
+	local lastHover = 0
+	local fader = CreateFrame("Frame", nil, UIParent)
+	fader:SetScript("OnUpdate", function(_, elapsed)
+		local open = ns.db.enabled and (not ns.db.collapsed or ns.inEditMode)
+		local target = 1
+		if open and ns.db.faint then
+			local now = GetTime()
+			if KeepChromeVisible() then lastHover = now end
+			if now - lastHover > FAINT_DELAY then target = 0 end
+		end
+		local a = ns.chromeAlpha or 1
+		if a == target then return end
+		if target > a then
+			a = math.min(target, a + elapsed / FAINT_FADE_IN)
+		else
+			a = math.max(target, a - elapsed / FAINT_FADE_OUT)
+		end
+		SetChromeAlpha(a)
+	end)
+	ns.faintFader = fader
+end
+
+function ns:ApplyFaint()
+	-- Turning faint off (or on while hovered) snaps the chrome fully visible right away.
+	if not ns.db.faint then SetChromeAlpha(1) end
 end
 
 ---------------------------------------------------------------------------
@@ -523,10 +637,20 @@ end
 function ns:ApplyEnabled()
 	local on = ns.db.enabled and true or false
 	local open = on and (not ns.db.collapsed or ns.inEditMode)
+	local showTabs = open and (ns.db.showTabs ~= false)
 
 	if ns.border then ns.border:SetShown(open) end
 	if ns.fill then ns.fill:SetShown(open) end
 	if ns.settingsBar then ns.settingsBar:SetShown(open) end
+	if ns.tabsToggleButton then
+		ns.tabsToggleButton:SetShown(open)
+		if open then
+			ResetButtonVisual(ns.tabsToggleButton)
+			if ns.SyncTabsToggleButton then ns:SyncTabsToggleButton() end
+		else
+			ns.SetButtonPulse(ns.tabsToggleButton, false)
+		end
+	end
 	if ns.chatSettingsButton then
 		ns.chatSettingsButton:SetShown(open)
 		if open then ResetButtonVisual(ns.chatSettingsButton) end
@@ -539,8 +663,8 @@ function ns:ApplyEnabled()
 		ns.closeButton:SetShown(open)
 		if open then ResetButtonVisual(ns.closeButton) end
 	end
-	if ns.tabColumn then ns.tabColumn:SetShown(open) end
-	if ns.tabColumnFill then ns.tabColumnFill:SetShown(open) end
+	if ns.tabColumn then ns.tabColumn:SetShown(showTabs) end
+	if ns.tabColumnFill then ns.tabColumnFill:SetShown(showTabs) end
 	if ns.chatBox then ns.chatBox:SetShown(open) end
 	if ns.chatBoxFill then ns.chatBoxFill:SetShown(open) end
 	if ns.dragStrip then ns.dragStrip:SetShown(open) end
@@ -553,7 +677,7 @@ function ns:ApplyEnabled()
 		ns.toggle:SetShown(showToggle)
 		if showToggle then ResetButtonVisual(ns.toggle) end
 	end
-	if not open and ns.tabs then
+	if not showTabs and ns.tabs then
 		for i = 1, #ns.tabs do ns.tabs[i]:Hide() end
 	end
 
@@ -562,7 +686,7 @@ function ns:ApplyEnabled()
 		ns:ApplyBackground()
 		ns:LayoutWindow()
 	elseif on then
-		-- Seat while anchor has a valid rect, place the Chat open button, then hide the anchor
+		-- Seat while anchor has a valid rect, place the message-bubble open icon, then hide the anchor
 		-- so the closed window's rectangle takes no mouse or wheel input.
 		if ns.anchor and not ns.anchor:IsShown() then ns.anchor:Show() end
 		ns:LayoutWindow()
@@ -577,9 +701,12 @@ function ns:ApplyEnabled()
 end
 
 function ns:SetCollapsed(collapsed)
+	if collapsed and ns.CloseOwnedEditBoxes then
+		ns:CloseOwnedEditBoxes()
+	end
 	ns.db.collapsed = collapsed and true or false
 	if not collapsed then
-		if ns.toggle then ns.toggle.alertUntil = nil end
+		ns.SetButtonPulse(ns.toggle, false)
 	end
 	ns:ApplyEnabled()
 end
@@ -599,15 +726,22 @@ function ns:Init()
 	ns:HookChatFlickerGuards()
 	ns:HookChatPositionGuards()
 	ns:ApplyEnabled()
+	StartFaintFader()
 
-	-- Re-hide Blizzard's real tabs and refresh ours immediately whenever the dock updates tabs.
+	-- Re-hide Blizzard's real tabs, recompute auto-fitted tab width, and refresh our list whenever the dock updates tabs.
+	local updatingDockTabs = false
 	if hooksecurefunc and type(FCFDock_UpdateTabs) == "function" then
 		hooksecurefunc("FCFDock_UpdateTabs", function()
-			if not ns.db.enabled then return end
-			ns:EnforceOwnedChrome()
+			if updatingDockTabs or not ns.db.enabled then return end
+			updatingDockTabs = true
+			ns:ApplyOwnedScale()
 			if not ns.db.collapsed or ns.inEditMode then
+				ns:SeatChat()
 				ns:RefreshTabs()
+			else
+				ns:SeatChat()
 			end
+			updatingDockTabs = false
 		end)
 	end
 
@@ -688,6 +822,13 @@ function ns:Init()
 	ns.events:RegisterEvent("CHANNEL_UI_UPDATE")
 	ns.events:RegisterEvent("CHAT_MSG_WHISPER")
 	ns.events:RegisterEvent("CHAT_MSG_BN_WHISPER")
+	-- GLOBAL_MOUSE_DOWN is Mainline/Forever; skip it where the client does not know the event.
+	local validate = C_EventUtils and C_EventUtils.IsEventValid
+	if validate then
+		if validate("GLOBAL_MOUSE_DOWN") then ns.events:RegisterEvent("GLOBAL_MOUSE_DOWN") end
+	else
+		pcall(ns.events.RegisterEvent, ns.events, "GLOBAL_MOUSE_DOWN")
+	end
 
 	if EventRegistry and EventRegistry.RegisterCallback then
 		EventRegistry:RegisterCallback("EditMode.Enter", function()
@@ -700,11 +841,14 @@ function ns:Init()
 		end, ns)
 		-- IM style leaves the edit box shown; only an actual focus opens a closed window.
 		EventRegistry:RegisterCallback("ChatFrame.OnEditBoxFocusGained", function(_, editBox)
-			if not (ns.db.enabled and ns.db.collapsed) then return end
+			if not ns.db.enabled then return end
 			local frame = editBox and editBox.chatFrame
 			if frame and frame ~= ChatFrame1 and not frame.isDocked then return end
 			if not frame and editBox ~= (ChatFrame1 and ChatFrame1.editBox) then return end
-			ns:SetCollapsed(false)
+			if editBox and editBox.EnableMouse then editBox:EnableMouse(true) end
+			if ns.db.collapsed then
+				ns:SetCollapsed(false)
+			end
 		end, ns)
 	end
 end

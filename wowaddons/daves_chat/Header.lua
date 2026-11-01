@@ -35,9 +35,82 @@ local function MakeWindowIcon(parent, name)
 	return b
 end
 
+-- Header Show/Hide button for the left-side chat tab list: uses Blizzard's chatframe-button plate
+-- (27x26, matching Channels) with WoW's eye visibility icon (friends-icon-eye / socialqueuing-icon-eye).
+local function MakeTabsToggleButton(parent, name)
+	local b = CreateFrame("Button", name, parent)
+	b:SetSize(27, 26)
+	if ns.HasAtlas("chatframe-button-up") then
+		b:SetNormalAtlas("chatframe-button-up")
+		b:SetPushedAtlas("chatframe-button-down")
+	else
+		b:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIcon-Chat-Up")
+		b:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIcon-Chat-Down")
+	end
+	if ns.HasAtlas("chatframe-button-highlight") then
+		b:SetHighlightAtlas("chatframe-button-highlight", "ADD")
+	else
+		b:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+	end
+	local icon = b:CreateTexture(nil, "OVERLAY")
+	icon:SetSize(16, 17)
+	icon:SetPoint("CENTER")
+	local eyeAtlas = (ns.HasAtlas("friends-icon-eye") and "friends-icon-eye")
+		or (ns.HasAtlas("socialqueuing-icon-eye") and "socialqueuing-icon-eye")
+	if eyeAtlas then
+		icon:SetAtlas(eyeAtlas, false)
+	else
+		icon:SetSize(15, 15)
+		icon:SetTexture("Interface\\Buttons\\UI-PlusButton-Up")
+		b.isFallbackIcon = true
+	end
+	b.Icon = icon
+	b:SetScript("OnMouseDown", function()
+		icon:ClearAllPoints()
+		icon:SetPoint("CENTER", -1, -2)
+	end)
+	b:SetScript("OnMouseUp", function()
+		icon:ClearAllPoints()
+		icon:SetPoint("CENTER")
+	end)
+	b:RegisterForClicks("LeftButtonUp")
+	return b
+end
+
+local function TabsToggleTooltip(self)
+	ns.AnchorTooltip(self)
+	if ns.db and ns.db.showTabs ~= false then
+		GameTooltip:SetText("Hide chat tabs")
+		GameTooltip:AddLine("Hides the left tab list and expands chat to the full window width.", 1, 1, 1, true)
+	else
+		GameTooltip:SetText("Show chat tabs")
+		GameTooltip:AddLine("Shows your chat tabs and channels on the left.", 1, 1, 1, true)
+	end
+	GameTooltip:Show()
+end
+
+function ns:SyncTabsToggleButton()
+	local b = ns.tabsToggleButton
+	if not b or not b.Icon then return end
+	local shown = not ns.db or ns.db.showTabs ~= false
+	if b.isFallbackIcon then
+		b.Icon:SetTexture(shown and "Interface\\Buttons\\UI-MinusButton-Up" or "Interface\\Buttons\\UI-PlusButton-Up")
+		b.Icon:SetAlpha(1)
+	else
+		if b.Icon.SetDesaturated then b.Icon:SetDesaturated(not shown) end
+		b.Icon:SetAlpha(shown and 1 or 0.52)
+	end
+end
+
+-- Blizzard's chat Social / Friends button: QuickJoinToastButton on Mainline / Forever (Blizzard_QuickJoin
+-- loads with AllowLoadGameType mainline only), or the Classic chat friends button when that client has one.
+function ns.SocialButton()
+	return QuickJoinToastButton or _G.FriendsMicroButton
+end
+
 -- The Social / Friends button is hidden while the in-game friends list game rule is disabled.
 function ns.FriendsWanted()
-	if not QuickJoinToastButton then return false end
+	if not ns.SocialButton() then return false end
 	if C_GameRules and C_GameRules.IsGameRuleActive and Enum and Enum.GameRule
 		and Enum.GameRule.IngameFriendsListDisabled
 		and C_GameRules.IsGameRuleActive(Enum.GameRule.IngameFriendsListDisabled) then
@@ -92,13 +165,31 @@ function ns:BuildHeader(anchor)
 	divider:SetPoint("RIGHT", anchor, "RIGHT", -edge, 0)
 	ns.settingsDivider = divider
 
+	local tabsToggle = MakeTabsToggleButton(bar, "DavesChatTabsToggleButton")
+	tabsToggle:SetFrameLevel(bar:GetFrameLevel() + 15)
+	tabsToggle:SetScript("OnClick", function(self)
+		ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		ns.db.showTabs = (ns.db.showTabs == false) and true or false
+		if ns.db.showTabs then
+			self.alertUntil = nil
+			ns.hiddenTabAlertUntil = nil
+		end
+		ns:SyncTabsToggleButton()
+		if ns.LayoutWindow then ns:LayoutWindow() end
+		if GameTooltip:GetOwner() == self then TabsToggleTooltip(self) end
+	end)
+	tabsToggle:SetScript("OnEnter", TabsToggleTooltip)
+	tabsToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	ns.tabsToggleButton = tabsToggle
+	ns:SyncTabsToggleButton()
+
 	local chatSettings = ns.MakeChatIcon(bar, "DavesChatConfigButton")
 	chatSettings:SetFrameLevel(bar:GetFrameLevel() + 15)
 	chatSettings:SetScript("OnClick", function()
 		ns:OpenChatConfig()
 	end)
 	chatSettings:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		ns.AnchorTooltip(self)
 		GameTooltip:SetText("Chat Settings")
 		GameTooltip:AddLine("Configure message types, channels, and colors for this tab.", 1, 1, 1, true)
 		GameTooltip:Show()
@@ -113,7 +204,7 @@ function ns:BuildHeader(anchor)
 		ns:ToggleWindowSettings()
 	end)
 	windowSettings:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		ns.AnchorTooltip(self)
 		GameTooltip:SetText("Window Settings")
 		GameTooltip:AddLine("Adjust window scale, size, background style, and tabs.", 1, 1, 1, true)
 		GameTooltip:Show()
@@ -129,7 +220,7 @@ function ns:BuildHeader(anchor)
 	close:SetPoint("TOPRIGHT", anchor, "TOPRIGHT", close.anchorX, close.anchorY)
 	close:SetFrameLevel(topLevel + 40)
 	close:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		ns.AnchorTooltip(self, "RIGHT")
 		GameTooltip:SetText("Close chat")
 		GameTooltip:Show()
 	end)
@@ -137,7 +228,7 @@ function ns:BuildHeader(anchor)
 	ns.closeButton = close
 end
 
--- Left side of the header: Social (QuickJoinToastButton), Channels, and optional TTS.
+-- Left side of the header: Social (far left), Show/Hide Tabs, Channels, and optional TTS.
 -- Right side of the header: Chat Settings (bubble icon) and Window Settings (window icon),
 -- with Close X in the top-right window corner.
 function ns:PlaceSettings()
@@ -154,6 +245,13 @@ function ns:PlaceSettings()
 	if ns.FriendsWanted() then
 		local w, h = 32, 32
 		ns.friendsX, ns.friendsY = x, -math.floor((ROW - h) / 2)
+		x = x + w + gap
+	end
+	if ns.tabsToggleButton then
+		local w = ns.tabsToggleButton:GetWidth() or 27
+		local h = ns.tabsToggleButton:GetHeight() or 26
+		ns.tabsToggleButton:ClearAllPoints()
+		ns.tabsToggleButton:SetPoint("TOPLEFT", bar, "TOPLEFT", x, -math.floor((ROW - h) / 2))
 		x = x + w + gap
 	end
 	if ChatFrameChannelButton then
@@ -249,7 +347,7 @@ function ns:PinHeaderIcons()
 		end
 	end
 
-	local friends = QuickJoinToastButton
+	local friends = ns.SocialButton()
 	if friends and ns.friendsX and ns.FriendsWanted() then
 		friends:SetSize(32, 32)
 		friends.IsInDefaultPosition = NotDefaultPosition
@@ -267,7 +365,7 @@ function ns:PinHeaderIcons()
 end
 
 function ns:FriendsDrifted()
-	local friends = QuickJoinToastButton
+	local friends = ns.SocialButton()
 	local home = ns.settingsBar
 	if not ns.FriendsWanted() or not home or not ns.friendsX then return false end
 	if not friends:IsShown() or friends:GetParent() ~= home then return true end
@@ -279,7 +377,21 @@ function ns:PlaceHeaderButtons()
 	if ns.placingHeader or not ns.settingsBar or not ns.chatSettingsButton then return end
 	ns.placingHeader = true
 	local home = ns.settingsBar
-	RememberParent(QuickJoinToastButton, "friendsParent", home)
+	local social = ns.SocialButton()
+	RememberParent(social, "friendsParent", home)
+	-- Remember the Social button's own strata, level, and anchors once so "Move the chat window" off
+	-- can put a Classic friends button back exactly where Blizzard had it.
+	if social and not ns.friendsHome and social.GetParent and social:GetParent() ~= home then
+		local points = {}
+		for i = 1, (social.GetNumPoints and social:GetNumPoints()) or 0 do
+			points[i] = { social:GetPoint(i) }
+		end
+		ns.friendsHome = {
+			strata = social.GetFrameStrata and social:GetFrameStrata(),
+			level = social.GetFrameLevel and social:GetFrameLevel(),
+			points = points,
+		}
+	end
 	RememberParent(ChatFrameChannelButton, "channelParent", home)
 
 	if not ns.db.enabled then
@@ -297,7 +409,7 @@ function ns:PlaceHeaderButtons()
 				moved = true
 			end
 		end
-		local friends = QuickJoinToastButton
+		local friends = ns.SocialButton()
 		if friends then
 			if friends.IsInDefaultPosition == NotDefaultPosition then
 				friends.IsInDefaultPosition = nil
@@ -305,8 +417,17 @@ function ns:PlaceHeaderButtons()
 			end
 			if OwnedByUs(friends, home) then
 				friends:SetParent(ns.friendsParent or UIParent)
-				friends:SetFrameStrata("LOW")
-				friends:SetFrameLevel(4)
+				local home0 = ns.friendsHome
+				friends:SetFrameStrata((home0 and home0.strata) or "LOW")
+				friends:SetFrameLevel((home0 and home0.level) or 4)
+				-- Non-QuickJoin (Classic) buttons aren't re-anchored by ChatAlertFrame; restore their own points.
+				if friends ~= QuickJoinToastButton and home0 and home0.points then
+					friends:ClearAllPoints()
+					for i = 1, #home0.points do
+						local p = home0.points[i]
+						friends:SetPoint(p[1], p[2], p[3], p[4], p[5])
+					end
+				end
 				if friends.SetToastDirection then
 					friends:SetToastDirection(ChatFrame1 ~= nil and ChatFrame1.buttonSide == "right")
 				end
@@ -326,7 +447,7 @@ function ns:PlaceHeaderButtons()
 		end
 	elseif not ns.db.collapsed or ns.inEditMode then
 		local tts = TextToSpeechButtonFrame
-		local friends = QuickJoinToastButton
+		local friends = ns.SocialButton()
 		local refreshAlerts = (tts and tts.IsInDefaultPosition ~= NotDefaultPosition)
 			or (friends and ns.friendsX and friends.IsInDefaultPosition ~= NotDefaultPosition)
 		ns:PinHeaderIcons()
@@ -341,6 +462,27 @@ function ns:PlaceHeaderButtons()
 end
 
 function ns:HookChatAlerts()
+	-- Blizzard's own header buttons we pin (Social / FriendsMicroButton, Channels, TTS) open their tooltips
+	-- through GameTooltip_SetDefaultAnchor on Classic, which parks them at the screen's bottom-right corner.
+	-- That call runs before any lines are added, so re-anchoring in a post-hook keeps the tooltip
+	-- next to its button without touching the buttons' own scripts.
+	if hooksecurefunc and type(GameTooltip_SetDefaultAnchor) == "function" then
+		hooksecurefunc("GameTooltip_SetDefaultAnchor", function(tooltip, parent)
+			if tooltip ~= GameTooltip or not parent or not ns.db or not ns.db.enabled then return end
+			local bar = ns.settingsBar
+			if not bar or not bar:IsShown() then return end
+			local p = parent
+			for _ = 1, 4 do
+				if not p or (issecretvalue and issecretvalue(p)) then return end
+				if p == bar then
+					ns.AnchorTooltip(parent)
+					return
+				end
+				p = p.GetParent and p:GetParent()
+			end
+		end)
+	end
+
 	if not (ChatAlertFrame and ChatAlertFrame.UpdateAnchors and hooksecurefunc) then return end
 	hooksecurefunc(ChatAlertFrame, "UpdateAnchors", function()
 		if not (ns.db.enabled and (not ns.db.collapsed or ns.inEditMode)) then return end
