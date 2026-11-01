@@ -31,7 +31,8 @@ local function NineSlice(parent, L)
 		for col = 1, 3 do
 			local t = parent:CreateTexture(nil, "BACKGROUND")
 			t:SetTexture(L.texture)
-			t:SetTexCoord(us[col], us[col + 1], vs[row], vs[row + 1])
+			t.tc = { us[col], us[col + 1], vs[row], vs[row + 1] }
+			t:SetTexCoord(unpack(t.tc))   -- SetTexture can clear this; ApplyArt puts it back
 			t:SetPoint("TOPLEFT", parent, ys[row][1] .. xs[col][1], xs[col][2], ys[row][2])
 			t:SetPoint("BOTTOMRIGHT", parent, ys[row + 1][1] .. xs[col + 1][1], xs[col + 1][2], ys[row + 1][2])
 			parts[#parts + 1] = t

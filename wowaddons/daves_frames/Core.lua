@@ -14,7 +14,7 @@ ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
 
 local DEFAULTS = {
 	enabled = true,
-	size = 0.8,               -- Scale as the player sees it: 0.5 to 1, where 1 is half the art's size (ns.FrameScale)
+	size = 0.8,               -- Scale as the player sees it: ns.MinSize() to 1, where 1 is half the art's size
 	layout = "overlay",       -- "overlay" or "stacked" (name and cast)
 	numbers = "portrait",     -- "portrait", "bars" (stacked only) or "off"
 	format = "both",          -- "num", "pct" or "both"
@@ -22,11 +22,19 @@ local DEFAULTS = {
 	boards = "chains",        -- "chains" or "under"
 	swing = true,
 	maxRows = 2,              -- aura rows per board before the ellipsis (1-4)
-	variant = "gold",         -- every target uses the gold elite art for now; every setting here applies to every variant
 }
 
--- The frame's real scale: Scale 1 is half the art's size (0.5), Scale 0.5 a quarter (0.25).
-function ns.FrameScale() return ns.db.size * 0.5 end
+-- Smallest Scale at which the name (44 layout px) is still 14 screen pixels.
+-- 14 / 44 / 0.5 = 0.636, rounded up to the slider's 0.05 step.
+function ns.MinSize() return 0.65 end
+
+-- The frame's real scale: Scale 1 is half the art's size (0.5). It does not go below the size
+-- where the name is still easy to read (ns.MinSize).
+function ns.FrameScale()
+	local size = ns.db.size or 0.8
+	if size < ns.MinSize() then size = ns.MinSize() end
+	return size * 0.5
+end
 
 -- Stacked needs room: below Scale 0.85 the setting switches to Overlay (and numbers in the bars, which only
 -- come with Stacked, to the portrait). Called whenever the Scale changes and at load.
@@ -60,7 +68,7 @@ events:RegisterEvent("PLAYER_LOGIN")
 local UNIT_EVENTS = {
 	"UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER",
 	"UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_PREDICTION", "UNIT_AURA", "UNIT_NAME_UPDATE", "UNIT_LEVEL",
-	"UNIT_FACTION", "UNIT_FLAGS", "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED", "UNIT_TARGET",
+	"UNIT_FACTION", "UNIT_FLAGS", "UNIT_CLASSIFICATION_CHANGED", "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED", "UNIT_TARGET",
 	"UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED",
 	"UNIT_SPELLCAST_DELAYED", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_STOP",
 	"UNIT_SPELLCAST_CHANNEL_UPDATE", "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
@@ -76,15 +84,16 @@ function ns:ADDON_LOADED(name)
 		if daves_framesDB[k] == nil then daves_framesDB[k] = v end
 	end
 	ns.db = daves_framesDB
-	if not ns.VARIANTS[ns.db.variant] then ns.db.variant = "gold" end
+	ns.db.variant = nil   -- 0.2.0: the unit picks the art (plain, rare, elite, rare elite)
 	ns.db.textSize, ns.db.textVersion = nil, nil   -- 0.1.13: text scales with the frame, no setting
 	ns.db.textStyle = nil
 	if ns.db.scale then   -- 0.1.11: Scale became 0.5 to 1 (1 = the old 0.5)
 		ns.db.size = math.max(0.5, math.min(1, ns.db.scale / 0.5)); ns.db.scale = nil
 	end
+	if ns.db.size < ns.MinSize() then ns.db.size = ns.MinSize() end
 
 	ns:CheckLayout()
-	local f = ns:BuildFrame(ns.db.variant)
+	local f = ns:BuildFrame("plain")
 	f:SetScale(ns.FrameScale())
 	ns:BuildBoards()
 	ns:BuildPortraitButton()
@@ -161,6 +170,7 @@ function ns:UNIT_NAME_UPDATE(unit) if Mine(unit) then ns:UpdateIdentity() end en
 ns.UNIT_LEVEL = ns.UNIT_NAME_UPDATE
 ns.UNIT_FACTION = ns.UNIT_NAME_UPDATE
 ns.UNIT_FLAGS = ns.UNIT_NAME_UPDATE
+ns.UNIT_CLASSIFICATION_CHANGED = ns.UNIT_NAME_UPDATE
 function ns:UNIT_PORTRAIT_UPDATE(unit) if Mine(unit) then ns:UpdatePortrait() end end
 ns.UNIT_MODEL_CHANGED = ns.UNIT_PORTRAIT_UPDATE
 function ns:UNIT_TARGET(unit) if Mine(unit) then ns:UpdateTargetOfTarget() end end
@@ -192,8 +202,22 @@ SlashCmdList["DAVES_FRAMES"] = function(msg)
 		ns.Print(ns.previewTest and "previewing on yourself while you have no target." or "preview off.")
 	elseif msg == "version" then
 		ns.Print(ns.VERSION)
+	elseif msg:match("^art%s+") or msg == "art" then
+		local which = msg:match("^art%s+(%S+)") or "auto"
+		if which == "auto" then
+			ns.artForce = nil
+			ns.artKey = nil
+			ns.Print("art follows the unit.")
+		elseif ns.VARIANTS[which] then
+			ns.artForce = which
+			ns.artKey = nil
+			ns:ApplyArt(which)
+			ns.Print("art: " .. which .. ".  /davesframes art auto puts it back on the unit.")
+		else
+			ns.Print("art: plain, rare, elite, rareelite, or auto.")
+		end
 	else
-		ns.Print("commands: /davesframes [options | test | version]")
+		ns.Print("commands: /davesframes [options | test | art | version]")
 	end
 end
 

@@ -1,0 +1,11 @@
+-- Overridden by tools/Build-FrameTemplate.py. The live numbers are in Layout.lua.
+-- Canvas 1024 x 272. Paint mask guides/frame-template.png at 2x (2048 x 544).
+art = { 0, 1, 0, 0.531250 }
+w = 1024, h = 272
+cx = 512, cy = 136, rIn = 105, rOut = 128
+winL = 35, winR = 989, winT = 108, winB = 164
+cut = { 35, 989, 108, 164 }
+hidden = 128
+plateL = 8, plateR = 1016, plateT = 81, plateB = 191
+pivotY = 189
+laneL = { 16, 376 }, laneR = { 648, 1008 }

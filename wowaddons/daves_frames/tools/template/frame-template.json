@@ -1,0 +1,111 @@
+{
+  "unit": "layout px, y down. The PNG is SCALE times this.",
+  "scale": 2,
+  "canvas": {
+    "w": 1024,
+    "h": 272
+  },
+  "image": {
+    "w": 2048,
+    "h": 544
+  },
+  "atlas": {
+    "w": 2048,
+    "h": 1024,
+    "art": [
+      0,
+      1,
+      0,
+      0.53125
+    ]
+  },
+  "center": {
+    "cx": 512,
+    "cy": 136
+  },
+  "portrait": {
+    "rIn": 105,
+    "rOut": 128,
+    "pad": 4
+  },
+  "lip": 5,
+  "outer": 22,
+  "health": {
+    "l": 35,
+    "t": 108,
+    "r": 379,
+    "b": 164,
+    "w": 344,
+    "h": 56
+  },
+  "mana": {
+    "l": 645,
+    "t": 108,
+    "r": 989,
+    "b": 164,
+    "w": 344,
+    "h": 56
+  },
+  "plate": {
+    "l": 8,
+    "t": 81,
+    "r": 1016,
+    "b": 191,
+    "w": 1008,
+    "h": 110
+  },
+  "layout": {
+    "w": 1024,
+    "h": 272,
+    "cx": 512,
+    "cy": 136,
+    "rIn": 105,
+    "rOut": 128,
+    "winL": 35,
+    "winR": 989,
+    "winT": 108,
+    "winB": 164,
+    "hidden": 128,
+    "plateL": 8,
+    "plateR": 1016,
+    "plateT": 81,
+    "plateB": 191,
+    "pivotY": 189,
+    "laneL": [
+      16,
+      376
+    ],
+    "laneR": [
+      648,
+      1008
+    ],
+    "art": [
+      0,
+      1,
+      0,
+      0.53125
+    ]
+  },
+  "level": {
+    "cx": 512,
+    "cy": 252,
+    "dy": 116,
+    "atlas": "UI-HUD-UnitFrame-SmallCircle"
+  },
+  "colours": {
+    "outside": "#FF00FF",
+    "game": "#0000FF",
+    "lip": "#00FF00",
+    "frame": "#808080",
+    "ring": "#FF8000"
+  },
+  "paint": [
+    "lip",
+    "frame",
+    "ring"
+  ],
+  "doNotPaint": [
+    "outside",
+    "game"
+  ]
+}

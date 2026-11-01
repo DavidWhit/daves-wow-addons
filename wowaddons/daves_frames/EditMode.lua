@@ -6,7 +6,7 @@
 
 local _, ns = ...
 
--- Pinned to the top edge by default: the top of the whole frame (the dragon's top) on the screen's edge.
+-- Pinned to the top edge by default: the top of the whole frame on the screen's edge.
 local DEFAULT_POS = { point = "TOP", relPoint = "TOP", x = 0, y = 0 }
 
 local function ApplyPosition(frame)
@@ -20,7 +20,7 @@ function ns:InitEditMode(frame)
 	ApplyPosition(frame)
 
 	local d = ns.EditMode.CreateDialog("daves_framesEditDialog", "Dave's Frames")
-	d:AddSlider({ label = "Scale", min = 0.5, max = 1, step = 0.05, format = "%.2f",
+	d:AddSlider({ label = "Scale", min = ns.MinSize(), max = 1, step = 0.05, format = "%.2f",
 		get = function() return ns.db.size end,
 		set = function(v)
 			local wasAllowed = ns.StackedAllowed()

@@ -154,7 +154,7 @@ function ns:BuildFrame(variant)
 	f.boardLayer:SetAllPoints()
 	f.boardLayer:SetFrameLevel(base + 1)
 
-	-- Bars, clipped to each window (run a few px under the rim; the ring hides the inner end).
+	-- Bars, clipped to each window. They run 5px under the lip; the inner end stops at the ring.
 	local cl, cr, ct, cb = L.winL - S.sideX, L.winR + S.sideX, L.winT - S.sideY, L.winB + S.sideY
 	local function Clip(l, r)
 		local c = CreateFrame("Frame", nil, f)
@@ -242,12 +242,7 @@ function ns:BuildFrame(variant)
 	f.pnPower = Font(text, "OVERLAY", NUM_FONT, 19)
 	f.pnPower:SetPoint("CENTER", f, "TOPLEFT", L.cx, -(L.cy + 13))
 
-	-- Name and level (left window), cast text and who they target (right window), bar numbers.
-	-- Level: Blizzard's own level circle and number (Forever's TargetFrameTemplates.xml: LevelBackgroundCircle,
-	-- atlas UI-HUD-UnitFrame-SmallCircle, and LevelText in WhiteLargeNumberFont, centred on it 0.5 low).
-	f.levelBadge = text:CreateTexture(nil, "ARTWORK")
-	f.levelBadge:SetAtlas(S.badge.atlas)
-	f.level = Font(text, "OVERLAY", NUM_FONT, 16)
+	-- Name (left window), cast text and who they target (right window), bar numbers.
 	f.name = Font(text, "OVERLAY", NAME_FONT, 21)
 	f.name:SetJustifyH("LEFT")
 	f.dead = Font(text, "OVERLAY", NAME_FONT, 21)
@@ -269,8 +264,47 @@ function ns:BuildFrame(variant)
 	f.tot = Font(text, "OVERLAY", NUM_FONT, 15)
 	f.tot:SetJustifyH("LEFT")
 
+	-- Level, above the plate and the other text. Blizzard's circle (Camelot TargetFrameTemplates.xml
+	-- LevelBackgroundCircle, atlas UI-HUD-UnitFrame-SmallCircle) with the number centred 0.5 low,
+	-- the same as TargetFrameMixin:OnLoad.
+	local level = CreateFrame("Frame", nil, f)
+	level:SetAllPoints()
+	level:SetFrameLevel(base + 12)
+	f.levelLayer = level
+	f.levelBadge = level:CreateTexture(nil, "ARTWORK")
+	f.levelBadge:SetAtlas(S.badge.atlas)
+	f.level = Font(level, "OVERLAY", NUM_FONT, 16)
+
 	ns:ApplyLayout()
 	return f
+end
+
+-- Swap the metal without moving anything. Every variant shares GEO.
+function ns:ApplyArt(key)
+	local L = ns.VARIANTS[key] or ns.VARIANTS.plain
+	key = L.key
+	if ns.artKey == key then return end
+	ns.artKey = key
+	ns.L = L
+	local f = ns.frame
+	if not f then return end
+	f.art:SetTexture(L.texture)
+	f.art:SetTexCoord(unpack(L.art))
+	local mid = L.metal[2]
+	if ns.boards then
+		for _, b in pairs(ns.boards) do
+			for _, t in ipairs(b.ornate) do
+				t:SetTexture(L.texture)
+				if t.tc then t:SetTexCoord(unpack(t.tc)) end
+			end
+			for _, t in ipairs(b.chains) do
+				t:SetTexture(L.chain, "CLAMP", "REPEAT")
+			end
+			if b.plain and b.plain[1] then
+				b.plain[1]:SetColorTexture(mid[1], mid[2], mid[3], 1)
+			end
+		end
+	end
 end
 
 -- Text scales with the frame, like the art: TEXT layout units for a full-size role (what Blizzard's target
@@ -327,9 +361,8 @@ function ns:ApplyLayout()
 	Rect(f.power, f, pl, barTop, pr, bottom)
 	if stacked then Rect(f.cast, f, pl, top, pr, split) else Rect(f.cast, f, pl, top, pr, bottom) end
 
-	-- Level: Blizzard's level circle on the bottom middle of the portrait ring, until a variant paints its own
-	-- (NOTES.md: L5 level badge), at the L5 guide's size so a painted badge replaces it exactly. It scales with
-	-- the frame like the art; the number keeps Blizzard's proportion to the circle, so two digits always fit.
+	-- Level circle, centred on the lower ring, above the plate. One point for every variant.
+	-- The digits keep that circle's size, so two of them fit.
 	local B = S.badge
 	local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(B.atlas)
 	local atlasW = (info and info.width and info.width > 0) and info.width or 30
@@ -341,17 +374,18 @@ function ns:ApplyLayout()
 	local fontObj = WhiteLargeNumberFont or TextStatusBarText
 	local file, height, flags = fontObj:GetFont()
 	local levelSize = math.max(1, math.floor((height or 14) * u / px + 0.5)) * px
-	f.level:ClearAllPoints(); f.level:SetPoint("CENTER", f, "TOPLEFT", bx, -Snap(by + 0.5 * u))   -- on a whole pixel: sharp digits
+	f.level:ClearAllPoints(); f.level:SetPoint("CENTER", f.levelBadge, "CENTER", 0, -0.5)
 	f.level:SetJustifyH("CENTER"); f.level:SetJustifyV("MIDDLE")
 	f.level:SetFont(file or (BlizzardFont()), levelSize, flags or "")
 	f.level:SetShadowColor(0, 0, 0, 0)
 
 	-- Name, from the outer end of the health window.
 	local nameMid = stacked and stripMid or (L.winT + L.winB) / 2
-	local nameSize = stacked and Size(1, strip - 6) or Size(1, 34)
+	-- Overlay: the name fills the window, which is sized so 44 layout px still fits.
+	local nameSize = stacked and Size(1, strip - 6) or Size(1, (L.winB - L.winT) - 8)
 	f.name:ClearAllPoints()
 	f.name:SetPoint("LEFT", f, "TOPLEFT", L.winL + 16, Y(nameMid, nameSize))
-	f.name:SetPoint("RIGHT", f, "TOPLEFT", L.cx - L.hidden - 60, Y(nameMid, nameSize))
+	f.name:SetPoint("RIGHT", f, "TOPLEFT", L.cx - L.hidden - 14, Y(nameMid, nameSize))
 	ns.StyleFont(f.name, ns.NAME_FONT, nameSize)
 
 	local barMid = stacked and stackBarMid or (L.winT + L.winB) / 2
@@ -388,12 +422,14 @@ function ns:ApplyLayout()
 	-- Numbers on the portrait: health over resource, centred, on a dark band that grows with them.
 	-- "Both" ("12.3K  ·  100%", about 7.5 em in Friz Quadrata) is capped to the opening's width where
 	-- the text sits.
-	local cap = db.format == "both" and math.floor(2 * math.sqrt(L.rIn * L.rIn - 1225) / 7.5) or 42
-	-- Health and resource are one size: the same as the numbers in the bars.
-	local hs = Size(1, math.min(34, cap))
+	-- "Both" is a wide string, so it shrinks to the opening. A single number uses the name's size.
+	-- 5.5 is Arial Narrow's width in ems for "12.3k  ·  100%"; the text sits about 22 px off centre.
+	local chord = math.sqrt(math.max(0, L.rIn * L.rIn - 22 * 22))
+	local cap = db.format == "both" and math.floor(2 * chord / 5.5) or 44
+	local hs = Size(1, math.min(44, cap))
 	local ps = hs
-	-- The band covers at most about 40% of the opening.
-	local half = math.min(math.floor(L.rIn * 0.4 + 0.5), math.max(34, math.floor((hs + ps) * 0.75 + 0.5)))
+	-- The dark band stays inside the opening.
+	local half = math.min(math.floor(L.rIn * 0.62 + 0.5), math.max(hs, math.floor((hs + ps) * 0.62 + 0.5)))
 	Rect(f.numBand, f, L.cx - L.rIn, L.cy - half, L.cx + L.rIn, L.cy + half)
 	ns.StyleFont(f.pnHealth, ns.NUM_FONT, hs)
 	f.pnHealth:SetPoint("CENTER", f, "TOPLEFT", L.cx, -(L.cy - hs * 0.5))

@@ -1,112 +1,77 @@
 # daves_frames: frame standard
 
-Everything about the target frame except its artwork (the notes for this addon). It's written from the **gold elite** variant as built in the
-demo (https://claude.ai/artifact/CAA5HcesyiyZtLrQUdkkV2). Every other variant (silver rare elite, normal, rare,
-boss, friendly, and so on) follows this file exactly. Only the four art layers change, and they're painted to the
-template in [`tools/template/PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md).
+One widget box for every unit. Players, ordinary NPCs, rares, and elites share it. A rare is the same shape in silver. An elite uses the elite key in that same shape. A world boss uses that same box. The mask below is the template. Paint the lip, the outer frame, and the ring.
 
-Units: **layout pixels** (the frame at 100% size). Art is delivered at **2x** (double resolution), so multiply by 2
-for image pixels.
+The paint mask is [`tools/template/guides/frame-template.png`](tools/template/guides/frame-template.png), built by [`tools/Build-FrameTemplate.py`](tools/Build-FrameTemplate.py) from [`tools/template/frame-template.json`](tools/template/frame-template.json). The numbers below are that file, and they are the numbers in `Layout.lua`. The 2× PNG is 2048 × 544.
+
+`Media/frame-plain.tga` and `frame-elite.tga` have this gold plate in the top 2048×544. `frame-rare.tga` and `frame-rareelite.tga` are that same plate in silver. The board strip under that slot is still the previous one.
+
+Units: **layout pixels** (the frame before the 0.5 real-scale factor). One layout pixel is 2 pixels on the 2× mask.
 
 ---
 
-## 1. The template
+## 1. The box
 
-One template for every variant, 1200 x 460 layout px (2400 x 920 image px). The ring is on the centre line.
+One box, 1024 × 272 layout px. The ring is the tallest part. The bars sit in a plate across the middle.
 
-| Part | Position (layout px) | Notes |
+| Part | Position (layout px) | Paint |
 | --- | --- | --- |
-| Canvas | 0,0 to 1200,460 | Everything the frame draws stays inside it, ornament included |
-| Ring centre | 600, 230 | Centre of the portrait |
-| Portrait opening | radius 105 | Transparent in the art; the portrait shows through |
-| Ring (L3) | radius 105 to 131 | 26 px band |
-| Level badge (L5) | centre 600,354, radius 40; number area radius 32 | On the ring's bottom (ring centre + 124), in front of the ring. The size the addon shows Blizzard's level circle at, so a painted badge replaces it exactly |
-| Outer border (L1) | 8,153 to 1192,289, corner radius 14 | The plate. Plus an end cap allowance at each end: 0..64 and 1136..1200, y 138..304. Its middle is open from 38,179 to 1162,263 (radius 6): 4 px inside L2's outer edge, so L1 runs under L2 and no seam shows |
-| Inner border (L2) | 34,175 to 1166,267, corner radius 10 | The container rim around both bars |
-| Bar windows | 50,191 to 1150,251, corner radius 5 | Transparent. Health is the left half, resource the right; the ring covers the middle |
-| Window keep-out | 44,185 to 1156,257 | The window plus 6 px. No ornament is ever painted here |
-| Ornament zone above | 300,0 to 900,153 | |
-| Ornament zone on the plate | 300,153 to 900,289 | Front ornament (L4 front), which may also cover the ring and the portrait; never inside the keep-out outside the ring |
-| Ornament zone behind the plate | The whole plate | Back ornament (L4 back) only, hidden by the plate; never inside the keep-out |
-| Ornament zone below | 430,289 to 770,460 | The ring column only, so the aura boards' lanes stay clear |
+| Art | 0,0 to 1024,272 | `w`, `h`. Atlas slot 2048×544 at the top of 2048×1024 (`art` bottom 0.531250) |
+| Ring centre | 512, 136 | `cx`, `cy` |
+| Portrait opening | radius 105 | Blue. The game draws the portrait. It is 4 px bigger so it tucks under the ring |
+| Portrait ring | radius 105 to 128 | Orange. Paintable, including the lower band |
+| Level | centre 512, 252 (`badge.dy` 116) | Not on the mask. Blizzard's circle, drawn on top of the plate |
+| Health hole | 35,108 to 379,164 | Blue. 344 × 56. The game draws health here |
+| Mana hole | 645,108 to 989,164 | Blue. Same size. The ring is the gap between the holes |
+| 5 px lip | around each hole, and out to the ring on the inner end | Green. Paintable |
+| Outer frame | 22 px around that lip. Plate 8,81 to 1016,191 | Grey. Paintable. It stops where the ring overlaps |
+| Outside | the rest of the canvas | Magenta. Do not paint |
+| Chains | `pivotY` 189 | The hook sits in the bottom of the outer frame. Lanes `{16,376}` and `{648,1008}` |
 
-Health window, visible part: x 50 to the ring's edge. Resource window, visible part: the ring's edge to x 1150.
+The bar widget runs 5 px under the lip and stops at the ring's outer edge (`hidden` 128, x 384 on the left). The blue hole is the part that stays unpainted, so the bar shows there. The name ends 14 px before that ring edge.
 
-### Gold and silver v1 (the current paintings)
-
-The current gold and silver art are single flattened paintings, not layered. They were measured and cut to fit
-rather than painted to the template, so their numbers are a little off it. The demo uses these measured values:
-
-| | Gold elite | Silver rare elite |
-| --- | --- | --- |
-| Art size (1x) | 1198 x 412 | 1201 x 427 |
-| Ring centre | 595.8, 227.8 | 602.0, 209.5 |
-| Ring radius in / out | 105 / 131 | 105 / 121 |
-| Plate | 8..1190 x 153..286 | 11..1190 x 132..266 |
-| Window cut | 49..1146 x 189..249 | 53..1146 x 169..229 |
-| Board lanes (left / right) | 70..430 / 810..1130 | 75..420 / 870..1130 |
-
-New variants are painted to the template, so they need no measuring. When gold and silver are repainted as layers,
-they move onto the template too.
+The name is 44 layout px in a 56 px window, so scale 0.65 still leaves it about 14 screen px. The frame is about 333 × 88 at that floor.
 
 ---
 
 ## 2. Layers and draw order
 
-Five art layers, plus what the addon draws. From the back to the front:
+Paint only the green lip, the grey outer frame, and the orange ring. Leave blue and magenta alone. The level circle is drawn on top of the painted ring.
 
-| # | What | Drawn by | Rule |
-| --- | --- | --- | --- |
-| 1 | **L4 back**: ornament behind the plate (wings, a tail tucked behind) | art | Behind everything |
-| 2 | Bar trough: the empty part of each bar | addon | A dark, worn version of the bar's own colour |
-| 3 | Health and resource bars, heal, shield, cast | addon | Inside the windows only |
-| 4 | Aura boards and chains (on chains) | addon | Chains hook in behind the plate |
-| 5 | **L1 outer border**: the decorative plate | art | Its middle is empty (L2 sits there) |
-| 6 | **L2 inner border**: the rim around the bars | art | Overlaps the bar ends: bars run 5 px under it at each end and 2 px at the top and bottom |
-| 7 | Inset shadow over each window | addon | See section 4 |
-| 8 | Portrait | addon | Circle-masked, 4 px bigger than the opening so its edge tucks under the ring |
-| 9 | **L3 ring** | art | Over L4 back, the plate, the portrait and the inner ends of the bars |
-| 10 | **L4 front**: ornament over the plate, the ring and the portrait (claws gripping the ring, a head, horns, the tail) | art | Never in the window keep-out, except inside the ring, where no bar shows |
-| 10b | **L5 level badge** | art (until a variant has one, the addon shows Blizzard's own level circle, `UI-HUD-UnitFrame-SmallCircle`, at the same size and place) | In front of the ring and L4 front; the level is written in its centre |
-| 11 | Numbers and text on the portrait | addon | Over everything, the ornament included |
-| 12 | Aura boards (right under the bar) | addon | Over the art |
+| Region | Colour on the mask | What |
+| --- | --- | --- |
+| Health and mana holes | Blue `#0000FF` | The addon draws the bars |
+| Portrait opening | Blue `#0000FF` | The target portrait fits inside the ring |
+| 5 px lip | Green `#00FF00` | The border around each bar |
+| Outer frame | Grey `#808080` | The thicker frame around that lip. 22 layout px |
+| Portrait ring | Orange `#FF8000` | The band the portrait sits inside, including the lower band |
+| Outside | Magenta `#FF00FF` | Do not paint |
 
-L4 is one ornament split into two files, so it can pass behind the plate and the ring in some places and in
-front of them in others. Only the level badge and the text are in front of L4 front. Nothing ever covers a bar.
+What the addon draws, from the back to the front: aura boards and chains, then the bar troughs and the bars, then the inset and the portrait, then the art, then the text, then Blizzard's level circle.
 
-**Stitching.** Where two layers meet, the lower one runs on under the upper one, so their soft edges never sit
-side by side (two half-transparent edges let the background through as a hairline):
+**Stitching.** Where the bar meets the lip, the bar runs on under the paint:
 
 | Joint | Overlap |
 | --- | --- |
-| L1 / L2 | L1's open middle is 4 px inside L2's outer edge (section 1) |
-| Bars / L2 | Bars run 5 px under the rim at each end, 2 px at the top and bottom (`ns.STD.sideX`, `sideY`) |
-| Portrait / L3 | The portrait is 4 px bigger than the opening |
-| L1, L2 / L3 | L1 and L2 carry on under the ring to radius 104 |
-| L4 back / L4 front | L4 front is cut out of the L4 back painting with a mask, never repainted, and L4 back keeps the whole ornament, so the two are the same pixels where they meet |
+| Bars / lip | Bars run 5 px under the lip at each end, 2 px at the top and bottom (`ns.STD.sideX`, `sideY`) |
+| Portrait / ring | The portrait is 4 px bigger than the opening |
 
-`tools\Preview-Layers.ps1` checks it: stacked with no background, the plate and the ring must be solid, and every
-see-through pixel there is reported and drawn red. The bare template passes (shapes from
-`Make-LayerGuides.ps1 -Plain`), so a seam is always in the painting.
-
-A variant may leave out L4 entirely (normal and rare frames have no ornament), and L5 (the addon then shows
-Blizzard's level circle). L1, L2 and L3 are always present.
+How the plain plate was painted is in [`tools/template/PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md).
 
 ---
 
 ## 3. Bars
 
 - Health on the left, resource on the right. Both **empty toward the portrait**: the full end is the outer end.
-- Fill width = (the part hidden under the ring) + percent x (visible length). Hidden part: gold 122, silver 111.
+- The bar widget runs from 5 px outside the hole to the ring's outer edge (`hidden` 128). The blue hole is the part the mask leaves open.
 - Animation: 0.45 s, `cubic-bezier(.3, .7, .2, 1)`.
 - **Damage trail:** a pale bar behind the health that catches up 0.55 s after a hit, over 0.9 s.
 - **Incoming heal:** pale green, from the end of the health outward.
 - **Shield:** white diagonal stripes beyond the heal. If health + heal + shield is more than full, a glowing white
   tick shows at the outer end.
 - **Empty part:** never blank. It's the bar's own colour mixed dark (30% of the mid colour, 38% of the dark colour).
-- **Outer end:** rounded with a 5 px radius. The art window, the bar clip and the inset all use the same radius.
-- Inner end: always hidden under the ring on every row. The ring is narrowest at the window's top and bottom
-  edges, which sets how far under it the bar and the inset must start.
+- **Outer end:** the bar tucks 5 px under the green lip.
+- Inner end: the bar stops at the ring's outer edge. The green lip covers the last 5 px. The ring starts there.
 
 ### Colours (light, mid, dark)
 
@@ -173,8 +138,7 @@ into Blizzard's number abbreviation, never into addon maths.
 ### Fonts
 
 All text uses Blizzard's own unit-frame text (`TextStatusBarText`: Friz Quadrata, outlined, the right font for the
-client's language). It scales with the frame like the art (no setting): 44 layout px for a full-size role, capped
-so it fits where it sits, so text never changes the bars. The level sits on the L5 badge, sized from its centre.
+client's language). The name is 44 layout px. The frame's smallest scale is 0.65, which is a real scale of 0.325, so that name is still about 14 screen px. The window is tall enough for those 44 px (the overlay cap is the window height minus 8, which is 48). The portrait's "Both" line ("12.3k · 74%") is smaller than that on purpose: growing the portrait to fit it would grow the whole frame. The level uses Blizzard's circle (`UI-HUD-UnitFrame-SmallCircle`, 48 layout px) centred on the lower ring, with the number 0.5 px low, and that pair is drawn above the plate.
 
 ---
 
@@ -185,9 +149,7 @@ in the frame's metal.
 
 ### Board art
 
-Made from L1 + L2, never painted separately: the plate's left 300 px and right 300 px side by side make a strip,
-which is drawn as a 9-slice. The slice insets are 100 / 116 / 104 / 116 image px (top / right / bottom / left at
-2x). On screen they're 30 / 35 / 31 / 35 px.
+Made from the plate, never painted separately: the left 150 and right 150 source px of the plate, at 2×, side by side (a 600 × 196 strip). Drawn as a 9-slice. The slice insets are 59 / 120 / 61 / 120 atlas px (top / right / bottom / left). On screen the corners are 42 / 86 / 44 / 86 layout px (`ns.STD.board`). The side cap covers the pointed finial up to the bar slot. A board with several rows stretches that point vertically.
 
 ### Contents
 
@@ -202,14 +164,11 @@ which is drawn as a 9-slice. The slice insets are 100 / 116 / 104 / 116 image px
 
 ### Lanes, growth and chains
 
-- **Lanes:** the left board fills from x 70 toward the centre, the right board from x 1130 toward the centre. Each
-  wraps to a new row before reaching the ornament below the plate (lane ends at 430 and 770 on the template).
-  They can never overlap each other or the ornament.
+- **Lanes:** the left board fills from x 16 to 376, the right board from x 1008 back to 648 (`laneL`, `laneR`). They stop before the ring.
 - The **outer edge never moves**: the left board's left edge and the right board's right edge stay fixed.
-- **Two vertical chains**, 62 px in from each end. That's half a one-aura board, so a single aura hangs centred
-  under the outer chain alone.
-- **Chain sizes:** each chain hooks on 14 px above its pivot, and the pivot is 18 px above the plate's bottom edge.
-  The board's top hangs 36 px below the pivot, so about 18 px of chain shows between the plate and the board.
+- **Two vertical chains**, `ns.STD.chainIn` in from each end (half a one-aura board: slot, gap, the board's side insets and padding). A single aura hangs centred under the outer chain alone.
+- **Chain sizes:** each chain hooks on 14 px above its pivot. The pivot is `pivotY` 189. The plate bottom is `plateB` 191.
+  The board's top hangs 36 px below the pivot. The painted lip ends above `plateB`, so the chain shows below the plate.
   Each chain carries on 36 px behind the board so it never looks unhooked.
 - **Growing and shrinking:** the outer chain never moves. The inner chain's top slides along its track first and
   the board's edge follows, so the chain leans briefly (/ when growing to the right, \ when shrinking) and then
@@ -221,7 +180,7 @@ which is drawn as a 9-slice. The slice insets are 100 / 116 / 104 / 116 image px
 | Setting | |
 | --- | --- |
 | **On chains** | Hanging below the plate as above |
-| **Right under the bar** | No chains, no swing. A plain board: 2 px metal border, 5 px radius, dark fill, padding 8 / 6 / 5. It sits 6 px below the plate and may lie over the ornament, so its lane runs up to the ring |
+| **Right under the bar** | No chains, no swing. A plain board: 2 px metal border, 5 px radius, dark fill, padding 8 / 6 / 5. It sits 6 px below the plate, so its lane runs up to the ring |
 
 ### Swing (a setting: Off or Subtle)
 
@@ -236,77 +195,63 @@ which is drawn as a 9-slice. The slice insets are 100 / 116 / 104 / 116 image px
 
 ## 7. Placement, Edit Mode and size
 
-- **Pinned:** the top of the whole frame (the ornament's top) sits on the screen's top edge. Nothing is clipped
-  or hidden.
+- **Pinned:** the top of the whole frame sits on the screen's top edge. Nothing is clipped or hidden.
 - **Floating:** anywhere on screen.
 - **Edit Mode:** uses the kit's `templates/editmode/EditModeDialog.lua`, as every addon frame must. Blizzard's
-  outline covers the whole frame, ornament included: blue, yellow while dragging. It snaps within 8 screen px to
+  outline covers the whole frame: blue, yellow while dragging. It snaps within 8 screen px to
   the 50 px grid, the screen centre, the screen edges and Blizzard's frames, and Shift places it freely. Dropping
   it on the top edge pins it.
-- **Scale:** 0.5 to 1 (default 0.8). 1 is half the art's size (the frame's real scale 0.5), 0.5 a quarter (0.25). It scales around the centre and keeps a pinned frame on the top edge. Every setting applies to every variant.
-  The art ships at 2x, so it stays sharp up to about 200% on a normal screen.
+- **Scale:** 0.65 to 1 (default 0.8), step 0.05. 1 sets a real scale of 0.5. 0.65 is the floor where the 44 px name is still about 14 screen px, and the frame is about 333 x 88. A saved size below that is raised on load. It scales around the centre and keeps a pinned frame on the top edge. Pinned, the top of the ring sits on the screen edge. The art stays sharp up to scale 1.
 
 ---
 
 ## 8. Art files and the checks they must pass
 
-| File (per variant) | Size | Content |
+The frame art in `Media/frame-*.tga` is the plate painted on this mask. The board strip under that slot, the chains, and the stripes are still the previous ones.
+
+| File | Size | Content |
 | --- | --- | --- |
-| `<variant>-L1.png` | 2400 x 920 | Outer border only |
-| `<variant>-L2.png` | 2400 x 920 | Inner border only; windows fully transparent |
-| `<variant>-L3.png` | 2400 x 920 | Ring only; opening fully transparent |
-| `<variant>-L4-back.png` | 2400 x 920 | Optional |
-| `<variant>-L4-front.png` | 2400 x 920 | Optional |
-| `<variant>-L5.png` | 2400 x 920 | Optional: the level badge; number area fully transparent |
+| `Media/frame-plain.tga` | 2048 x 1024 | This gold plate in the top 2048×544. The strip below is the previous board |
+| `Media/frame-rare.tga` | 2048 x 1024 | The same plate, silver |
+| `Media/frame-elite.tga` | 2048 x 1024 | The same gold plate as plain |
+| `Media/frame-rareelite.tga` | 2048 x 1024 | The same plate, silver |
+| `Media/chain-gold.tga`, `chain-silver.tga` | 32 x 64 | One chain repeat, tiling vertically. The link has a hole |
+| `Media/stripes.tga` | 32 x 32 | Shield stripes |
 
-All are PNG with straight alpha, on the template, at the same position, so they stack with no offsets.
+The new art slot is the top 2048 × 544 of that atlas (`art` in `Layout.lua`). A 600 × 196 board strip stays under it (`strip`). Every atlas is packed the same way, so a classification change is `SetTexture` plus the chain and the plain-board metal colour. It is not a frame rebuild.
 
-Every file must pass:
+A later repaint starts from `guides/frame-template.png`, the way [`PAINT-LAYERS.md`](tools/template/PAINT-LAYERS.md) describes.
 
-1. **Clean edges:** no magenta or blue fringe, no ragged or frayed edges, no stray half-transparent pixels.
-2. **Keep-out:** zero alpha inside the window keep-out in L4 back and L3, in L4 front outside the ring
-   (radius 131), and zero alpha in the windows in L1 and L2. A script can count the pixels.
-3. **Opening:** zero alpha inside radius 104 in every layer except L4 front, which may cover the portrait.
-4. **Ring:** L3's band fills radius 105 to 131 with no gaps.
-5. **Zones:** L4 only inside its zones; nothing outside the canvas.
-6. **Same metal:** L1, L2 and L3 share one material. The ornament may differ (a gold dragon on a gold frame, a
-   silver dragon on a silver frame).
-
-In game the layers become textures. 2400 is wider than 2048, so either pad them to 4096 x 1024 and crop with
-`SetTexCoord`, or split each layer into two 2048 halves. Settle this when the addon is built, against the kit's
-texture checks.
+Plain and elite share the gold metal. Rare and rare elite share the silver. Dead is not a painting: the addon desaturates the art.
 
 ## 9. Variants
 
-| Variant | Material | L4 ornament |
-| --- | --- | --- |
-| Normal | Gold | None |
-| Elite | Gold | Gold dragon |
-| Rare | Silver | None |
-| Rare elite | Silver | Silver dragon |
-| Boss | Dark gold with crimson | Wings and crest |
-| Friendly / self | As the reaction (to decide) | None |
-| Dead | The same art, desaturated by the addon (grey, 72% brightness) | Not painted |
+| Key | Who | Metal | Crest |
+| --- | --- | --- | --- |
+| `plain` | Ordinary NPCs, and a secret classification. Players, until a class frame exists | Gold | No |
+| `rare` | `UnitClassification` `"rare"` | Silver | No |
+| `elite` | `"elite"` or `"worldboss"` | Gold | No |
+| `rareelite` | `"rareelite"` | Silver | No |
 
-Nothing in sections 1 to 8 changes between variants.
+These four are reused. An ordinary unit, a rare, and an elite are the same box. Gold and silver are the only differences. "Plain" is the name of the key.
+
+A class frame is a later paint on this same mask, one per class, with a short animation. A player is plain until then, even a rare player. Dead uses the same art, desaturated by the addon. `/davesframes art plain|rare|elite|rareelite|auto` forces a look, because a preview on yourself is a player and would always show plain.
+
+Nothing in sections 1 to 7 changes between variants.
 
 ---
 
-## 10. In this addon (0.1.0, for testing)
+## 10. In this addon (0.2.1)
 
-- **Every target uses the gold elite art** (`Layout.lua` → `ns.VARIANTS.gold`, measured from the painting).
-  Classification-based variants come once more art is painted.
-- **Textures:** `tools\Make-FrameMedia.ps1` keys the painting, cuts the windows (smooth edges, 5 px rounded
-  ends, whole ring kept) and packs `Media\frame-gold.tga` (2048 x 1024): the frame art across the top at
-  2048 wide (1.71x the layout size), and the board strip in the rows below. It also writes the chain and
-  shield-stripe textures. It prints the atlas numbers `Layout.lua` needs. A layered painting (L1 to L4)
-  needs the script to stack the layers first; that comes with the first layered variant.
+- **Art follows the unit** (`Unit.lua` `ns.ArtFor`, applied by `ns:ApplyArt`). Saved `db.variant` is cleared on load.
+- **Textures:** `py -3 tools\Build-FrameTemplate.py` redraws the mask. It checks that `Layout.lua` still matches. It does not write `Media/`. Imagine paints the metal onto that mask. The keying step keeps only the green, grey, and orange. See `tools/template/PAINT-LAYERS.md`.
+- **Level:** Blizzard's `UI-HUD-UnitFrame-SmallCircle`, centred on the lower ring, on its own frame above the plate. The number sits on the circle, 0.5 px low.
 - **Secret values:** health, absorbs and heals go straight into the bars and text; cast times into
   `SetMinMaxValues`/`SetValue`; "can't be interrupted" through `SetVertexColorFromBoolean`. Aura times use
   `C_UnitAuras.GetAuraDuration` with a duration text binding, and stacks use
-  `C_UnitAuras.GetAuraApplicationDisplayCount`. The kit's wow-forever-api skill has the full list
+  `C_UnitAuras.GetAuraApplicationDisplayCount`. Classification is read only after `issecretvalue`; a secret stays plain. The kit's wow-forever-api skill has the full list
   ("Unit frame toolbox").
-- **Not in 0.1.0 yet:**
+- **Not in yet:**
   - the shield-overflow tick
   - the "+2.4K" shield number
   - aura borders by dispel type when the type is secret (they fall back to the plain colour)
@@ -314,3 +259,4 @@ Nothing in sections 1 to 8 changes between variants.
   - the stack badge's pop
   - hiding Blizzard's target frame
   - clicking the frame to target or open the menu (it's a display frame; that needs a secure button)
+  - a class frame: another paint on this box, with a short animation. Players use the plain plate until that paint exists

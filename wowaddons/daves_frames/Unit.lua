@@ -169,9 +169,26 @@ local function HealthShades(unit)
 	return HEALTH
 end
 
+-- Players and ordinary NPCs share the plain frame. A rare is the same frame in silver.
+-- An elite (and a world boss) uses the elite key, still in the same box. A secret classification
+-- can't be read, so the frame stays plain rather than guessing.
+function ns.ArtFor(unit)
+	if ns.artForce and ns.VARIANTS[ns.artForce] then return ns.artForce end
+	if not unit then return "plain" end
+	local player = UnitIsPlayer(unit)
+	if Secret(player) or player then return "plain" end
+	local class = UnitClassification(unit)
+	if Secret(class) then return "plain" end
+	if class == "rareelite" then return "rareelite" end
+	if class == "elite" or class == "worldboss" then return "elite" end
+	if class == "rare" then return "rare" end
+	return "plain"
+end
+
 function ns:UpdateIdentity()
 	local f, unit = ns.frame, ns.unit
 	if not unit then return end
+	ns:ApplyArt(ns.ArtFor(unit))
 	local shades = HealthShades(unit)
 	ns.healthShades = shades
 	ns.Paint(f.health:GetStatusBarTexture(), shades)

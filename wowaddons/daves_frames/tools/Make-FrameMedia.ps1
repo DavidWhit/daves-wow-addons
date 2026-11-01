@@ -1,6 +1,11 @@
 <#
 .SYNOPSIS
-  Builds daves_frames' textures in Media\ from a frame painting (uncompressed 32-bit TGA, power of two).
+  Stop. The paint mask is tools\template\guides\frame-template.png. This old packer exits before it can replace Media\.
+
+.NOTES
+  The gold measurements below are the old measured painting. They do not match Layout.lua.
+  Running this writes frame-<variant>.tga, chain-<variant>.tga and stripes.tga into Media\
+  and will replace a chain or the stripes the Python painter just wrote.
 
 .DESCRIPTION
   For a painting on the magenta/blue key (see NOTES.md and tools\template\PAINT-LAYERS.md):
@@ -20,6 +25,10 @@ param(
 	[string]$Variant = 'gold'
 )
 $ErrorActionPreference = 'Stop'
+Write-Host "The paint mask is tools\template\guides\frame-template.png."
+Write-Host "Redraw it with: py -3 tools\Build-FrameTemplate.py"
+Write-Host "This script packs an old painting into Media\ and would replace frame-*.tga."
+exit 1
 $TOOLS = $PSScriptRoot
 $MEDIA = Join-Path (Split-Path $TOOLS -Parent) 'Media'
 $WORK = Join-Path ([IO.Path]::GetTempPath()) 'daves_frames_media'

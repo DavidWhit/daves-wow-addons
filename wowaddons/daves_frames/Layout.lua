@@ -1,6 +1,9 @@
 -- daves_frames / Layout.lua
--- Where everything sits, per art variant, and the colours. All positions are layout pixels from the
--- frame's top-left corner (y grows downward here; Frame.lua flips it for SetPoint). See NOTES.md.
+-- Where everything sits, and the colours. All positions are layout pixels from the frame's top-left
+-- corner (y grows downward here; Frame.lua flips it for SetPoint). One geometry for every unit.
+-- The box is tools/template/frame-template.json, drawn by tools/Build-FrameTemplate.py.
+-- guides/frame-template.png is the paint mask at 2x. Media/frame-*.tga is still the previous
+-- painting, so the picture will not line up until a frame is painted on that mask and packed.
 
 local _, ns = ...
 
@@ -19,35 +22,51 @@ ns.STD = {
 	chainTail = 36,     -- chain carries on behind the board
 	slot = 40, slotGap = 10, rowGap = 6, timerGap = 5, timerH = 10,
 	boardPad = { top = 9, bottom = 6, side = 2 },
-	board = { top = 30, right = 35, bottom = 31, left = 35 },   -- 9-slice border widths on screen
+	-- 9-slice corner, in layout px. stripSlice is that corner in atlas pixels. The side cap
+	-- covers the pointed finial up to the bar slot. One layout px is about 1.39 atlas px.
+	board = { top = 42, right = 86, bottom = 44, left = 86 },
 	plainPad = { top = 6, side = 6, bottom = 6, border = 2 },
 	underGap = 6,       -- "right under the bar": gap below the plate
-	-- Level circle (L5): Blizzard's atlas, centred this far below the ring centre, this many layout px across.
-	-- Same numbers as the L5 paint guide (whose number area, radius 32, the code doesn't need).
-	badge = { dy = 124, d = 80, atlas = "UI-HUD-UnitFrame-SmallCircle" },
+	-- Blizzard's level circle (TargetFrame LevelBackgroundCircle). dy is the centre of the
+	-- lower ring band, halfway from rIn to rOut. d is that circle in layout px, so two digits fit.
+	-- The addon draws it above the plate. The ring is painted underneath.
+	badge = { dy = 116, d = 48, atlas = "UI-HUD-UnitFrame-SmallCircle" },
 }
 ns.STD.chainIn = (ns.STD.slot + ns.STD.slotGap + ns.STD.board.left + ns.STD.board.right + 2 * ns.STD.boardPad.side) / 2
 
--- Gold elite v1: measured from the painting (gold-elite.jpg), built by tools\Make-FrameMedia.ps1.
--- Every target uses this one for now.
+-- The name is 44 layout px. Scale stops at 0.65 so that stays at least 14 screen px (see ns.MinSize).
+-- Art slot: the 2x mask is 2048 x 544, the top of the 2048 x 1024 atlas (544/1024 = 0.531250).
+-- The board strip stays where the current atlas already has it, under that slot.
+local GEO = {
+	art = { 0, 1, 0, 0.531250 },
+	strip = { 0, 0.292969, 0.789062, 0.980469 },
+	stripPx = { w = 600, h = 196 },
+	stripSlice = { top = 59, right = 120, bottom = 61, left = 120 },
+	w = 1024, h = 272,
+	cx = 512, cy = 136, rIn = 105, rOut = 128,
+	winL = 35, winR = 989, winT = 108, winB = 164,
+	cut = { 35, 989, 108, 164 },
+	hidden = 128,
+	plateL = 8, plateR = 1016, plateT = 81, plateB = 191,
+	pivotY = 189,
+	laneL = { 16, 376 }, laneR = { 648, 1008 },
+}
+
+local function Variant(key, texture, chain, metal)
+	local v = { key = key, texture = MEDIA .. texture, chain = MEDIA .. chain, metal = metal }
+	for k, value in pairs(GEO) do v[k] = value end
+	return v
+end
+
+local GOLD = { { 1.000, 0.910, 0.690 }, { 0.729, 0.486, 0.149 }, { 0.110, 0.063, 0.024 } }
+local SILVER = { { 0.925, 0.949, 0.973 }, { 0.580, 0.627, 0.690 }, { 0.078, 0.094, 0.118 } }
+
+-- plain: players and ordinary NPCs. rare: silver, same shape. elite / rareelite: the same shape.
 ns.VARIANTS = {
-	gold = {
-		texture = MEDIA .. "frame-gold.tga",
-		chain = MEDIA .. "chain-gold.tga",
-		art = { 0, 1, 0, 0.6875 },                        -- texcoords of the frame art in the atlas
-		strip = { 0, 0.5, 712 / 1024, 985 / 1024 },        -- the board strip (1024 x 273 px)
-		stripPx = { w = 1024, h = 273 },
-		stripSlice = { top = 85, right = 99, bottom = 89, left = 99 },   -- 9-slice insets, atlas px
-		w = 1198.5, h = 412,
-		cx = 595.8, cy = 227.8, rIn = 105, rOut = 131,
-		winL = 52, winR = 1142, winT = 190, winB = 248,
-		cut = { 49, 1146, 189, 249 },                      -- the window as cut from the art (left, right, top, bottom)
-		hidden = 122,                                      -- part of each bar under the ring
-		plateL = 8, plateR = 1190, plateT = 151, plateB = 286,
-		pivotY = 268,
-		laneL = { 70, 430 }, laneR = { 810, 1130 },
-		metal = { { 0.965, 0.863, 0.580 }, { 0.659, 0.478, 0.173 }, { 0.290, 0.196, 0.047 } },
-	},
+	plain = Variant("plain", "frame-plain.tga", "chain-gold.tga", GOLD),
+	rare = Variant("rare", "frame-rare.tga", "chain-silver.tga", SILVER),
+	elite = Variant("elite", "frame-elite.tga", "chain-gold.tga", GOLD),
+	rareelite = Variant("rareelite", "frame-rareelite.tga", "chain-silver.tga", SILVER),
 }
 
 -- Colours: light, mid, dark (NOTES.md section 3).
