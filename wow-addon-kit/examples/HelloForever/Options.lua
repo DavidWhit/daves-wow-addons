@@ -8,7 +8,7 @@
 local ADDON, ns = ...
 
 function ns:InitOptions()
-	if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end   -- very old clients
+	if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end
 
 	local category = Settings.RegisterVerticalLayoutCategory("Hello Forever")
 
@@ -35,7 +35,5 @@ end
 function ns:OpenOptions()
 	if ns.settingsCategory and Settings.OpenToCategory then
 		Settings.OpenToCategory(ns.settingsCategory:GetID())
-	else
-		ns.Print("options are not available on this client.")
 	end
 end

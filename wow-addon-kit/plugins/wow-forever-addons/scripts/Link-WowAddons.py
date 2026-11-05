@@ -99,7 +99,7 @@ def link_addons(path, flavor_args, root, remove, no_dev, what_if):
         raise RuntimeError('World of Warcraft was not found. Pass -Root "<WoW install folder>" (the one holding .build.info).')
     clients = wowkit.wow_install(root)
     if not clients:
-        raise RuntimeError(f"No client folders (_retail_, _forever_, ...) under {root}.")
+        raise RuntimeError(f"No WoW: Forever client folder (_forever_) under {root}.")
     forced = None
     warnings = []
     if flavor_args:

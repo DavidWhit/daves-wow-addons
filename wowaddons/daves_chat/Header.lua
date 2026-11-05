@@ -81,10 +81,10 @@ local function TabsToggleTooltip(self)
 	ns.AnchorTooltip(self)
 	if ns.db and ns.db.showTabs ~= false then
 		GameTooltip:SetText("Hide chat tabs")
-		GameTooltip:AddLine("Hides the left tab list and expands chat to the full window width.", 1, 1, 1, true)
+		GameTooltip:AddLine("Hides the left tab list and expands chat to the full window width (tabs also close automatically when your mouse leaves the window).", 1, 1, 1, true)
 	else
 		GameTooltip:SetText("Show chat tabs")
-		GameTooltip:AddLine("Shows your chat tabs and channels on the left.", 1, 1, 1, true)
+		GameTooltip:AddLine("Shows your chat tabs and channels on the left; closes automatically back to full width when your mouse leaves the window.", 1, 1, 1, true)
 	end
 	GameTooltip:Show()
 end
@@ -102,10 +102,47 @@ function ns:SyncTabsToggleButton()
 	end
 end
 
--- Blizzard's chat Social / Friends button: QuickJoinToastButton on Mainline / Forever (Blizzard_QuickJoin
--- loads with AllowLoadGameType mainline only), or the Classic chat friends button when that client has one.
+function ns:SetShowTabs(shown)
+	if not ns.db then return end
+	local want = shown and true or false
+	local cur = (ns.db.showTabs ~= false)
+	if cur == want then return end
+	ns.db.showTabs = want
+	if want then
+		ns.tabsAutoCloseArmed = true
+		ns.lastTabsHover = GetTime()
+		if ns.tabsToggleButton then ns.tabsToggleButton.alertUntil = nil end
+		ns.hiddenTabAlertUntil = nil
+	else
+		ns.tabsAutoCloseArmed = false
+		if ns.tabs then
+			local now = GetTime()
+			local selected = ns.VisibleChatFrame and ns.VisibleChatFrame()
+			local owner = GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner()
+			local checkOwner = owner and not (issecretvalue and issecretvalue(owner))
+			for i = 1, #ns.tabs do
+				local tab = ns.tabs[i]
+				if tab then
+					if tab.chatFrame ~= selected and tab.alertUntil and tab.alertUntil > now then
+						if not ns.hiddenTabAlertUntil or tab.alertUntil > ns.hiddenTabAlertUntil then
+							ns.hiddenTabAlertUntil = tab.alertUntil
+						end
+					end
+					if checkOwner and owner == tab then
+						GameTooltip:Hide()
+						checkOwner = false
+					end
+				end
+			end
+		end
+	end
+	ns:SyncTabsToggleButton()
+	if ns.LayoutWindow then ns:LayoutWindow() end
+end
+
+-- Blizzard's chat Social / Friends button: QuickJoinToastButton on WoW: Forever (Blizzard_QuickJoin).
 function ns.SocialButton()
-	return QuickJoinToastButton or _G.FriendsMicroButton
+	return QuickJoinToastButton
 end
 
 -- The Social / Friends button is hidden while the in-game friends list game rule is disabled.
@@ -169,14 +206,11 @@ function ns:BuildHeader(anchor)
 	tabsToggle:SetFrameLevel(bar:GetFrameLevel() + 15)
 	tabsToggle:SetScript("OnClick", function(self)
 		ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		ns.db.showTabs = (ns.db.showTabs == false) and true or false
-		if ns.db.showTabs then
-			self.alertUntil = nil
-			ns.hiddenTabAlertUntil = nil
+		ns:SetShowTabs(ns.db.showTabs == false)
+		local owner = GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner()
+		if owner and not (issecretvalue and issecretvalue(owner)) and owner == self then
+			TabsToggleTooltip(self)
 		end
-		ns:SyncTabsToggleButton()
-		if ns.LayoutWindow then ns:LayoutWindow() end
-		if GameTooltip:GetOwner() == self then TabsToggleTooltip(self) end
 	end)
 	tabsToggle:SetScript("OnEnter", TabsToggleTooltip)
 	tabsToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -379,19 +413,6 @@ function ns:PlaceHeaderButtons()
 	local home = ns.settingsBar
 	local social = ns.SocialButton()
 	RememberParent(social, "friendsParent", home)
-	-- Remember the Social button's own strata, level, and anchors once so "Move the chat window" off
-	-- can put a Classic friends button back exactly where Blizzard had it.
-	if social and not ns.friendsHome and social.GetParent and social:GetParent() ~= home then
-		local points = {}
-		for i = 1, (social.GetNumPoints and social:GetNumPoints()) or 0 do
-			points[i] = { social:GetPoint(i) }
-		end
-		ns.friendsHome = {
-			strata = social.GetFrameStrata and social:GetFrameStrata(),
-			level = social.GetFrameLevel and social:GetFrameLevel(),
-			points = points,
-		}
-	end
 	RememberParent(ChatFrameChannelButton, "channelParent", home)
 
 	if not ns.db.enabled then
@@ -417,17 +438,8 @@ function ns:PlaceHeaderButtons()
 			end
 			if OwnedByUs(friends, home) then
 				friends:SetParent(ns.friendsParent or UIParent)
-				local home0 = ns.friendsHome
-				friends:SetFrameStrata((home0 and home0.strata) or "LOW")
-				friends:SetFrameLevel((home0 and home0.level) or 4)
-				-- Non-QuickJoin (Classic) buttons aren't re-anchored by ChatAlertFrame; restore their own points.
-				if friends ~= QuickJoinToastButton and home0 and home0.points then
-					friends:ClearAllPoints()
-					for i = 1, #home0.points do
-						local p = home0.points[i]
-						friends:SetPoint(p[1], p[2], p[3], p[4], p[5])
-					end
-				end
+				friends:SetFrameStrata("LOW")
+				friends:SetFrameLevel(4)
 				if friends.SetToastDirection then
 					friends:SetToastDirection(ChatFrame1 ~= nil and ChatFrame1.buttonSide == "right")
 				end
@@ -462,8 +474,8 @@ function ns:PlaceHeaderButtons()
 end
 
 function ns:HookChatAlerts()
-	-- Blizzard's own header buttons we pin (Social / FriendsMicroButton, Channels, TTS) open their tooltips
-	-- through GameTooltip_SetDefaultAnchor on Classic, which parks them at the screen's bottom-right corner.
+	-- Blizzard's own header buttons we pin (Social / QuickJoinToastButton, Channels, TTS) may open their tooltips
+	-- through GameTooltip_SetDefaultAnchor, which parks them at the screen's bottom-right corner.
 	-- That call runs before any lines are added, so re-anchoring in a post-hook keeps the tooltip
 	-- next to its button without touching the buttons' own scripts.
 	if hooksecurefunc and type(GameTooltip_SetDefaultAnchor) == "function" then

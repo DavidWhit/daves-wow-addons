@@ -1,8 +1,8 @@
-## Interface: 16001, 11509, 20506, 38002, 40402, 50504, 120000, 120001, 120005, 120100
+## Interface: 16001
 ## Title: |cffd4a94eDave's|r Sack
 ## Notes: A modern, Warcraft-styled all-in-one bag with categories, search and quality borders.
 ## Author: davidwhit5
-## Version: 1.7.18
+## Version: 1.7.20
 ## SavedVariables: DavesSackDB
 ## IconTexture: Interface\Icons\INV_Misc_Bag_08
 

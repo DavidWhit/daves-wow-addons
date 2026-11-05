@@ -1,6 +1,6 @@
 # WoW Addon Kit
 
-A Claude Code plugin (`wow-forever-addons`) for creating, setting up, testing and releasing World of Warcraft addons for **WoW: Forever** (and Retail/Midnight and Classic).
+A Claude Code plugin (`wow-forever-addons`) for creating, setting up, testing and releasing World of Warcraft addons for **WoW: Forever** (`16001`).
 
 All API knowledge comes from Blizzard's own client source and your installed client, not from memory. See `plugins/wow-forever-addons/skills/wow-forever-api/sources.md`.
 
@@ -20,10 +20,10 @@ After editing the plugin, bump `version` in `plugins/wow-forever-addons/.claude-
 | --- | --- |
 | `/wow-forever-addons:wow-addon-new [Name] [idea]` | Scaffold an addon (TOC, events, SavedVariables, slash command, Settings panel), validate it, link it into the game |
 | `/wow-forever-addons:wow-addon-test [folder]` | Build the `Prepare-WowReview.py` review packet (validator + diff + API/`NOTES.md` context), run the advisor code review (inline for small clean diffs or diff-scoped subagent; fixes wait for your approval), then walk through the in-game test checklist |
-| `/wow-forever-addons:wow-addon-setup` | Find the game and Interface numbers, install luacheck and the API index, link/unlink addons (one, or every addon in the repo after a clone or pull) |
+| `/wow-forever-addons:wow-addon-setup` | Find the game (`_forever_`) and Interface number, install luacheck and the API index, link/unlink addons (one, or every addon in the repo after a clone or pull) |
 | `/wow-forever-addons:wow-addon-release [folder] [version]` | Version bump, clean zip, BigWigsMods/packager setup |
 | `wow-forever-api` (loaded automatically) | Forever facts, secret values, restrictions, removed-API table, Settings API |
-| `@agent-wow-forever-addons:wow-addon-reviewer` | Packet-driven (`Prepare-WowReview.py`), diff-scoped `sonnet` advisor review for Forever/Midnight compatibility, taint and performance: numbered findings and proposed fixes, never edits. Runs automatically from `wow-addon-test` and `wow-addon-new` |
+| `@agent-wow-forever-addons:wow-addon-reviewer` | Packet-driven (`Prepare-WowReview.py`), diff-scoped `sonnet` advisor review for Forever compatibility, taint and performance: numbered findings and proposed fixes, never edits. Runs automatically from `wow-addon-test` and `wow-addon-new` |
 
 ## Scripts (usable without Claude)
 
@@ -31,16 +31,16 @@ Run them with Python 3 (`py -3` on Windows, `python3` on macOS) from `plugins/wo
 
 | Script | Purpose |
 | --- | --- |
-| `Find-WowInstall.py` | Lists installed clients with build, TOC Interface number and AddOns path (reads `.build.info`) |
-| `New-WowAddon.py -Name X [-Flavor forever,retail] [-EditMode]` | Scaffold from `templates/addon`; `-EditMode` adds the shared Edit Mode behaviour and an `EditMode.lua` wired up with it |
-| `Test-WowAddon.py -Path X [-Flavor ...] [-NoInfo] [-Json]` | Static validator; exit code 1 on errors |
-| `Prepare-WowReview.py -Path X [-Flavor ...] [-Full]` | One-shot pre-review packet: runs validator (`-NoInfo`), scopes `git diff` (skipping unmodified `EditModeDialog.lua`), extracts `NOTES.md` rules/skipped items, pre-annotates APIs/methods/events, and picks `inline` vs `subagent-diff` vs `subagent-full` |
+| `Find-WowInstall.py` | Lists installed WoW: Forever client with build, TOC Interface number and AddOns path (reads `.build.info`) |
+| `New-WowAddon.py -Name X [-Flavor forever] [-EditMode]` | Scaffold from `templates/addon`; `-EditMode` adds the shared Edit Mode behaviour and an `EditMode.lua` wired up with it |
+| `Test-WowAddon.py -Path X [-Flavor forever] [-NoInfo] [-Json]` | Static validator; exit code 1 on errors |
+| `Prepare-WowReview.py -Path X [-Flavor forever] [-Full]` | One-shot pre-review packet: runs validator (`-NoInfo`), scopes `git diff` (skipping unmodified `EditModeDialog.lua`), extracts `NOTES.md` rules/skipped items, pre-annotates APIs/methods/events, and picks `inline` vs `subagent-diff` vs `subagent-full` |
 | `Find-WowApi.py <pattern...> [-Events] [-Methods] [-SecretOnly] [-UiSource]` | Batch look up functions, `:WidgetMethods`, events, or branch-filtered `INDEX.tsv` definitions (`-UiSource`) |
 | `Get-WowScriptErrors.py [-Addon X] [-Session n]` | Lua errors (with stacks), blocked/forbidden actions (each with a taint probe: what an addon wrote where the action read, via `issecurevariable`; `/wkprobe` runs it by hand) and Lua warnings recorded in game by the dev addon `devaddons/!WowKitErrors` (installed by every kit link: `Link-WowAddons.py`, `Deploy-WowAddon.py`, and by this script when it's missing). Read first when something breaks in game (the order: wow-addon-test step 0) |
 | `Get-WowTaintLog.py [-Addon X]` | The client's `Logs\taint.log`: which addon tainted what, and the blocked call. Read when nothing was recorded, or when the taint probe names nothing. Reads the live log while the game runs (a `/reload` starts a new one) |
 | `Deploy-WowAddon.py -Path X [-Mode Link/Copy] [-Remove]` | Junction or copy into `Interface\AddOns`; never deletes real folders |
-| `Link-WowAddons.py [-Path dir] [-Flavor ...] [-Remove] [-NoDevAddons] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into each client its TOC targets, plus the kit's error recorder; real folders go to `AddOns.backup` (junctions on Windows, symlinks on macOS) |
-| `link-wow-addons.sh [--dry-run] [--remove] [--no-dev-addons] [--wow-root DIR] [dir]` | Pure-bash macOS fallback (symlinks every addon into every client, error recorder included) |
+| `Link-WowAddons.py [-Path dir] [-Flavor ...] [-Remove] [-NoDevAddons] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into the WoW: Forever client (`_forever_`), plus the kit's error recorder; real folders go to `AddOns.backup` (junctions on Windows, symlinks on macOS) |
+| `link-wow-addons.sh [--dry-run] [--remove] [--no-dev-addons] [--wow-root DIR] [dir]` | Pure-bash macOS fallback (symlinks every addon into `_forever_/Interface/AddOns`, error recorder included) |
 | `Install-WowDevTools.py` | luacheck from its official GitHub release, plus the API index |
 | `Update-WowUiSource.py [-Branch forever]` | Download/refresh a local copy of Blizzard's UI source and `INDEX.tsv` under `data/ui-source/<branch>` |
 | `Update-WowApiIndex.py [-Branch forever] [-FromLocal]` | Rebuild `data/api-<branch>.json` from Blizzard's UI source (GitHub zip, or local `data/ui-source/<branch>` with `-FromLocal`) |

@@ -144,6 +144,7 @@ function ns:BuildFrame(variant)
 
 	local f = CreateFrame("Frame", "DavesFramesTarget", UIParent)
 	f:SetSize(L.w, L.h)
+	f:SetClampRectInsets(0, 0, -L.extTopT, L.h - L.extBotB)
 	f:SetFrameStrata("MEDIUM")
 	f:SetFrameLevel(10)
 	f:Hide()
@@ -218,7 +219,8 @@ function ns:BuildFrame(variant)
 	f.portrait:AddMaskTexture(mask)
 	f.portraitMask = mask
 
-	-- The frame art.
+	-- The frame art (plus the top and bottom extended-template overhang bands packed in the atlas;
+	-- standard single-box textures leave those atlas slots transparent).
 	local artLayer = CreateFrame("Frame", nil, f)
 	artLayer:SetAllPoints()
 	artLayer:SetFrameLevel(base + 6)
@@ -226,6 +228,17 @@ function ns:BuildFrame(variant)
 	f.art:SetAllPoints()
 	f.art:SetTexture(L.texture)
 	f.art:SetTexCoord(unpack(L.art))
+	f.artTop = artLayer:CreateTexture(nil, "ARTWORK")
+	f.artTop:SetPoint("BOTTOMLEFT", f.art, "TOPLEFT", L.extL, 0)
+	f.artTop:SetPoint("TOPRIGHT", f.art, "TOPLEFT", L.extR, -L.extTopT)
+	f.artTop:SetTexture(L.texture)
+	f.artTop:SetTexCoord(unpack(L.extTop))
+	f.artBottom = artLayer:CreateTexture(nil, "ARTWORK")
+	f.artBottom:SetPoint("TOPLEFT", f.art, "BOTTOMLEFT", L.extL, 0)
+	f.artBottom:SetPoint("BOTTOMRIGHT", f.art, "BOTTOMLEFT", L.extR, -(L.extBotB - L.h))
+	f.artBottom:SetTexture(L.texture)
+	f.artBottom:SetTexCoord(unpack(L.extBot))
+	f.artParts = { f.art, f.artTop, f.artBottom }
 
 	-- Text over everything.
 	local text = CreateFrame("Frame", nil, f)
@@ -295,6 +308,10 @@ function ns:ApplyArt(key)
 	if not f then return end
 	f.art:SetTexture(L.texture)
 	f.art:SetTexCoord(unpack(L.art))
+	f.artTop:SetTexture(L.texture)
+	f.artTop:SetTexCoord(unpack(L.extTop))
+	f.artBottom:SetTexture(L.texture)
+	f.artBottom:SetTexCoord(unpack(L.extBot))
 	if ns.boards then
 		for _, b in pairs(ns.boards) do
 			for _, t in ipairs(b.chains) do

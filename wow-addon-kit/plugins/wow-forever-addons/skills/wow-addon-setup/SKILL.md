@@ -1,6 +1,6 @@
 ---
 name: wow-addon-setup
-description: Set up a Windows (or Mac) machine for WoW Forever addon development - find the WoW install and every client folder with its Interface number, install luacheck and the Blizzard API index from official sources, link one addon or every addon in the repo into the game's AddOns folders (junction on Windows, symlink on Mac), and recommend editor tooling. Use when the user is getting started, has just cloned or pulled the addons repo, can't find their AddOns folder, needs the current Interface number, or wants to install, link, unlink or deploy an addon.
+description: Set up a Windows (or Mac) machine for WoW Forever addon development - find the WoW: Forever install (_forever_) and its Interface number, install luacheck and the Blizzard API index from official sources, link one addon or every addon in the repo into the game's AddOns folder (junction on Windows, symlink on Mac), and recommend editor tooling. Use when the user is getting started, has just cloned or pulled the addons repo, can't find their AddOns folder, needs the current Interface number, or wants to install, link, unlink or deploy an addon.
 argument-hint: "[find | tools | link-all | link <folder> | unlink <folder> | refresh-api]"
 ---
 
@@ -18,14 +18,14 @@ On macOS, the Python scripts (`Find-WowInstall.py`, `Link-WowAddons.py`, `Test-W
 
 ## 1. Find the game (`find`)
 
-`Find-WowInstall.py` lists every installed client with its build and TOC Interface number. It reads Blizzard's `.build.info` and `.flavor.info`, so the numbers are the installed build's own. Example output on WoW: Forever:
+`Find-WowInstall.py` finds the installed WoW: Forever client (`_forever_`) with its build and TOC Interface number. It reads Blizzard's `.build.info` and `.flavor.info`, so the numbers are the installed build's own. Example output on WoW: Forever:
 
 ```
 Folder     Flavor  Product  Version      Interface AddOns
-_forever_  forever wowf     1.60.1.70707     16001 C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns
+_forever_  forever wowf     1.60.1.70790     16001 C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns
 ```
 
-WoW: Forever installs under `_forever_` (product `wowf`; early beta builds used `_classic_beta_`). Always detect the client path with `Find-WowInstall.py` rather than hard-coding it. If the game isn't found, ask for the install path and pass `-Root`.
+WoW: Forever installs under `_forever_` (product `wowf`). Always detect the client path with `Find-WowInstall.py` rather than hard-coding it. If the game isn't found, ask for the install path and pass `-Root`.
 
 ## 2. Install tools (`tools`)
 
@@ -34,16 +34,16 @@ WoW: Forever installs under `_forever_` (product `wowf`; early beta builds used 
 - **API index** for Forever (`Update-WowApiIndex.py -Branch forever`), built from Blizzard's UI source (Gethe/wow-ui-source). Skipped if it is less than 7 days old.
 - Prints the optional VS Code extension command: `code --install-extension ketho.wow-api`.
 
-`refresh-api`: after a game patch, run `Update-WowUiSource.py` to refresh the local Blizzard UI source and its `INDEX.tsv`, then `Update-WowApiIndex.py -Branch forever -FromLocal` (or omit `-FromLocal` to fetch directly from GitHub). Other branches: `live` (Retail), `classic_era`, `classic`, `classic_anniversary`, `classic_titan`.
+`refresh-api`: after a game patch, run `Update-WowUiSource.py` to refresh the local Blizzard UI source and its `INDEX.tsv`, then `Update-WowApiIndex.py -Branch forever -FromLocal` (or omit `-FromLocal` to fetch directly from GitHub).
 
 ## 3. Link every addon after cloning or pulling (`link-all`)
 
-Use this on a fresh clone of the addons repo, and after a pull that added addons. `Link-WowAddons.py` links every folder in the repo's `wowaddons/` that holds a `<Folder>.toc` (or `<Folder>_<Flavor>.toc`) into each installed client whose game the TOC's `## Interface` lists: a junction on Windows, a symlink on a Mac. Run `-WhatIf` first and show the user the table. Every run also links the kit's error recorder `devaddons/!WowKitErrors` into the same clients (shown as "kit error recorder"), so in-game Lua errors and blocked actions are always on file for `Get-WowScriptErrors.py`. `-NoDevAddons` leaves it out.
+Use this on a fresh clone of the addons repo, and after a pull that added addons. `Link-WowAddons.py` links every folder in the repo's `wowaddons/` that holds a `<Folder>.toc` (or `<Folder>_Camelot.toc`) targeting Forever (`## Interface: 16001`) into `_forever_/Interface/AddOns`: a junction on Windows, a symlink on a Mac. Run `-WhatIf` first and show the user the table. Every run also links the kit's error recorder `devaddons/!WowKitErrors` into the same client (shown as "kit error recorder"), so in-game Lua errors and blocked actions are always on file for `Get-WowScriptErrors.py`. `-NoDevAddons` leaves it out.
 
 ```powershell
 py -3 Link-WowAddons.py -WhatIf                 # what would change
 py -3 Link-WowAddons.py                         # link everything (finds wowaddons/ by walking up from the current folder)
-py -3 Link-WowAddons.py -Path "<addons folder>" -Flavor forever   # another folder; only the Forever client
+py -3 Link-WowAddons.py -Path "<addons folder>" -Flavor forever   # another folder
 py -3 Link-WowAddons.py -Remove                 # unlink them all
 ```
 
@@ -54,7 +54,7 @@ python3 wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.py    # 
 bash wow-addon-kit/plugins/wow-forever-addons/scripts/link-wow-addons.sh      # pure-bash fallback; --dry-run, --remove, --no-dev-addons, --wow-root DIR
 ```
 
-The bash script doesn't read TOCs: it links every addon into every `_*_` client folder. Both scripts leave a correct link alone, re-point a link that points elsewhere, and move a real folder to `Interface/AddOns.backup/<Name>-<timestamp>` before linking. `-Flavor all` links every addon into every client. When run from `${CLAUDE_PLUGIN_ROOT}` outside the repo, pass `-Path`.
+The bash script doesn't read TOCs: it links every addon into `_forever_/Interface/AddOns`. Both scripts leave a correct link alone, re-point a link that points elsewhere, and move a real folder to `Interface/AddOns.backup/<Name>-<timestamp>` before linking. When run from `${CLAUDE_PLUGIN_ROOT}` outside the repo, pass `-Path`.
 
 ## 4. Link one addon into the game (`link` / `unlink`)
 

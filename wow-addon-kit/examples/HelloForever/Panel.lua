@@ -12,8 +12,8 @@
 
 local _, ns = ...
 
-local CoinString = (C_CurrencyInfo and C_CurrencyInfo.GetCoinTextureString) or GetCoinTextureString
-local issecretvalue = issecretvalue or function() return false end   -- clients without secrets
+local CoinString = C_CurrencyInfo.GetCoinTextureString
+local issecretvalue = issecretvalue
 
 local panel
 
@@ -69,7 +69,7 @@ local function Build()
 
 	panel.forever = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
 	panel.forever:SetPoint("TOPRIGHT", -8, -8)
-	panel.forever:SetText(ns.IS_FOREVER and "Forever" or "")
+	panel.forever:SetText("Forever")
 end
 
 function ns:UpdateIdentity()

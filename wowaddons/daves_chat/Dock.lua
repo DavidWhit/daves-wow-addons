@@ -115,6 +115,66 @@ function ns.VisibleChatFrame()
 	return ChatFrame1
 end
 
+local function RegionShownAlpha(reg)
+	if not reg or (issecretvalue and issecretvalue(reg)) or not reg.IsShown then return 0 end
+	local shown = reg:IsShown()
+	if issecretvalue and issecretvalue(shown) then return 1 end
+	if not shown then return 0 end
+	if not reg.GetAlpha then return 1 end
+	local la = reg:GetAlpha()
+	if issecretvalue and issecretvalue(la) then return 1 end
+	return (type(la) == "number") and la or 1
+end
+
+local function IsFontStringRegion(reg)
+	if not reg or (issecretvalue and issecretvalue(reg)) then return false end
+	if not reg.GetObjectType then return true end
+	local kind = reg:GetObjectType()
+	if issecretvalue and issecretvalue(kind) then return true end
+	return kind == "FontString"
+end
+
+local function MaxFontStringAlpha(...)
+	local best = 0
+	for i = 1, select("#", ...) do
+		local reg = select(i, ...)
+		if IsFontStringRegion(reg) then
+			local la = RegionShownAlpha(reg)
+			if la > best then
+				best = la
+				if best >= 0.999 then return 1 end
+			end
+		end
+	end
+	return ns.Clamp(best, 0, 1)
+end
+
+-- Returns the highest visible-line alpha [0..1] on the currently selected chat frame without
+-- reading secret message strings or touching CircularBuffer, so Faint mode's frosted-glass pane
+-- fades cleanly down to 0 when all chat lines have faded out and returns as soon as a new message
+-- (or scroll/tab activity) brings text back onto the screen.
+function ns.ActiveChatTextAlpha()
+	local chat = ns.VisibleChatFrame()
+	if not chat then return 1 end
+	local lines = chat.visibleLines
+	if type(lines) == "table" then
+		local best = 0
+		for i = 1, #lines do
+			local la = RegionShownAlpha(lines[i])
+			if la > best then
+				best = la
+				if best >= 0.999 then return 1 end
+			end
+		end
+		return ns.Clamp(best, 0, 1)
+	end
+	local container = chat.FontStringContainer
+	if container and container.GetRegions then
+		return MaxFontStringAlpha(container:GetRegions())
+	end
+	return 1
+end
+
 -- The wheel delta is positive when the wheel rolls up. Bottom-insert chat scrolls up on a
 -- positive amount; top-insert flips that, matching ScrollUtil.InitScrollingMessageFrameWithScrollBar
 -- (ScrollUtil.lua:198-200) so wheel-down scrolls down toward older messages.
@@ -305,6 +365,7 @@ function ns:ApplyOwnedScale()
 	ns.db.scale = s
 	if ns.anchor then SetOwnScale(ns.anchor, s) end
 	if ns.fill then SetOwnScale(ns.fill, s) end
+	if ns.frost then SetOwnScale(ns.frost, s) end
 	EachTrackedOrDocked(function(frame, isDocked)
 		if isDocked then
 			ownedFrames[frame] = true
@@ -320,6 +381,7 @@ end
 -- "Move the chat window" off. Leave the on-screen size where it is and drop our scale.
 function ns:ResetOwnedScale()
 	if ns.fill then SetOwnScale(ns.fill, 1) end
+	if ns.frost then SetOwnScale(ns.frost, 1) end
 	EachTrackedOrDocked(function(frame)
 		RestoreUnscaledRect(frame)
 	end)

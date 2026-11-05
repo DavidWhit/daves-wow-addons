@@ -305,7 +305,7 @@ end
 
 -- Only plain bags count toward "free space" (not quivers, soul/herb bags or
 -- the keyring). The reagent bag (modern client) gets its own count.
-local GetFreeSlots = (C_Container and C_Container.GetContainerNumFreeSlots) or GetContainerNumFreeSlots
+local GetFreeSlots = C_Container.GetContainerNumFreeSlots
 local generalBag, reagentBag = {}, {}
 
 local function SyncBagList()
@@ -915,8 +915,8 @@ end
 -- into the first free slot of a normal bag. Checked live, so a slot changed
 -- this instant is never hit.
 ---------------------------------------------------------------------------
-local PickupContainerItem = (C_Container and C_Container.PickupContainerItem) or PickupContainerItem
-local GetContainerItemID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+local PickupContainerItem = C_Container.PickupContainerItem
+local GetContainerItemID = C_Container.GetContainerItemID
 
 local function DropIntoBag(bag, needFit)
 	local free, family = GetFreeSlots(bag)                -- live: catches bag swaps too
@@ -953,20 +953,9 @@ end
 -- Retail use C_CurrencyInfo (checked in Blizzard's Forever 1.60.1 source);
 -- older Classic clients the global; Classic Era has no currencies (row stays hidden).
 ---------------------------------------------------------------------------
-local GetBackpackToken
-do
-	local C = C_CurrencyInfo
-	if C and C.GetBackpackCurrencyInfo then
-		GetBackpackToken = function(i)
-			local t = C.GetBackpackCurrencyInfo(i)
-			if t then return t.iconFileID, t.quantity, t.currencyTypesID end
-		end
-	elseif GetBackpackCurrencyInfo then
-		GetBackpackToken = function(i)
-			local name, count, icon, id = GetBackpackCurrencyInfo(i)
-			if name then return icon, count, id end
-		end
-	end
+local function GetBackpackToken(i)
+	local t = C_CurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo(i)
+	if t then return t.iconFileID, t.quantity, t.currencyTypesID end
 end
 
 local FOOT_BASE, TOKEN_ROW_Y, TOKEN_ROW_H, TOKEN_GAP = 44, 38, 20, 10
@@ -1366,17 +1355,6 @@ do
 			if loc and loc.IsBagAndSlot and loc:IsBagAndSlot() then
 				bag, slot = loc:GetBagAndSlot()
 			end
-		else
-			for id, list in pairs(buttons) do
-				for s = 1, list.n do
-					local r = list[s].fbRec
-					if r.locked and r.id == itemID and (not itemLink or r.link == itemLink) then
-						bag, slot = id, s
-						break
-					end
-				end
-				if bag then break end
-			end
 		end
 		local icon, count, quality, link
 		if bag and slot then
@@ -1615,24 +1593,14 @@ local function Build()
 	deleteBtn:RegisterForClicks("LeftButtonUp")
 	local deleteIcon = deleteBtn:CreateTexture(nil, "ARTWORK")
 	deleteIcon:SetPoint("CENTER")
+	deleteIcon:SetSize(18, 18)
+	deleteIcon:SetTexture(M .. "trash")
 	local deleteHL = deleteBtn:CreateTexture(nil, "HIGHLIGHT")
 	deleteHL:SetPoint("CENTER")
+	deleteHL:SetSize(18, 18)
+	deleteHL:SetTexture(M .. "trash")
 	deleteHL:SetBlendMode("ADD")
 	deleteHL:SetAlpha(0.4)
-	local atlasName = "common-icon-delete"
-	local atlasInfo
-	if C_Texture and C_Texture.GetAtlasInfo then
-		local ok, info = pcall(C_Texture.GetAtlasInfo, atlasName)
-		atlasInfo = ok and info or nil
-	end
-	if atlasInfo and deleteIcon.SetAtlas then
-		deleteIcon:SetSize(16, 16); deleteIcon:SetAtlas(atlasName)
-		deleteHL:SetSize(16, 16); deleteHL:SetAtlas(atlasName)
-	else
-		-- The loot-pass X: the same red button every client has shipped.
-		deleteIcon:SetSize(20, 20); deleteIcon:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
-		deleteHL:SetSize(20, 20); deleteHL:SetTexture("Interface\\Buttons\\UI-GroupLoot-Pass-Up")
-	end
 	-- Brighter while holding an item, and only listens to CURSOR_CHANGED while the bags are open.
 	local function DropReady()
 		local held = CursorHasItem and CursorHasItem()
@@ -1932,30 +1900,10 @@ local function TakeOverBlizzardBags()
 		local open = ns.BlizzardBagsOpen()
 		if open ~= frame:IsShown() then frame:SetShown(open) end
 	end
-	if IsBagOpen then
-		for _, name in ipairs({ "ToggleAllBags", "ToggleBackpack", "ToggleKeyRing", "OpenAllBags", "OpenBackpack",
-			"CloseAllBags", "CloseBackpack", "ToggleBag", "OpenBag", "CloseBag" }) do
-			if _G[name] then hooksecurefunc(name, Follow) end
-		end
-		return
+	for _, name in ipairs({ "ToggleAllBags", "ToggleBackpack", "ToggleKeyRing", "OpenAllBags", "OpenBackpack",
+		"CloseAllBags", "CloseBackpack", "ToggleBag", "OpenBag", "CloseBag" }) do
+		if _G[name] then hooksecurefunc(name, Follow) end
 	end
-	-- A client without IsBagOpen (none seen yet): toggle along with Blizzard's calls instead. Several of these
-	-- call each other internally, so only the first per frame tick acts.
-	local stamp
-	local function Once(fn)
-		return function(...)
-			local t = GetTime()
-			if stamp == t then return end
-			stamp = t
-			fn(...)
-		end
-	end
-	for _, name in ipairs({ "ToggleAllBags", "ToggleBackpack", "ToggleKeyRing" }) do
-		if _G[name] then hooksecurefunc(name, Once(ns.Toggle)) end
-	end
-	for _, name in ipairs({ "OpenAllBags", "OpenBackpack" }) do if _G[name] then hooksecurefunc(name, Once(ns.Open)) end end
-	for _, name in ipairs({ "CloseAllBags", "CloseBackpack" }) do if _G[name] then hooksecurefunc(name, Once(ns.Close)) end end
-	if ToggleBag then hooksecurefunc("ToggleBag", Once(function(id) if inList[id] then ns.Toggle() end end)) end
 end
 
 ---------------------------------------------------------------------------
@@ -2059,13 +2007,11 @@ function ns.OnLoad()
 		C_Timer.After(0, PlaceSplit)              -- next frame, once the stack is on the cursor
 	end
 	if C_Container and C_Container.SplitContainerItem then pcall(hooksecurefunc, C_Container, "SplitContainerItem", OnSplit) end
-	if SplitContainerItem then pcall(hooksecurefunc, "SplitContainerItem", OnSplit) end
 
 	-- "Show on Backpack" ticked/unticked in the Currency tab
 	local function OnWatchChanged() ns.MarkCurrencies() end
 	local C = C_CurrencyInfo
 	if C and C.SetCurrencyBackpack then pcall(hooksecurefunc, C, "SetCurrencyBackpack", OnWatchChanged) end
 	if C and C.SetCurrencyBackpackByID then pcall(hooksecurefunc, C, "SetCurrencyBackpackByID", OnWatchChanged) end
-	if SetCurrencyBackpack then pcall(hooksecurefunc, "SetCurrencyBackpack", OnWatchChanged) end
 	for e in pairs(handlers) do TryRegister(e) end
 end

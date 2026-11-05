@@ -13,6 +13,9 @@ function ns:ApplyPosition()
 	if ns.fill then
 		if ns.fill.SetScaleBase then ns.fill:SetScaleBase(s) else ns.fill:SetScale(s) end
 	end
+	if ns.frost then
+		if ns.frost.SetScaleBase then ns.frost:SetScaleBase(s) else ns.frost:SetScale(s) end
+	end
 	local pos = ns.db.pos or ns.DEFAULT_POS
 	frame:ClearAllPoints()
 	frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
@@ -72,12 +75,14 @@ function ns:InitEditMode(frame)
 		format = function(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) end,
 		get = function() return ns.db.scale or 1 end,
 		set = function(v)
+			ns.frostPreviewUntil = nil
 			ns.db.scale = ns.Clamp(v, 0.5, 2)
 			ns:ApplyScale()
 		end })
 	d:AddSlider({ label = "Width", min = ns.MIN_WIDTH, max = 1200, step = 10, format = "%d",
 		get = function() return ns.db.width end,
 		set = function(v)
+			ns.frostPreviewUntil = nil
 			ns.db.width = math.max(ns.MIN_WIDTH, v)
 			frame:SetWidth(ns.db.width)
 			ns:LayoutWindow()
@@ -85,6 +90,7 @@ function ns:InitEditMode(frame)
 	d:AddSlider({ label = "Height", min = ns.MIN_HEIGHT, max = 800, step = 10, format = "%d",
 		get = function() return ns.db.height end,
 		set = function(v)
+			ns.frostPreviewUntil = nil
 			local need = ns:MinFrameHeight()
 			ns.db.height = math.max(need, v)
 			frame:SetHeight(ns.db.height)
@@ -99,6 +105,7 @@ function ns:InitEditMode(frame)
 		format = function(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) end,
 		get = function() return ns.db.background or 0.8 end,
 		set = function(v)
+			ns.frostPreviewUntil = nil
 			v = ns.Clamp(math.floor(v / 0.05 + 0.5) * 0.05, 0.2, 1)
 			ns.db.background = v
 			ns:ApplyBackground()
@@ -106,6 +113,7 @@ function ns:InitEditMode(frame)
 	d:AddButtonGrid({ label = "Background style", columns = 2,
 		buttons = styleButtons,
 		onClick = function(key)
+			ns.frostPreviewUntil = nil
 			ns.db.backgroundStyle = key
 			ns:ApplyBackground()
 		end,
@@ -118,11 +126,33 @@ function ns:InitEditMode(frame)
 		end,
 		isActive = function(key) return (ns.db.textDirection or "bottom") == key end })
 	d:AddCheckbox({ label = "Faint",
-		tooltip = "While the mouse isn't over the window, hide the border, background, header, tabs, scrollbar, and idle input box so only the chat text shows. Hover the window to bring everything back.",
+		tooltip = "While the mouse isn't over the window, fade out the outer border, background, header, tabs, scrollbar, and idle input box, leaving a translucent frosted-glass pane behind the chat section only (which also fades to 0 when old messages fade out, and comes right back when a new message arrives). Hover the window to bring everything back.",
 		get = function() return ns.db.faint end,
 		set = function(v)
 			ns.db.faint = v and true or false
 			ns:ApplyFaint()
+			if ns.db.faint and ns.PreviewFrost then ns:PreviewFrost() end
+		end })
+	d:AddSlider({ label = "Faint glass", min = 0, max = 1, step = 0.05,
+		format = function(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) end,
+		get = function() return (ns.db.frostStrength ~= nil) and ns.db.frostStrength or ns.DEFAULTS.frostStrength end,
+		set = function(v)
+			v = ns.Clamp(math.floor(v / 0.05 + 0.5) * 0.05, 0, 1)
+			ns.db.frostStrength = v
+			if ns.ApplyFrost then ns:ApplyFrost() end
+			if ns.PreviewFrost then ns:PreviewFrost() end
+		end })
+	d:AddColor({ label = "Faint glass color",
+		tooltip = "Tints only the frosted-glass chat text pane in Faint mode (never the outer window, header, or tab list).",
+		get = function() return ns:GetFrostColor() end,
+		saved = function()
+			if ns.BeginFrostColorPick then ns:BeginFrostColorPick() end
+			local c = ns.db.frostColor
+			return c and { c[1], c[2], c[3] } or nil
+		end,
+		set = function(c)
+			ns.db.frostColor = c and { c[1], c[2], c[3] } or nil
+			if ns.ApplyFrost then ns:ApplyFrost() end
 		end })
 	d:AddCheckbox({ label = "Whisper alert",
 		tooltip = "Flashes the message-bubble open icon (when closed) or the Chat tab / Show Tabs button (when viewing another tab) when a whisper arrives. The usual whisper sound still plays while the window is closed.",
@@ -130,6 +160,7 @@ function ns:InitEditMode(frame)
 		set = function(v) ns.db.whisperAlert = v and true or false end })
 
 	d:AddButton({ text = "Restore defaults", onClick = function()
+		ns.frostPreviewUntil = nil
 		ns.db.scale = ns.DEFAULTS.scale
 		ns.db.width, ns.db.height = ns.DEFAULTS.width, ns.DEFAULTS.height
 		ns.db.background = ns.DEFAULTS.background
@@ -137,15 +168,18 @@ function ns:InitEditMode(frame)
 		ns.db.showTabs = ns.DEFAULTS.showTabs
 		ns.db.textDirection = ns.DEFAULTS.textDirection
 		ns.db.faint = ns.DEFAULTS.faint
+		ns.db.frostStrength = ns.DEFAULTS.frostStrength
+		ns.db.frostColor = nil
 		if ns.SyncTabsToggleButton then ns:SyncTabsToggleButton() end
 		ns:ApplyTextDirection()
+		if ns.ApplyFrost then ns:ApplyFrost() end
 		ns:ApplyFaint()
 		frame:SetSize(ns.db.width, ns.db.height)
 		ns:ApplyScale()
 		ns:ApplyBackground()
 		d:Refresh()
 	end })
-	d:AddNote({ text = "Drag the empty header bar or left tab list to move the window, or drag a bottom corner to resize it. Use the header eye button to show or hide your chat tabs (auto-fitted up to 1/3 of the window width, or full-width chat when hidden; right-click any tab to rename, add, close, or set it as the Default Window shown on login). Text direction picks where new messages appear: Bottom (stock WoW) or Top. Faint hides everything but the chat text until you hover the window. In the header, the chat bubble opens Chat Settings, the window icon opens Window Settings, and the top-right X closes chat down to a draggable message-bubble icon." })
+	d:AddNote({ text = "Drag the empty header bar or left tab list to move the window, or drag a bottom corner to resize it. Use the header eye button to show or hide your chat tabs (auto-fitted up to 1/3 of the window width, and closing automatically back to full-width chat when your mouse leaves the window; right-click any tab to rename, add, close, or set it as the Default Window shown on login). Text direction picks where new messages appear: Bottom (stock WoW) or Top. Faint fades the window chrome down to a translucent frosted-glass backing on the chat section only (tune its strength and color with Faint glass and Faint glass color) until you hover the window. In the header, the chat bubble opens Chat Settings, the window icon opens Window Settings, and the top-right X closes chat down to a draggable message-bubble icon." })
 
 	d:AddButton({ text = "Reset tabs", onClick = function()
 		if ns:ApplyTabLayout() then

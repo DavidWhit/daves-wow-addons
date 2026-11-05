@@ -2,7 +2,7 @@
 
 {{NOTES}}
 
-Targets: {{FLAVORS}} (`## Interface: {{INTERFACES}}`).
+Targets: WoW: Forever (`## Interface: {{INTERFACES}}`).
 
 ## Use
 
@@ -13,8 +13,8 @@ Targets: {{FLAVORS}} (`## Interface: {{INTERFACES}}`).
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `Test-WowAddon.py -Path . -Flavor {{FLAVORLIST}}` |
-| Link into the game | `Deploy-WowAddon.py -Path . -Flavor forever` |
+| Check the addon | `Test-WowAddon.py -Path .` |
+| Link into the game | `Deploy-WowAddon.py -Path .` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
 Files: `{{NAME}}.toc` (manifest), `Core.lua` (startup, events, slash command), `Options.lua` (Settings panel).

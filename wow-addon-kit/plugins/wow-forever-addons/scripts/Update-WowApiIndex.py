@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wowkit
 
 REPO = "Gethe/wow-ui-source"
-BRANCHES = ("forever", "live", "ptr", "classic", "classic_era", "classic_anniversary", "classic_titan", "beta")
+BRANCHES = ("forever",)
 KEYWORDS = {"if", "for", "while", "function", "return", "and", "or", "not", "local", "elseif", "until"}
 CALL_RX = re.compile(r"(?<![\w.:])([A-Za-z_]\w*)\s*\(")
 DEF_RX = re.compile(r"(?m)^\s*(?:function\s+([A-Za-z_]\w*)\s*\(|([A-Za-z_]\w*)\s*=)")
@@ -174,8 +174,7 @@ def _finalize_methods(raw_methods):
 
 
 def _scan_lua_entries(entries, branch):
-    mainline = branch in ("forever", "live", "ptr", "beta")
-    other = re.compile(r"/(Classic|Vanilla|TBC|Wrath|Cata|Mists)/" if mainline else r"/(Mainline|Camelot|Standard)/", re.I)
+    other = re.compile(r"/(Classic|Vanilla|TBC|Wrath|Cata|Mists)/", re.I)
     functions = {}
     events = {}
     namespaces = set()

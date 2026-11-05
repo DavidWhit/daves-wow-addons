@@ -1,8 +1,8 @@
 # Dave's Balls (`daves_balls`)
 
-Diablo-style health and power orbs for WoW: Forever (`v0.1.4`), with swirling liquid that sloshes as you move, cursor-tracked glass glare, and optional Blizzard player-frame replacement.
+Diablo-style health and power orbs for WoW: Forever (`v0.1.5`), with swirling liquid that sloshes as you move, cursor-tracked glass glare, and optional Blizzard player-frame replacement.
 
-Targets: forever, classic_era, anniversary (`## Interface: 16001, 11509, 20506`).
+Targets: WoW: Forever (`## Interface: 16001`).
 
 ## Use
 
@@ -18,7 +18,7 @@ Targets: forever, classic_era, anniversary (`## Interface: 16001, 11509, 20506`)
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py -Path wowaddons/daves_balls -Flavor forever` |
+| Check the addon | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py -Path wowaddons/daves_balls` |
 | Prepare review packet | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Prepare-WowReview.py -Path wowaddons/daves_balls` |
 | Link into the game | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.py -Path wowaddons/daves_balls` |
 | Rebuild orb textures | `py -3 wowaddons/daves_balls/tools/Make-OrbMedia.py -Out wowaddons/daves_balls/Media` |

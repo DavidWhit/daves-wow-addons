@@ -6,7 +6,7 @@ argument-hint: "[addon folder] [flavors]"
 
 # Test a WoW addon
 
-Arguments: `$ARGUMENTS` (addon folder and optional flavors, e.g. `C:\dev\CampTracker forever,retail`). Without a folder, use the addon you're working on, or ask.
+Arguments: `$ARGUMENTS` (addon folder and optional `-Flavor forever`, e.g. `C:\dev\CampTracker forever`). Without a folder, use the addon you're working on, or ask.
 
 ## 0. Bug reports: start from the game's own evidence
 
@@ -51,7 +51,7 @@ No log, or nothing for this addon: ask the user to run `/console taintLog 1`, re
 ## 1. Static validation (always)
 
 ```powershell
-py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.py" -Path "<addon folder>" -Flavor forever[,retail,classic_era] [-NoInfo]
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.py" -Path "<addon folder>" -Flavor forever [-NoInfo]
 ```
 
 Add `-Json` for machine-readable output, and `-NoInfo` to omit informational notes (`feature-detected, OK`, etc.). The exit code is 1 when there are errors. (Note: `Prepare-WowReview.py` in Step 2 runs `Test-WowAddon.py` automatically, so you don't need to run both separately unless iterating on validator errors.)
@@ -67,8 +67,8 @@ What each rule means and how to fix it:
 | `unloaded-file` | warn | Add the file to the TOC, or delete it |
 | `cleu-removed` | error | Combat log isn't available on 12.x/Forever. Redesign around unit events and widget setters |
 | `unknown-event` | error | The event doesn't exist on this client. Look it up: `Find-WowApi.py <part> -Events` |
-| `unknown-namespace` / `unknown-function` | error/warn | Look it up with `Find-WowApi.py`. Feature-detect (`C_X and C_X.Fn`) if it's flavor-specific |
-| `moved-api` | warn | Use the `C_*` replacement it names, with a fallback if you also target Classic |
+| `unknown-namespace` / `unknown-function` | error/warn | Look it up with `Find-WowApi.py` |
+| `moved-api` | warn | Use the `C_*` replacement it names |
 | `unknown-global` | warn | The global doesn't exist on Forever (e.g. `UnitAura`). Use the suggested replacement |
 | `deprecated-api` | warn | Only Blizzard's deprecation shim provides it, and it will be removed. Migrate now |
 | `secret-value` | warn | Same-line or 1-hop local secret used in comparison (`~= nil` is OK), math, concatenation or table indexing before `issecretvalue()`. Pass straight to `SetValue`/`SetText`/`SetFormattedText`, or guard with `issecretvalue()` first (`-- secret-value: ok` when known non-restricted) |

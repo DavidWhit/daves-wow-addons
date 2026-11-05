@@ -1,6 +1,6 @@
 ---
 name: wow-forever-api
-description: Facts and rules for writing World of Warcraft addon Lua that works on WoW Forever (internal game type "camelot", client 1.60.x, Interface 16001), plus Retail/Midnight and Classic. Covers secret values, combat-log removal, addon-comms lockdown, TOC game-type rules, Forever detection, API lookups, and the shared Edit Mode settings dialog every movable addon frame must use. Use whenever writing, reviewing or debugging WoW addon code, choosing a WoW API, or answering "does X exist / work on Forever".
+description: Facts and rules for writing World of Warcraft addon Lua that works on WoW Forever (internal game type "camelot", client 1.60.x, Interface 16001). Covers secret values, combat-log removal, addon-comms lockdown, TOC game-type rules, API lookups, and the shared Edit Mode settings dialog every movable addon frame must use. Use whenever writing, reviewing or debugging WoW addon code, choosing a WoW API, or answering "does X exist / work on Forever".
 ---
 
 # WoW: Forever addon API
@@ -40,26 +40,13 @@ On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Va
 | TOC game type | `camelot`, inside the `mainline` family | Blizzard's own TOCs, e.g. `Blizzard_UnitFrame.toc` |
 | TOC path variables | `[Family]` → `Mainline`, `[Game]` → `Camelot` | same |
 | Client-specific TOC | `<Name>_Camelot.toc` | warcraft.wiki.gg TOC_format |
-| Install folder | `_forever_` (product `wowf`; early beta used `_classic_beta_`) | local install; always confirm via `Find-WowInstall.py` |
+| Install folder | `_forever_` (product `wowf`) | local install; always confirm via `Find-WowInstall.py` |
 
 The Interface number can change at launch (expected November 2026) or with any patch. `Find-WowInstall.py` reads it from the installed build, so prefer that over this table.
 
-### Detecting Forever at runtime
-
-```lua
-local IS_FOREVER = WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
-```
-
-Prefer **feature detection** over project checks for API differences, so one file runs everywhere:
-
-```lua
-local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-local GetItemInfo      = (C_Item and C_Item.GetItemInfo) or GetItemInfo
-```
-
 ### TOC targeting
 
-- One TOC for every flavor: `## Interface: 16001, 120100, 11509`.
+- Target WoW: Forever in the TOC: `## Interface: 16001`.
 - `[AllowLoadGameType mainline]` **includes Forever**. Blizzard itself has to add `[ExcludeLoadGameType camelot]` to opt Forever out. Use `camelot` to target Forever only.
 - Per-file variants: `[Game]\Feature.lua` loads `Camelot\Feature.lua` on Forever.
 - TOC or new-file changes need a full client restart; `/reload` only re-runs Lua/XML.

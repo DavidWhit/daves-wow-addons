@@ -3,14 +3,7 @@
 
 local ADDON, ns = ...
 
--- WoW: Forever identifies itself as project "Camelot" (Blizzard's Forever UI source,
--- Blizzard_ProjectConstants/Camelot/ProjectConstants.lua: WOW_PROJECT_CAMELOT = 18).
-ns.IS_FOREVER = WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
-ns.IS_RETAIL = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
-
--- Feature detection, never version checks: C_AddOns on modern clients, the old global elsewhere.
-local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
+ns.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata(ADDON, "Version")) or "dev"
 
 local DEFAULTS = {
 	enabled = true,
@@ -69,7 +62,7 @@ local UNIT_EVENTS = {
 	"UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_POWER_UPDATE", "UNIT_MAXPOWER", "UNIT_DISPLAYPOWER",
 	"UNIT_ABSORB_AMOUNT_CHANGED", "UNIT_HEAL_PREDICTION", "UNIT_AURA", "UNIT_NAME_UPDATE", "UNIT_LEVEL",
 	"UNIT_FACTION", "UNIT_FLAGS", "UNIT_CLASSIFICATION_CHANGED", "UNIT_PORTRAIT_UPDATE", "UNIT_MODEL_CHANGED", "UNIT_TARGET",
-	"UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED",
+	"UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_FAILED",
 	"UNIT_SPELLCAST_DELAYED", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_STOP",
 	"UNIT_SPELLCAST_CHANNEL_UPDATE", "UNIT_SPELLCAST_INTERRUPTIBLE", "UNIT_SPELLCAST_NOT_INTERRUPTIBLE",
 }
@@ -84,7 +77,7 @@ function ns:ADDON_LOADED(name)
 		if daves_framesDB[k] == nil then daves_framesDB[k] = v end
 	end
 	ns.db = daves_framesDB
-	ns.db.variant = nil   -- 0.2.0: the unit picks the art (plain, rare, elite, rare elite)
+	ns.db.variant = nil   -- 0.2.0: the unit picks the art (plain, elite, rare elite, boss, class)
 	ns.db.textSize, ns.db.textVersion = nil, nil   -- 0.1.13: text scales with the frame, no setting
 	ns.db.textStyle = nil
 	if ns.db.scale then   -- 0.1.11: Scale became 0.5 to 1 (1 = the old 0.5)
@@ -101,10 +94,6 @@ function ns:ADDON_LOADED(name)
 	-- Per-frame work runs on its own child frame: Edit Mode's drag owns the frame's OnUpdate.
 	local ticker = CreateFrame("Frame", nil, f)
 	ticker:SetScript("OnUpdate", function(_, dt)
-		if ns.editing and not ns.editPreview then
-			ns.editClock = (ns.editClock or 0) + dt
-			if ns.editClock >= 2.6 then ns:StepEditPreview() end
-		end
 		if ns.aurasDirty then ns.aurasDirty = nil; ns:RefreshAuras() end
 		ns:TickCast()
 		ns:TickBoards(dt)
@@ -125,34 +114,18 @@ function ns:ADDON_LOADED(name)
 end
 
 function ns:PLAYER_LOGIN()
-	ns.Print(("v%s loaded%s. Type /davesframes for options, /davesframes test to preview on yourself."):format(ns.VERSION, ns.IS_FOREVER and " (WoW: Forever)" or ""))
+	ns.Print(("v%s loaded. Type /davesframes for options, /davesframes test to preview on yourself."):format(ns.VERSION))
 	ns:UI_SCALE_CHANGED()   -- UIParent has its final scale by now
 	ns:Refresh()
 end
 
 -- Preview shows the frame on yourself when there's no target: in Edit Mode, or with /davesframes test.
--- While Edit Mode is open, the frame also cycles through the plate variants (or holds on one chosen in the dialog).
-function ns:StepEditPreview(key)
-	if not key then
-		ns.editIndex = (ns.editIndex or 0) % #ns.VARIANT_ORDER + 1
-		key = ns.VARIANT_ORDER[ns.editIndex]
-	end
-	ns.editArt = key
-	ns.editClock = 0
-	if ns.editing then ns:ApplyArt(ns.ArtFor(ns.unit)) end
-end
-
 local previewReasons = {}
 function ns:SetPreview(reason, on)
-	local wasEditing = ns.editing
 	previewReasons[reason] = on or nil
 	ns.preview = next(previewReasons) ~= nil
 	ns.editing = previewReasons.editmode ~= nil   -- Edit Mode shows the frame even when it's disabled
-	if ns.editing and not wasEditing then
-		ns:StepEditPreview(ns.editPreview)
-	elseif not ns.editing then
-		ns.editArt, ns.editClock = nil, nil
-	end
+	if not ns.editing then ns.editPreview = nil end
 	ns:Refresh()
 end
 
@@ -160,6 +133,7 @@ function ns:Apply()
 	if not ns.frame then return end
 	ns:CheckLayout()
 	ns.frame:SetScale(ns.FrameScale())
+	if ns.ApplyPosition then ns:ApplyPosition() end
 	ns:ApplyLayout()
 	ns:ApplyBoardStyle()
 	ns:Refresh()
@@ -172,6 +146,7 @@ function ns:PLAYER_TARGET_CHANGED() ns:Refresh() end
 -- Screen-pixel sizes (text shadow, level ring) follow the UI scale and resolution.
 function ns:UI_SCALE_CHANGED()
 	if not ns.frame then return end
+	if ns.ApplyPosition then ns:ApplyPosition() end
 	ns:ApplyLayout(); ns:ApplyBoardStyle()
 end
 ns.DISPLAY_SIZE_CHANGED = ns.UI_SCALE_CHANGED
@@ -225,6 +200,7 @@ SlashCmdList["DAVES_FRAMES"] = function(msg)
 		ns.Print(ns.VERSION)
 	elseif msg:match("^art%s+") or msg == "art" then
 		local which = msg:match("^art%s+(%S+)") or "auto"
+		if which == "rare" or which == "silver" or which == "silverelite" then which = "rareelite" end
 		if which == "auto" then
 			ns.artForce = nil
 			ns:ApplyArt(ns.ArtFor(ns.unit))
@@ -234,10 +210,7 @@ SlashCmdList["DAVES_FRAMES"] = function(msg)
 			ns:ApplyArt(which)
 			ns.Print("art: " .. which .. ".  /davesframes art auto puts it back on the unit.")
 		else
-			local names = {}
-			for key in pairs(ns.VARIANTS) do names[#names + 1] = key end
-			table.sort(names)
-			ns.Print("art: " .. table.concat(names, ", ") .. ", or auto.")
+			ns.Print("art: " .. table.concat(ns.VARIANT_ORDER, ", ") .. ", or auto.")
 		end
 	else
 		ns.Print("commands: /davesframes [options | test | art | version]")

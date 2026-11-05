@@ -115,6 +115,45 @@ function ns:ApplyBackground()
 	end
 end
 
+-- Applies Faint mode's frosted-glass strength and color strictly to the inner chat-text pane
+-- (ns.frost, anchored to ns.chatBox — never the outer window, header, tab list, or input strip).
+function ns:ApplyFrost()
+	if not ns.frost then return end
+	local s = ns.Clamp((ns.db and tonumber(ns.db.frostStrength)) or ns.DEFAULTS.frostStrength, 0, 1)
+	local c = ns:GetFrostColor()
+	local cr, cg, cb = c[1], c[2], c[3]
+	if ns.frostGlass then
+		if ns.frostHasGlassTex then
+			ns.frostGlass:SetVertexColor(cr, cg, cb)
+		else
+			ns.frostGlass:SetColorTexture(cr * 0.9, cg * 0.9, cb * 0.9, 0.82)
+		end
+		ns.frostGlass:SetAlpha(0.86 * s)
+	end
+	if ns.frostGrain then
+		local gr, gg, gb = 0.65 * cr + 0.35, 0.65 * cg + 0.35, 0.65 * cb + 0.35
+		if ns.frostHasGrainTex then
+			ns.frostGrain:SetVertexColor(gr, gg, gb)
+		else
+			ns.frostGrain:SetColorTexture(gr, gg, gb, 0.21)
+		end
+		ns.frostGrain:SetAlpha(0.65 * s)
+	end
+	if ns.frostSheen then
+		local sr, sg, sb = 0.50 * cr + 0.50, 0.50 * cg + 0.50, 0.50 * cb + 0.50
+		local topA = 0.11 * s
+		if ns.frostSheen.SetGradient and CreateColor then
+			ns.frostSheen:SetColorTexture(1, 1, 1, 1)
+			ns.frostSheen:SetGradient("VERTICAL",
+				CreateColor(sr, sg, sb, 0),
+				CreateColor(sr, sg, sb, topA))
+		else
+			ns.frostSheen:SetColorTexture(sr, sg, sb, 0.5 * topA)
+		end
+	end
+	if ns.SyncFrostAlpha then ns:SyncFrostAlpha() end
+end
+
 ---------------------------------------------------------------------------
 -- Shared magnetic snap-drag helper (uses ns.EditMode.SnapRect)
 ---------------------------------------------------------------------------
@@ -132,6 +171,7 @@ local function MakeSnapMover(target, opts)
 	function mover.Stop()
 		if not moving then return end
 		moving = false
+		target.isSnapMoving = nil
 		target.isMovingIcon = nil
 		if opts.markDragged then
 			target.dragStopTime = GetTime()
@@ -150,6 +190,7 @@ local function MakeSnapMover(target, opts)
 		local cx, cy = GetCursorPosition()
 		local grabX, grabY = cx - ox * scale, cy - oy * scale
 		moving = true
+		target.isSnapMoving = true
 		if opts.markDragged then target.isMovingIcon = true end
 		ResetButtonVisual(target)
 		target:SetScript("OnUpdate", function(self)
@@ -182,15 +223,17 @@ local function MakeSnapMover(target, opts)
 	return mover
 end
 
-local function WireDragHandle(handle, mover)
+local function WireDragHandle(handle, mover, resetOnRightClick)
 	handle:EnableMouse(true)
 	handle:RegisterForDrag("LeftButton")
 	handle:SetScript("OnDragStart", mover.Start)
 	handle:SetScript("OnDragStop", mover.Stop)
 	handle:SetScript("OnHide", mover.Stop)
-	handle:SetScript("OnMouseUp", function(_, button)
-		if button == "RightButton" then ns:ResetPosition() end
-	end)
+	if resetOnRightClick then
+		handle:SetScript("OnMouseUp", function(_, button)
+			if button == "RightButton" then ns:ResetPosition() end
+		end)
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -275,6 +318,49 @@ local function BuildWindow(anchor)
 	chatBoxFill:SetPoint("BOTTOMRIGHT", chatBox, "BOTTOMRIGHT", -3, 3)
 	ns.chatBoxFill = chatBoxFill
 
+	-- Frosted-glass backing behind the inner chat-text pane while Faint mode has faded the window
+	-- chrome out: lifts dark scenes with a translucent milky-etched glass pane + subtle specular rim
+	-- so dark and light messages stay readable while keeping an airy, borderless transparent look.
+	local frost = CreateFrame("Frame", nil, UIParent)
+	frost:SetFrameStrata("BACKGROUND")
+	frost:SetFrameLevel((fill:GetFrameLevel() or 0) + 1)
+	frost:SetAllPoints(chatBox)
+	frost:EnableMouse(false)
+	if frost.SetFlattensRenderLayers then frost:SetFlattensRenderLayers(true) end
+	frost:SetAlpha(0)
+	frost:Hide()
+	ns.frost = frost
+
+	local frostGlass = frost:CreateTexture(nil, "BACKGROUND", nil, 0)
+	frostGlass:SetAllPoints()
+	if frostGlass.SetTextureSliceMargins and frostGlass:SetTexture(ns.MEDIA .. "frost_glass") then
+		frostGlass:SetTextureSliceMargins(16, 16, 16, 16)
+		ns.frostHasGlassTex = true
+	else
+		frostGlass:SetColorTexture(0.74, 0.78, 0.85, 0.82)
+		ns.frostHasGlassTex = false
+	end
+	ns.frostGlass = frostGlass
+
+	local frostGrain = frost:CreateTexture(nil, "BACKGROUND", nil, 1)
+	frostGrain:SetPoint("TOPLEFT", frost, "TOPLEFT", 2, -2)
+	frostGrain:SetPoint("BOTTOMRIGHT", frost, "BOTTOMRIGHT", -2, 2)
+	if frostGrain:SetTexture(ns.MEDIA .. "frost_grain", "REPEAT", "REPEAT") then
+		frostGrain:SetHorizTile(true)
+		frostGrain:SetVertTile(true)
+		ns.frostHasGrainTex = true
+	else
+		frostGrain:SetColorTexture(0.88, 0.92, 0.96, 0.21)
+		ns.frostHasGrainTex = false
+	end
+	ns.frostGrain = frostGrain
+
+	local frostSheen = frost:CreateTexture(nil, "BACKGROUND", nil, 2)
+	frostSheen:SetPoint("TOPLEFT", frost, "TOPLEFT", 2, -2)
+	frostSheen:SetPoint("BOTTOMRIGHT", frost, "BOTTOMRIGHT", -2, 2)
+	frostSheen:SetColorTexture(1, 1, 1, 1)
+	ns.frostSheen = frostSheen
+
 	-- Header, top lip, and empty tab-column drag outside Edit Mode (anchor itself stays mouse-off
 	-- outside Edit Mode so clicks pass through to chat links and the 3D world).
 	local windowMover = MakeSnapMover(anchor, {
@@ -290,7 +376,7 @@ local function BuildWindow(anchor)
 	drag:SetPoint("TOPRIGHT", anchor, "TOPRIGHT", -32, -4)
 	drag:SetHeight(14)
 	drag:SetFrameLevel(topLevel + 20)
-	WireDragHandle(drag, windowMover)
+	WireDragHandle(drag, windowMover, true)
 	drag:SetScript("OnEnter", function(self)
 		ns.AnchorTooltip(self)
 		GameTooltip:SetText("Drag to move")
@@ -300,8 +386,10 @@ local function BuildWindow(anchor)
 	drag:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	ns.dragStrip = drag
 
-	WireDragHandle(ns.settingsBar, windowMover)
-	WireDragHandle(tabColumn, windowMover)
+	WireDragHandle(ns.settingsBar, windowMover, true)
+	-- Left-drag on empty tab-list space still moves the window, but right-clicking inside the tab
+	-- list must never reset the window position.
+	WireDragHandle(tabColumn, windowMover, false)
 
 	-- Draggable message-bubble icon shown while collapsed; independent of the window's rectangle.
 	local toggle = ns.MakeChatIcon(UIParent, "DavesChatToggle")
@@ -435,6 +523,7 @@ local function BuildWindow(anchor)
 	end
 
 	ns:ApplyBackground()
+	ns:ApplyFrost()
 end
 
 function ns:PlaceToggle()
@@ -563,8 +652,9 @@ function ns:GLOBAL_MOUSE_DOWN()
 end
 
 ---------------------------------------------------------------------------
--- Faint mode: while the window isn't hovered, fade every piece of window chrome (border, background,
--- header, tab list, inner frame border, scrollbar, resting edit box, grips) so only chat text shows.
+-- Faint mode: while the window isn't hovered, fade every piece of window chrome (border, outer
+-- background, header, tab list, inner frame border, scrollbar, resting edit box, grips) while
+-- cross-fading in the frosted-glass backing behind the chat text so dark and light messages stay readable.
 -- Runs on its own UIParent child frame (EditMode.Attach owns the anchor's OnUpdate while dragging).
 ---------------------------------------------------------------------------
 local FAINT_FADE_IN = 0.15   -- seconds to fade chrome back in on hover
@@ -573,17 +663,79 @@ local FAINT_DELAY = 0.6      -- seconds the chrome stays after the mouse leaves
 
 ns.chromeAlpha = 1
 
+local function IsFrostPreviewing(now)
+	if ns.resizing then
+		ns.frostPreviewUntil = nil
+		return false
+	end
+	if ns.frostColorPicking then
+		if ColorPickerFrame and ColorPickerFrame.IsShown and ColorPickerFrame:IsShown() then
+			return true
+		end
+		ns.frostColorPicking = false
+	end
+	now = now or GetTime()
+	if ns.frostPreviewUntil then
+		if now < ns.frostPreviewUntil then return true end
+		ns.frostPreviewUntil = nil
+	end
+	return false
+end
+
+function ns:SyncFrostAlpha()
+	if not ns.frost then return end
+	local open = ns.db and ns.db.enabled and (not ns.db.collapsed or ns.inEditMode)
+	local strength = ns.Clamp((ns.db and tonumber(ns.db.frostStrength)) or ns.DEFAULTS.frostStrength, 0, 1)
+	local previewing = open and IsFrostPreviewing()
+	local active = open and strength > 0.001 and (ns.db.faint or previewing or (ns.chromeAlpha or 1) < 0.999)
+	local textA = 1
+	if active and not previewing then
+		if ns.frostTextAlpha == nil then
+			ns.frostTextAlpha = ns.ActiveChatTextAlpha and ns.ActiveChatTextAlpha() or 1
+		end
+		textA = ns.frostTextAlpha
+	end
+	local frostA = active and (ns.Clamp(1 - (ns.chromeAlpha or 1), 0, 1) * textA) or 0
+	if frostA > 0.001 then
+		ns.frost:SetAlpha(frostA)
+		if not ns.frost:IsShown() then ns.frost:Show() end
+	else
+		ns.frost:SetAlpha(0)
+		if ns.frost:IsShown() then ns.frost:Hide() end
+	end
+end
+
+function ns:PreviewFrost(duration)
+	ns.frostPreviewUntil = GetTime() + (duration or 1.4)
+	ns:SyncFrostAlpha()
+end
+
+function ns:BeginFrostColorPick()
+	ns.frostColorPicking = true
+	ns:PreviewFrost(0.5)
+end
+
 local function SetChromeAlpha(a)
 	ns.chromeAlpha = a
 	if ns.anchor then ns.anchor:SetAlpha(a) end
 	if ns.fill then ns.fill:SetAlpha(a) end
+	ns:SyncFrostAlpha()
 	if ns.ApplyOwnedChromeAlpha then ns:ApplyOwnedChromeAlpha() end
 end
 
-local function KeepChromeVisible()
+local function KeepTabsOpen()
 	if ns.inEditMode or ns.resizing then return true end
+	if ns.anchor and ns.anchor.isSnapMoving then return true end
+	if ns.tabColumn and ns.tabColumn.isThumbDragging then return true end
 	if MouseOverShown(ns.anchor) then return true end
+	if ns.IsTabMenuOpen and ns.IsTabMenuOpen() then return true end
+	if StaticPopup_Visible and StaticPopup_Visible("NAME_CHAT") then return true end
 	if ns.editDialog and ns.editDialog.IsShown and ns.editDialog:IsShown() then return true end
+	return false
+end
+
+local function KeepChromeVisible()
+	if KeepTabsOpen() then return true end
 	if ns.OwnedEditBoxActive and ns:OwnedEditBoxActive() then return true end
 	return false
 end
@@ -593,27 +745,78 @@ local function StartFaintFader()
 	local fader = CreateFrame("Frame", nil, UIParent)
 	fader:SetScript("OnUpdate", function(_, elapsed)
 		local open = ns.db.enabled and (not ns.db.collapsed or ns.inEditMode)
+		local now = GetTime()
+
+		-- Auto-close open tabs once the cursor leaves the chat window (and no tab menu / drag /
+		-- Window Settings / Edit Mode session is active), expanding chat to the full window width.
+		if open and ns.db.showTabs ~= false then
+			if KeepTabsOpen() then
+				ns.tabsAutoCloseArmed = true
+				ns.lastTabsHover = now
+			elseif ns.tabsAutoCloseArmed and now - (ns.lastTabsHover or 0) > FAINT_DELAY then
+				if not (ChatFrame1 and ChatFrame1.IsProtected and ChatFrame1:IsProtected() and InCombatLockdown()) then
+					ns.tabsAutoCloseArmed = false
+					if ns.SetShowTabs then ns:SetShowTabs(false) end
+				end
+			end
+		else
+			ns.tabsAutoCloseArmed = false
+		end
+
+		local previewing = open and IsFrostPreviewing(now)
 		local target = 1
-		if open and ns.db.faint then
-			local now = GetTime()
+		if previewing then
+			target = 0
+		elseif open and ns.db.faint then
 			if KeepChromeVisible() then lastHover = now end
 			if now - lastHover > FAINT_DELAY then target = 0 end
 		end
+
 		local a = ns.chromeAlpha or 1
-		if a == target then return end
-		if target > a then
-			a = math.min(target, a + elapsed / FAINT_FADE_IN)
+		local textChanged = false
+		if previewing or (open and (ns.db.faint or a < 0.999)) then
+			local wantText = 1
+			if not previewing and ns.db.faint and ns.ActiveChatTextAlpha then
+				wantText = ns.ActiveChatTextAlpha()
+			end
+			local prevTa = ns.frostTextAlpha
+			local ta = (prevTa == nil) and wantText or prevTa
+			if wantText > ta then
+				ta = math.min(wantText, ta + elapsed / FAINT_FADE_IN)
+			elseif wantText < ta then
+				ta = math.max(wantText, ta - elapsed / FAINT_FADE_OUT)
+			end
+			textChanged = (ta ~= prevTa)
+			ns.frostTextAlpha = ta
 		else
-			a = math.max(target, a - elapsed / FAINT_FADE_OUT)
+			ns.frostTextAlpha = nil
 		end
-		SetChromeAlpha(a)
+
+		local chromeChanged = (a ~= target)
+		if chromeChanged then
+			if target > a then
+				a = math.min(target, a + elapsed / FAINT_FADE_IN)
+			else
+				local rate = previewing and FAINT_FADE_IN or FAINT_FADE_OUT
+				a = math.max(target, a - elapsed / rate)
+			end
+			SetChromeAlpha(a)
+		elseif textChanged then
+			ns:SyncFrostAlpha()
+		end
 	end)
 	ns.faintFader = fader
 end
 
 function ns:ApplyFaint()
-	-- Turning faint off (or on while hovered) snaps the chrome fully visible right away.
-	if not ns.db.faint then SetChromeAlpha(1) end
+	-- Turning faint off snaps the chrome fully visible right away.
+	if not ns.db.faint then
+		ns.frostPreviewUntil = nil
+		ns.frostTextAlpha = nil
+		SetChromeAlpha(1)
+	else
+		ns:SyncFrostAlpha()
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -641,6 +844,7 @@ function ns:ApplyEnabled()
 
 	if ns.border then ns.border:SetShown(open) end
 	if ns.fill then ns.fill:SetShown(open) end
+	ns:SyncFrostAlpha()
 	if ns.settingsBar then ns.settingsBar:SetShown(open) end
 	if ns.tabsToggleButton then
 		ns.tabsToggleButton:SetShown(open)

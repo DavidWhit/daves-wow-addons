@@ -7,120 +7,66 @@
 
 local ADDON, ns = ...
 
--- WoW: Forever identifies itself as project "Camelot" (Blizzard's Forever UI source,
--- Blizzard_ProjectConstants/Camelot/ProjectConstants.lua: WOW_PROJECT_CAMELOT = 18).
-ns.IS_FOREVER = WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
-ns.IS_RETAIL = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
+ns.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata(ADDON, "Version")) or "dev"
 
--- Feature detection, never version checks: C_AddOns on modern clients, the old global elsewhere.
-local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
-
--- Quest log and super-tracking. Forever has the C_ forms. Warcraft Classic (TBC anniversary)
--- still answers the older globals, and there AddQuestWatch takes a log index, not a quest id.
--- Each C_ lookup is on one line so a missing function is skipped instead of called.
-local LogIndexForID = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID
-local TitleForID = C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID
-local InfoAt = C_QuestLog.GetInfo and C_QuestLog.GetInfo
-local NumEntries = C_QuestLog.GetNumQuestLogEntries and C_QuestLog.GetNumQuestLogEntries
-local IsComplete = C_QuestLog.IsComplete and C_QuestLog.IsComplete
-local ReadyForTurnIn = C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn
-local IsOnMap = C_QuestLog.IsOnMap and C_QuestLog.IsOnMap
-local WatchType = C_QuestLog.GetQuestWatchType and C_QuestLog.GetQuestWatchType
-local AddWatch = C_QuestLog.AddQuestWatch and C_QuestLog.AddQuestWatch
-local RemoveWatch = C_QuestLog.RemoveQuestWatch and C_QuestLog.RemoveQuestWatch
-local GetSuperTracked = (C_SuperTrack and C_SuperTrack.GetSuperTrackedQuestID) or GetSuperTrackedQuestID
-local SetSuperTracked = (C_SuperTrack and C_SuperTrack.SetSuperTrackedQuestID) or SetSuperTrackedQuestID
-local SetSuperWaypoint = C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint
-local CanSetWaypoint = C_Map.CanSetUserWaypointOnMap and C_Map.CanSetUserWaypointOnMap
-local SetUserWaypoint = C_Map.SetUserWaypoint and C_Map.SetUserWaypoint
-
+-- Quest log and super-tracking helpers (Forever C_QuestLog / C_SuperTrack / C_Map APIs).
 function ns.QuestLogIndex(questID)
-	if LogIndexForID then return LogIndexForID(questID) end
-	if GetQuestLogIndexByID then
-		local idx = GetQuestLogIndexByID(questID)
-		if idx and idx > 0 then return idx end
-	end
+	return C_QuestLog.GetLogIndexForQuestID(questID)
 end
 
 function ns.QuestTitle(questID)
-	if TitleForID then return TitleForID(questID) end
-	local idx = ns.QuestLogIndex(questID)
-	if idx and GetQuestLogTitle then return (GetQuestLogTitle(idx)) end
+	return C_QuestLog.GetTitleForQuestID(questID)
 end
 
 function ns.QuestInfo(index)
-	if InfoAt then return InfoAt(index) end
-	if not (index and index > 0 and GetQuestLogTitle) then return nil end
-	-- TBC QuestLogFrame.lua: title, level, tag, isHeader, isCollapsed, isComplete, frequency, questID, ...
-	local title, _, _, header, _, complete, _, questID, _, _, onMap, _, _, _, _, hidden = GetQuestLogTitle(index)
-	if not title then return nil end
-	return {
-		title = title, isHeader = header, isComplete = complete,
-		questID = questID, isOnMap = onMap, isHidden = hidden, isAutoComplete = false,
-	}
+	return C_QuestLog.GetInfo(index)
 end
 
 function ns.NumQuestLogEntries()
-	if NumEntries then return NumEntries() end
-	return GetNumQuestLogEntries and GetNumQuestLogEntries() or 0
+	return C_QuestLog.GetNumQuestLogEntries()
 end
 
 function ns.QuestComplete(questID)
-	if IsComplete then return IsComplete(questID) end
-	if IsQuestComplete then return IsQuestComplete(questID) end
-	local info = ns.QuestInfo(ns.QuestLogIndex(questID))
-	return info and (info.isComplete == 1 or info.isComplete == true) or false
+	return C_QuestLog.IsComplete(questID)
 end
 
 function ns.QuestReady(questID)
-	if ReadyForTurnIn then return ReadyForTurnIn(questID) and true or false end
-	return ns.QuestComplete(questID) and true or false
+	return C_QuestLog.ReadyForTurnIn(questID) and true or false
 end
 
-function ns.QuestOnMap(questID, info)
-	if IsOnMap then return IsOnMap(questID) end
-	return info and info.isOnMap or false
+function ns.QuestOnMap(questID)
+	return C_QuestLog.IsOnMap(questID)
 end
 
 function ns.QuestWatched(questID)
-	if WatchType then return WatchType(questID) ~= nil end
-	local idx = ns.QuestLogIndex(questID)
-	return (idx and IsQuestWatched and IsQuestWatched(idx)) and true or false
+	return C_QuestLog.GetQuestWatchType(questID) ~= nil
 end
 
 function ns.AddQuestWatch(questID)
-	if AddWatch then return AddWatch(questID) end
-	local idx = ns.QuestLogIndex(questID)
-	if idx and AddQuestWatch then return AddQuestWatch(idx) end
+	return C_QuestLog.AddQuestWatch(questID)
 end
 
 function ns.RemoveQuestWatch(questID)
-	if RemoveWatch then return RemoveWatch(questID) end
-	local idx = ns.QuestLogIndex(questID)
-	if idx and RemoveQuestWatch then return RemoveQuestWatch(idx) end
+	return C_QuestLog.RemoveQuestWatch(questID)
 end
 
 function ns.SuperTrackedQuest()
-	return GetSuperTracked and GetSuperTracked() or 0
+	return C_SuperTrack.GetSuperTrackedQuestID() or 0
 end
 
 function ns.SetSuperTrackedQuest(questID)
-	if SetSuperTracked then SetSuperTracked(questID) end
+	C_SuperTrack.SetSuperTrackedQuestID(questID)
 end
 
 function ns.RegisterSuperTracking(frame)
-	-- Forever fires SUPER_TRACKING_CHANGED. This Classic client fires SUPER_TRACKED_QUEST_CHANGED.
-	pcall(frame.RegisterEvent, frame, "SUPER_TRACKING_CHANGED")
-	pcall(frame.RegisterEvent, frame, "SUPER_TRACKED_QUEST_CHANGED")
+	frame:RegisterEvent("SUPER_TRACKING_CHANGED")
 end
 
--- True when a map pin was dropped. Classic has no user waypoint until those functions exist.
 function ns.PlaceUserWaypoint(mapID, x, y)
-	if not (mapID and x and y and SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates) then return false end
-	if CanSetWaypoint and not CanSetWaypoint(mapID) then return false end
-	SetUserWaypoint(UiMapPoint.CreateFromCoordinates(mapID, x, y))
-	if SetSuperWaypoint then SetSuperWaypoint(true) end
+	if not (mapID and x and y and UiMapPoint and UiMapPoint.CreateFromCoordinates) then return false end
+	if not C_Map.CanSetUserWaypointOnMap(mapID) then return false end
+	C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(mapID, x, y))
+	C_SuperTrack.SetSuperTrackedUserWaypoint(true)
 	return true
 end
 ns.NO_DATA = "Tell Dave to give me the data file."   -- shown in chat and on the map when daves_map_data isn't loaded

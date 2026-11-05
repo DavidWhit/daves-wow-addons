@@ -30,7 +30,7 @@ Spell looks mark the cast edge with a spark, like Blizzard's bar for damage and 
 
 Framed or borderless; edges are always clean, never frayed. Framed draws a thin line in the look's colour (Blizzard's frame for Plain); borderless draws none. Corners can be square, soft (slightly rounded, the default) or rounded, and the depth flat or a bevel (light along the top, shade along the bottom, a shadow inside the frame); every look follows both.
 
-Targets: forever, classic_era, anniversary (`## Interface: 16001, 11509, 20506`).
+Targets: WoW: Forever (`## Interface: 16001`).
 
 ## Use
 
@@ -52,7 +52,7 @@ with "Flame", ...), then the "Other casts" setting: a look (Plain, Blizzard's ow
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py -Path wowaddons/daves_castbar -Flavor forever` |
+| Check the addon | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py -Path wowaddons/daves_castbar` |
 | Prepare review packet | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Prepare-WowReview.py -Path wowaddons/daves_castbar` |
 | Link into the game | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.py -Path wowaddons/daves_castbar` |
 | Rebuild the art | `& .\tools\Make-CastbarMedia.ps1` |

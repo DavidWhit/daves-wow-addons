@@ -1213,10 +1213,6 @@ function ns:SUPER_TRACKING_CHANGED()
 	if UpdateFocus() then ns.Refresh() end   -- (most focus changes aren't ours: then the pins stay as they are)
 end
 
-function ns:SUPER_TRACKED_QUEST_CHANGED()
-	return self:SUPER_TRACKING_CHANGED()
-end
-
 function ns:PLAYER_REGEN_ENABLED()
 	ns.events:UnregisterEvent("PLAYER_REGEN_ENABLED")
 	if hot and hot.SetPassThroughButtons then hot:SetPassThroughButtons("RightButton") end

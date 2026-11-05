@@ -3,13 +3,7 @@
 
 local ADDON, ns = ...
 
--- WoW: Forever identifies itself as project "Camelot" (Blizzard's Forever UI source,
--- Blizzard_ProjectConstants/Camelot/ProjectConstants.lua: WOW_PROJECT_CAMELOT = 18).
-ns.IS_FOREVER = WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
-
--- Feature detection, never version checks: C_AddOns on modern clients, the old global elsewhere.
-local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
+ns.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata(ADDON, "Version")) or "dev"
 
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 

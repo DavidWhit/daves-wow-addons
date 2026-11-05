@@ -3,14 +3,7 @@
 
 local ADDON, ns = ...
 
--- WoW: Forever identifies itself as project "Camelot" (Blizzard's Forever UI source,
--- Blizzard_ProjectConstants/Camelot/ProjectConstants.lua: WOW_PROJECT_CAMELOT = 18).
-ns.IS_FOREVER = WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
-ns.IS_RETAIL = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
-
--- Feature detection, never version checks: C_AddOns on modern clients, the old global elsewhere.
-local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
+ns.VERSION = C_AddOns.GetAddOnMetadata(ADDON, "Version") or "dev"
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 
 -- Minimum window dimensions: 300 still fits the header icons (~170px) and leaves a ~150px inner chat
@@ -23,6 +16,7 @@ ns.TAB_WIDTH = 96
 
 -- WoW's usual corner, clear of the left button column the chat frame hangs outside itself.
 ns.DEFAULT_POS = { point = "BOTTOMLEFT", relPoint = "BOTTOMLEFT", x = 16, y = 16 }
+ns.DEFAULT_FROST_COLOR = { 0.82, 0.87, 0.94 }
 
 ns.DEFAULTS = {
 	enabled = true,          -- place Blizzard's chat dock inside our window
@@ -30,7 +24,8 @@ ns.DEFAULTS = {
 	layoutVersion = 0,       -- 0 until the three default tabs have been applied once
 	showTabs = true,         -- show the left-side scrollable chat tab list
 	textDirection = "bottom", -- "bottom" = stock WoW (newest at the bottom), "top" = newest at the top
-	faint = false,           -- hide all window chrome (only chat text stays) until the window is hovered
+	faint = false,           -- fade window chrome down to a frosted-glass chat backing until hovered
+	frostStrength = 0.5,     -- faint frosted-glass strength on the chat pane only (0 = clear, 1 = dense frost)
 	defaultTab = 1,          -- chat frame ID selected on login / reopen (right-click a tab > Default Window)
 	width = 520,
 	height = 320,
@@ -45,6 +40,19 @@ function ns.Clamp(v, lo, hi)
 	if v < lo then return lo end
 	if v > hi then return hi end
 	return v
+end
+
+function ns:GetFrostColor()
+	local c = ns.db and ns.db.frostColor
+	if type(c) == "table" and type(c[1]) == "number" and type(c[2]) == "number" and type(c[3]) == "number" then
+		return {
+			ns.Clamp(c[1], 0, 1),
+			ns.Clamp(c[2], 0, 1),
+			ns.Clamp(c[3], 0, 1),
+		}
+	end
+	local d = ns.DEFAULT_FROST_COLOR
+	return { d[1], d[2], d[3] }
 end
 
 function ns.Sound(kit)
@@ -121,6 +129,11 @@ function ns:ADDON_LOADED(name)
 	ns.db.height = math.max(ns.MIN_HEIGHT, tonumber(ns.db.height) or ns.DEFAULTS.height)
 	ns.db.scale = ns.Clamp(tonumber(ns.db.scale) or ns.DEFAULTS.scale, 0.5, 2)
 	ns.db.background = ns.Clamp(tonumber(ns.db.background) or ns.DEFAULTS.background, 0.2, 1)
+	ns.db.frostStrength = ns.Clamp(tonumber(ns.db.frostStrength) or ns.DEFAULTS.frostStrength, 0, 1)
+	local fc = ns.db.frostColor
+	if fc ~= nil and not (type(fc) == "table" and type(fc[1]) == "number" and type(fc[2]) == "number" and type(fc[3]) == "number") then
+		ns.db.frostColor = nil
+	end
 	if ns.db.textDirection ~= "top" then ns.db.textDirection = "bottom" end
 
 	ns:InitOptions()

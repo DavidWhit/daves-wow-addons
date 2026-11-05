@@ -1,8 +1,8 @@
 # Dave's Out Of My Way (`daves_outofmyway`)
 
-Blizzard frames that get in the way, moved or opened up (`v0.1.4`).
+Blizzard frames that get in the way, moved or opened up (`v0.1.5`).
 
-Targets: Forever, Classic Era, Anniversary (`## Interface: 16001, 11509, 20506`; designed for WoW: Forever `16001`).
+Targets: WoW: Forever (`## Interface: 16001`).
 
 ## What it does
 
@@ -11,7 +11,7 @@ Targets: Forever, Classic Era, Anniversary (`## Interface: 16001, 11509, 20506`;
   - "Show all buffs (never collapse)" (Esc > Options > AddOns, on to start with) turns both off and remembers what you had. Turning it off puts that back.
   - Nothing is switched while you play: the change is made as the UI shuts down (logout, quit or `/reload`), so it shows from your next reload or login, and the addon offers the reload in a small window of its own. Changing these settings mid-session would taint Blizzard's buff frame (a typed `/console` too, since Forever's runs insecure) and could block cancelling a buff in combat; switched at logout, the next UI reads them cleanly and nothing writes them again.
   - If something turns one back on, it's switched off again at the next logout. If they come back after a reload anyway (the client doesn't keep them), the addon says so once and leaves them alone; tick the option again to retry.
-  - With both off, every buff shows, up to 32. Edit Mode's Icon Limit on the buff frame only sets how many sit in each row.
+  - With both off, every buff shows, up to 32. Edit Mode's Icon Limit on the buff frame only sets how many buffs sit in each row.
   - `/oomw buffs` shows the state.
 - **The flight-path dismount button** (`MainMenuBarVehicleLeaveButton`, "request early landing") is not moved by this addon on purpose. It is one of Blizzard's own Edit Mode frames on Forever: tick **Vehicle Leave Button** in Edit Mode's settings (click Expand options, then Misc) and drag it there. An addon can't hold it anywhere. Edit Mode places it again with the action bars every time it appears, and moving it from addon code would taint the action bars, so actions would be blocked in combat. Opening Edit Mode reminds you once if that setting is off.
 
@@ -31,7 +31,7 @@ One known limit: while a roll is open, Blizzard's own roll container still takes
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py -Path wowaddons/daves_outofmyway -Flavor forever` |
+| Check the addon | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py -Path wowaddons/daves_outofmyway` |
 | Prepare review packet | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Prepare-WowReview.py -Path wowaddons/daves_outofmyway` |
 | Link into the game | `py -3 wow-addon-kit/plugins/wow-forever-addons/scripts/Link-WowAddons.py -Path wowaddons/daves_outofmyway` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |

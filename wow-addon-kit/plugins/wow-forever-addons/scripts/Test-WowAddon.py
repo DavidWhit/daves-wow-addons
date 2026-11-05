@@ -13,8 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wowkit
 
 TOC_SUFFIXES = (
-    "Standard", "Mainline", "Classic", "Vanilla", "TBC", "BCC", "Wrath", "WOTLK",
-    "Cata", "Mists", "Camelot", "Plunderstorm", "WoWLabs", "WoWHack",
+    "Camelot", "Mainline",
 )
 KNOWN_DIRECTIVES = {
     "interface", "title", "notes", "author", "version", "savedvariables", "savedvariablespercharacter",
@@ -188,7 +187,7 @@ def check(path, flavors, no_luacheck=False):
             break
     if not api:
         add("info", "api-index", "", 0, f"No API index for '{','.join(branches)}'. Run scripts\\Update-WowApiIndex.py -Branch {branches[0]} to enable API/event/secret checks.")
-    modern = any(flavor in ("forever", "retail") for flavor in flavors)
+    modern = True
 
     tocs = []
     for name in os.listdir(addon_dir):
@@ -280,7 +279,7 @@ def check(path, flavors, no_luacheck=False):
                     continue
                 if any(item in types for item in exclude):
                     continue
-                game_dir = "Standard" if flavor == "retail" else ("Camelot" if flavor == "forever" else info["TocSuffix"])
+                game_dir = "Camelot"
                 expanded = entry.replace("[Family]", info["Family"]).replace("[Game]", game_dir)
                 if expanded in checked:
                     continue
@@ -314,7 +313,7 @@ def check(path, flavors, no_luacheck=False):
         for flavor in flavors:
             want = known[flavor]["TocSuffix"]
             specific = any(re.search(rf"[_-]{re.escape(want)}$", os.path.splitext(os.path.basename(item))[0], re.I) for item in valid)
-            reads = (suffix.lower() == want.lower() or (flavor == "retail" and suffix.lower() == "standard")) if suffix else (not specific)
+            reads = (suffix.lower() in (want.lower(), known[flavor]["Family"].lower())) if suffix else (not specific)
             if not reads:
                 continue
             target = wowkit.interface_for(flavor, installs)

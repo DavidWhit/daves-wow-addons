@@ -137,11 +137,11 @@ def main(argv):
     assert_that(has(edit, "editmode-snap", "error", 14), "hand-rolled grid snapping")
     assert_that(has(edit, "editmode-snap", "warn"), "own dragging without the kit's SnapRect")
 
-    host("Invoked the way the skills do (py script, comma-separated flavors):")
+    host("Invoked the way the skills do (py script):")
     proc = run([
         os.path.join(SCRIPTS, "Test-WowAddon.py"),
         "-Path", os.path.join(here, "fixtures", "BrokenAddon"),
-        "-Flavor", "forever,retail",
+        "-Flavor", "forever",
         "-Json",
     ])
     try:
@@ -149,16 +149,16 @@ def main(argv):
     except json.JSONDecodeError:
         via_file = None
     assert_that(via_file is not None and proc.returncode == 1, "runs as a script and returns exit 1 for errors")
-    assert_that(via_file is not None and len(via_file.get("Flavors") or []) == 2, "comma-separated -Flavor parsed into two flavors")
+    assert_that(via_file is not None and via_file.get("Flavors") == ["forever"], "-Flavor forever parsed")
 
-    host("Scaffold (forever, retail, classic_era):")
+    host("Scaffold (forever):")
     tmp = os.path.join(temp_base, "wowkit-selftest-" + uuid.uuid4().hex[:8])
     os.makedirs(tmp)
     try:
         run([
             os.path.join(SCRIPTS, "New-WowAddon.py"),
             "-Name", "KitProbe", "-OutDir", tmp,
-            "-Flavor", "forever,retail,classic_era",
+            "-Flavor", "forever",
             "-Author", "selftest", "-Icon", "INV_Misc_Gear_01",
         ])
         probe = os.path.join(tmp, "KitProbe")
@@ -169,7 +169,7 @@ def main(argv):
         assert_that("{{" not in toc, "no unreplaced template tokens")
         blob = open(toc_path, "rb").read()
         assert_that(not (blob[:1] == b"\xef" and blob[1:2] == b"\xbb"), "TOC written without BOM")
-        code, checked = invoke_check(probe, ("forever", "retail", "classic_era"))
+        code, checked = invoke_check(probe, ("forever",))
         errors = checked["Errors"] if checked else "?"
         warns = checked["Warnings"] if checked else "?"
         assert_that(
@@ -228,41 +228,41 @@ def main(argv):
     wow = os.path.join(tmp, "World of Warcraft")
     src = os.path.join(tmp, "wowaddons")
     elsewhere = os.path.join(tmp, "elsewhere")
-    forever_addons = os.path.join(wow, "_classic_beta_", "Interface", "AddOns")
+    forever_addons = os.path.join(wow, "_forever_", "Interface", "AddOns")
+    classic_beta_addons = os.path.join(wow, "_classic_beta_", "Interface", "AddOns")
     retail_addons = os.path.join(wow, "_retail_", "Interface", "AddOns")
     link = os.path.join(SCRIPTS, "Link-WowAddons.py")
     try:
         for folder in (
-            forever_addons, retail_addons, elsewhere,
+            forever_addons, classic_beta_addons, retail_addons, elsewhere,
             os.path.join(src, "ForeverOnly"), os.path.join(src, "Both"),
-            os.path.join(src, "RetailOnly"), os.path.join(src, "NotAnAddon"),
+            os.path.join(src, "StaleLink"), os.path.join(src, "OtherOnly"), os.path.join(src, "NotAnAddon"),
             os.path.join(forever_addons, "Both"),
         ):
             os.makedirs(folder, exist_ok=True)
         with open(os.path.join(wow, ".build.info"), "w", encoding="utf-8", newline="") as handle:
             handle.write(
                 "Branch!STRING:0|Active!DEC:1|Version!STRING:0|Product!STRING:0\n"
-                "us|1|1.60.1.70205|wow_classic_beta\n"
+                "us|1|1.60.1.70790|wowf\n"
                 "us|1|12.1.0.65000|wow\n"
             )
-        with open(os.path.join(wow, "_classic_beta_", ".flavor.info"), "w", encoding="utf-8", newline="") as handle:
-            handle.write("Product Flavor!STRING:0\nwow_classic_beta\n")
         with open(os.path.join(src, "ForeverOnly", "ForeverOnly.toc"), "w", encoding="utf-8", newline="") as handle:
             handle.write("## Interface: 16001\n")
         with open(os.path.join(src, "Both", "Both.toc"), "w", encoding="utf-8", newline="") as handle:
-            handle.write("## Interface: 16001, 120100\n")
-        with open(os.path.join(src, "RetailOnly", "RetailOnly_Mainline.toc"), "w", encoding="utf-8", newline="") as handle:
+            handle.write("## Interface: 16001\n")
+        with open(os.path.join(src, "StaleLink", "StaleLink_Camelot.toc"), "w", encoding="utf-8", newline="") as handle:
+            handle.write("## Interface: 16001\n")
+        with open(os.path.join(src, "OtherOnly", "OtherOnly.toc"), "w", encoding="utf-8", newline="") as handle:
             handle.write("## Interface: 120100\n")
         with open(os.path.join(src, "NotAnAddon", "README.md"), "w", encoding="utf-8", newline="") as handle:
             handle.write("no toc here\n")
         with open(os.path.join(forever_addons, "Both", "marker.txt"), "w", encoding="utf-8", newline="") as handle:
             handle.write("installed copy\n")
-        wowkit.new_link(os.path.join(retail_addons, "RetailOnly"), elsewhere)
 
         installs = wowkit.wow_install(wow)
         assert_that(
-            any(client.Folder == "_retail_" and client.Flavor == "retail" for client in installs),
-            "client without .flavor.info identified by folder name",
+            len(installs) == 1 and installs[0].Folder == "_forever_" and installs[0].Flavor == "forever",
+            "only _forever_ client discovered (even without .flavor.info)",
         )
 
         what_if = run([link, "-Path", src, "-Root", wow, "-WhatIf"])
@@ -274,30 +274,32 @@ def main(argv):
         if what_if.returncode != 0:
             host(what_if.stderr)
 
+        wowkit.new_link(os.path.join(forever_addons, "StaleLink"), elsewhere)
+
         linked = run([link, "-Path", src, "-Root", wow, "-PassThru"])
         rows = last_json(linked.stdout) or []
         assert_that(not any(row.get("Addon") == "NotAnAddon" for row in rows), "folder without a TOC ignored")
         assert_that(
-            status_of(rows, "_classic_beta_", "ForeverOnly") == "Linked"
+            status_of(rows, "_forever_", "ForeverOnly") == "Linked"
             and wowkit.same_path(wowkit.link_target(os.path.join(forever_addons, "ForeverOnly")), os.path.join(src, "ForeverOnly")),
             "new addon linked",
         )
         assert_that(
-            status_of(rows, "_retail_", "ForeverOnly") == "Skipped"
+            not os.path.exists(os.path.join(classic_beta_addons, "ForeverOnly"))
             and not os.path.exists(os.path.join(retail_addons, "ForeverOnly")),
-            "Forever-only addon not linked into Retail",
+            "non-_forever_ client folders (_classic_beta_, _retail_) untouched",
         )
         assert_that(
-            status_of(rows, "_classic_beta_", "RetailOnly") == "Skipped",
-            "flavor TOC (_Mainline) read: Retail-only addon not linked into Forever",
+            status_of(rows, "_forever_", "OtherOnly") == "Skipped",
+            "addon without Forever Interface skipped",
         )
         assert_that(
-            status_of(rows, "_retail_", "RetailOnly") == "Relinked"
-            and wowkit.same_path(wowkit.link_target(os.path.join(retail_addons, "RetailOnly")), os.path.join(src, "RetailOnly"))
+            status_of(rows, "_forever_", "StaleLink") == "Relinked"
+            and wowkit.same_path(wowkit.link_target(os.path.join(forever_addons, "StaleLink")), os.path.join(src, "StaleLink"))
             and os.path.isdir(elsewhere),
             "stale link re-pointed, old target kept",
         )
-        backup_root = os.path.join(wow, "_classic_beta_", "Interface", "AddOns.backup")
+        backup_root = os.path.join(wow, "_forever_", "Interface", "AddOns.backup")
         backups = []
         if os.path.isdir(backup_root):
             backups = [name for name in os.listdir(backup_root) if name.startswith("Both-")]
@@ -309,23 +311,22 @@ def main(argv):
         )
         recorder = os.path.join(forever_addons, "!WowKitErrors", "!WowKitErrors.toc")
         assert_that(
-            status_of(rows, "_classic_beta_", "!WowKitErrors") == "Linked"
-            and status_of(rows, "_retail_", "!WowKitErrors") == "Linked"
+            status_of(rows, "_forever_", "!WowKitErrors") == "Linked"
             and os.path.isfile(recorder),
             "kit error recorder linked along with the addons",
         )
 
         again = last_json(run([link, "-Path", src, "-Root", wow, "-PassThru"]).stdout) or []
         assert_that(
-            sum(1 for row in again if row.get("Status") == "AlreadyLinked") == 6
-            and sum(1 for row in again if row.get("Status") == "Skipped") == 2,
+            sum(1 for row in again if row.get("Status") == "AlreadyLinked") == 4
+            and sum(1 for row in again if row.get("Status") == "Skipped") == 1,
             "second run leaves correct links alone",
         )
 
         one = last_json(run([link, "-Path", os.path.join(src, "Both"), "-Root", wow, "-Remove", "-PassThru"]).stdout) or []
         assert_that(
-            len(one) == 2
-            and sum(1 for row in one if row.get("Status") == "Unlinked") == 2
+            len(one) == 1
+            and sum(1 for row in one if row.get("Status") == "Unlinked") == 1
             and os.path.exists(os.path.join(forever_addons, "ForeverOnly"))
             and wowkit.is_link(os.path.join(forever_addons, "!WowKitErrors")),
             "-Path <one addon> touches only that addon",
@@ -349,9 +350,8 @@ def main(argv):
         gone = last_json(run([link, "-Path", src, "-Root", wow, "-Remove", "-PassThru"]).stdout) or []
         recorder_source = os.path.join(ROOT, "devaddons", "!WowKitErrors", "!WowKitErrors.toc")
         assert_that(
-            sum(1 for row in gone if row.get("Status") == "Unlinked") == 2
+            sum(1 for row in gone if row.get("Status") == "Unlinked") == 1
             and not os.path.exists(os.path.join(forever_addons, "!WowKitErrors"))
-            and not os.path.exists(os.path.join(retail_addons, "!WowKitErrors"))
             and os.path.isfile(recorder_source),
             "-Remove of the folder unlinks the error recorder too, its source intact",
         )
@@ -362,6 +362,7 @@ def main(argv):
             raise
     finally:
         unlink_dir(forever_addons)
+        unlink_dir(classic_beta_addons)
         unlink_dir(retail_addons)
         if not keep:
             shutil.rmtree(tmp, ignore_errors=True)
@@ -371,7 +372,7 @@ def main(argv):
     example = os.path.join(os.path.dirname(os.path.dirname(ROOT)), "examples", "HelloForever")
     if os.path.isdir(example):
         host("Example HelloForever:")
-        code, checked = invoke_check(example, ("forever", "retail", "classic_era"))
+        code, checked = invoke_check(example, ("forever",))
         errors = checked["Errors"] if checked else "?"
         warns = checked["Warnings"] if checked else "?"
         assert_that(

@@ -21,11 +21,6 @@ KIT_ROOT = SCRIPT_DIR.parent
 # "camelot" inside the "mainline" family. Installed clients override Interface.
 KNOWN_FLAVORS = {
     "forever": {"Interface": 16001, "Version": "1.60.1", "GameType": "camelot", "Family": "Mainline", "TocSuffix": "Camelot", "ApiBranch": "forever"},
-    "retail": {"Interface": 120100, "Version": "12.1.0", "GameType": "standard", "Family": "Mainline", "TocSuffix": "Mainline", "ApiBranch": "live"},
-    "mists": {"Interface": 50504, "Version": "5.5.4", "GameType": "mists", "Family": "Classic", "TocSuffix": "Mists", "ApiBranch": "classic"},
-    "titan": {"Interface": 38002, "Version": "3.80.2", "GameType": "wrath", "Family": "Classic", "TocSuffix": "Wrath", "ApiBranch": "classic_titan"},
-    "anniversary": {"Interface": 20506, "Version": "2.5.6", "GameType": "tbc", "Family": "Classic", "TocSuffix": "TBC", "ApiBranch": "classic_anniversary"},
-    "classic_era": {"Interface": 11509, "Version": "1.15.9", "GameType": "vanilla", "Family": "Classic", "TocSuffix": "Vanilla", "ApiBranch": "classic_era"},
 }
 
 _CANONICAL_NS = (
@@ -162,8 +157,7 @@ def interface_from_version(version):
 
 def flavor_for_interface(interface: int):
     for name, info in KNOWN_FLAVORS.items():
-        known = info["Interface"]
-        if known // 100 == int(interface) // 100 or (name == "retail" and interface >= 110000):
+        if info["Interface"] // 100 == int(interface) // 100:
             return name
     return None
 
@@ -250,18 +244,21 @@ def wow_install(root=None):
     # on Windows (which is creation-unspecified). Keep insertion as listdir gives it.
     for name in names:
         full = os.path.join(root, name)
-        if not os.path.isdir(full) or not re.match(r"^_.+_$", name):
+        if not os.path.isdir(full) or name.lower() != "_forever_":
             continue
         flavor_info = _read_blizzard_info(os.path.join(full, ".flavor.info"))
         product = flavor_info[0].get("Product Flavor") if flavor_info else None
         if not product:
-            guess = "wow" if name == "_retail_" else "wow" + name.rstrip("_")
-            if any(row.get("Product") == guess for row in build):
-                product = guess
+            for guess in ("wowf", "wow" + name.rstrip("_")):
+                if any(row.get("Product") == guess for row in build):
+                    product = guess
+                    break
         row = next((item for item in build if item.get("Product") == product), None)
         version = row.get("Version") if row else None
         interface = interface_from_version(version) if version else None
         flavor = flavor_for_interface(interface) if interface else None
+        if flavor != "forever":
+            continue
         clients.append(Client(
             name, flavor, product, version, interface, os.path.abspath(full),
             os.path.join(os.path.abspath(full), "Interface", "AddOns"),

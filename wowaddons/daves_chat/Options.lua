@@ -45,7 +45,5 @@ function ns:OpenOptions()
 	end
 	if ns.settingsCategory and Settings.OpenToCategory then
 		Settings.OpenToCategory(ns.settingsCategory:GetID())
-	else
-		ns.Print("options are not available on this client.")
 	end
 end

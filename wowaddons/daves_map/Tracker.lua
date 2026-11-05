@@ -12,8 +12,6 @@
 -- Blizzard's tracker (ObjectiveTrackerManager:SetModuleContainer)? Adding to it from addon code would taint the whole
 -- tracker, and its quest item buttons are secure: they'd be blocked in combat. So our section is a plain frame on
 -- UIParent that only reads where the tracker's contents end and sits below them (Place, below).
--- Warcraft Classic has QuestWatchFrame and no ObjectiveTrackerFrame, so that section is never built. Ready quests
--- stay on the watch frame there. Pulling them off would hide them.
 
 local _, ns = ...
 
@@ -96,25 +94,16 @@ local function Unwatch(q)
 end
 
 local function MoveReadyOut(ready)
-	-- Classic has nowhere else to show a quest once it leaves QuestWatchFrame.
-	if not ObjectiveTrackerFrame then return end
+	if not ObjectiveTrackerFrame then return false end
+	local moved = false
 	for _, q in ipairs(ready) do
-		if not movedOut[q] then
+		if not movedOut[q] and Watched(q) then
 			movedOut[q] = true
-			if Watched(q) then Unwatch(q) end
+			Unwatch(q)
+			moved = true
 		end
 	end
-end
-
--- Classic's watch frame holds 5 (MAX_WATCHABLE_QUESTS). Adding while it is still full fails, and shift-click
--- reads QUEST_WATCH_LIST, which AddQuestWatch does not update. Set while QuestWatch_OnLogin runs, so rebuilding
--- that list does not look like the player pinned every watched quest.
-local rebuildingWatch
-local function SyncClassicWatch()
-	rebuildingWatch = true
-	QuestWatch_OnLogin()
-	if QuestWatch_Update then QuestWatch_Update() end
-	rebuildingWatch = false
+	return moved
 end
 
 -- `unpinned`: a quest you've just unpinned, checked whether it's focused or not (its pin was what kept it here)
@@ -128,27 +117,6 @@ local function TrackZoneQuests(unpinned)
 	if not db.trackMyZone or UnitOnTaxi("player") then return end   -- on a flight the landing comes back here
 	if not next(ZoneNames()) then return end                          -- a loading screen: leave the tracker alone
 	local focused = ns.SuperTrackedQuest()
-	-- QuestWatchFrame (TBC): drop other zones first, then fill the free slots. Forever keeps the loop below.
-	if QuestWatch_OnLogin and not ObjectiveTrackerFrame then
-		local remove, add = {}, {}
-		for _, q in ipairs(all) do
-			if not isReady[q] and not db.pinned[q] and (q ~= focused or q == unpinned) then
-				local watched = Watched(q)
-				if not here[q] and watched then remove[#remove + 1] = q
-				elseif here[q] and not watched then add[#add + 1] = q end
-			end
-		end
-		for _, q in ipairs(remove) do ns.RemoveQuestWatch(q) end
-		local cap = (type(MAX_WATCHABLE_QUESTS) == "number" and MAX_WATCHABLE_QUESTS) or 5
-		for _, q in ipairs(add) do
-			local n = GetNumQuestWatches and GetNumQuestWatches() or 0
-			if n >= cap then break end
-			ourAdd[q] = true; C_Timer.After(2, function() ourAdd[q] = nil end)
-			ns.AddQuestWatch(q)
-		end
-		SyncClassicWatch()
-		return
-	end
 	for _, q in ipairs(all) do
 		-- the zone tracking ignores ready quests, pinned ones and the focused one (unless you've just unpinned it)
 		if not isReady[q] and not db.pinned[q] and (q ~= focused or q == unpinned) then
@@ -222,34 +190,68 @@ end
 
 local PIN_MODULES = { "QuestObjectiveTracker", "CampaignQuestObjectiveTracker" }
 local UpdateQuestClicks   -- the tracker's quest clicks (below, with the events); the pins' watcher runs it
+
+-- Blizzard's pooled tracker blocks, POI buttons, headers and objective lines do not reset their alpha on acquire
+-- (GetBlock / SetHeader / GetPOIButton / GetLine), so if an AddAnim (setToFinalAlpha="true", fromAlpha="0") is
+-- stopped early when a newly-watched quest is untracked, or a TurnInAnim finishes after a pooled block is reused,
+-- the reused block or its children stay at alpha 0 while occupying vertical space in the tracker. Pure C++ widget
+-- SetAlpha/SetScale calls restore visibility without writing any Lua fields on Blizzard's frames (no taint).
+local function RestoreBlockAlpha(block)
+	if (block.AddAnim and block.AddAnim:IsPlaying())
+		or (block.TurnInAnim and block.TurnInAnim:IsPlaying())
+		or (block.RemoveAnim and block.RemoveAnim:IsPlaying()) then
+		return
+	end
+	if block:GetAlpha() < 1 then block:SetAlpha(1) end
+	if block.HeaderText and block.HeaderText:GetAlpha() < 1 then block.HeaderText:SetAlpha(1) end
+	if block.HeaderGlow and block.HeaderGlow:GetAlpha() > 0 then block.HeaderGlow:SetAlpha(0) end
+	local poi = block.poiButton
+	if poi and not (poi.AddAnim and poi.AddAnim:IsPlaying()) then
+		if poi:GetAlpha() < 1 then poi:SetAlpha(1) end
+		if poi:GetScale() ~= 1 then poi:SetScale(1) end
+	end
+	if block.usedLines then
+		for _, line in pairs(block.usedLines) do
+			if not (line.FadeInAnim and line.FadeInAnim:IsPlaying())
+				and not (line.FadeOutAnim and line.FadeOutAnim:IsPlaying())
+				and line:GetAlpha() < 1 then
+				line:SetAlpha(1)
+			end
+		end
+	end
+end
+
 local function UpdatePins()
 	local n = 0
 	local tracker = ObjectiveTrackerFrame
-	if ns.db.trackMyZone and tracker and tracker:IsVisible() then
+	if tracker and tracker:IsVisible() then
 		local scale = tracker:GetEffectiveScale() / UIParent:GetEffectiveScale()
 		for _, name in ipairs(PIN_MODULES) do
 			local m = _G[name]
 			if m and m.usedBlocks and m:IsVisible() then
 				for _, blocks in pairs(m.usedBlocks) do
 					for id, block in pairs(blocks) do
-						if type(id) == "number" and block:IsVisible() and not ns.QuestComplete(id) then
-							n = n + 1
-							local b = PinButton(n)
-							-- just left of the quest's map icon (its POI button sits left of the title:
-							-- ObjectiveTrackerQuestPOIBlockMixin:AddPOIButton); left of the title when it has none
-							local poi = block.poiButton
-							local anchor = (poi and poi:IsShown()) and poi or (block.HeaderText or block)
-							if b.block ~= block or b.questID ~= id or b.anchor ~= anchor then
-								b.block, b.questID, b.anchor = block, id, anchor
-								b:SetFrameStrata(tracker:GetFrameStrata())
-								b:SetFrameLevel(block:GetFrameLevel() + 10)
-								b:ClearAllPoints()
-								if anchor == poi then b:SetPoint("RIGHT", poi, "LEFT", -1, 0)
-								else b:SetPoint("RIGHT", anchor, "TOPLEFT", -6, -7) end
+						if type(id) == "number" and block:IsVisible() and Watched(id) and not IsReady(id) and not block.cached then
+							RestoreBlockAlpha(block)
+							if ns.db.trackMyZone then
+								n = n + 1
+								local b = PinButton(n)
+								-- just left of the quest's map icon (its POI button sits left of the title:
+								-- ObjectiveTrackerQuestPOIBlockMixin:AddPOIButton); left of the title when it has none
+								local poi = block.poiButton
+								local anchor = (poi and poi:IsShown()) and poi or (block.HeaderText or block)
+								if b.block ~= block or b.questID ~= id or b.anchor ~= anchor then
+									b.block, b.questID, b.anchor = block, id, anchor
+									b:SetFrameStrata(tracker:GetFrameStrata())
+									b:SetFrameLevel(block:GetFrameLevel() + 10)
+									b:ClearAllPoints()
+									if anchor == poi then b:SetPoint("RIGHT", poi, "LEFT", -1, 0)
+									else b:SetPoint("RIGHT", anchor, "TOPLEFT", -6, -7) end
+								end
+								b:SetScale(scale)
+								PaintPin(b)
+								b:Show()
 							end
-							b:SetScale(scale)
-							PaintPin(b)
-							b:Show()
 						end
 					end
 				end
@@ -529,19 +531,33 @@ events.PLAYER_ENTERING_WORLD = function()
 	Queue(true)
 end
 events.PLAYER_CONTROL_GAINED = function() Queue(true) end
--- Forever's payload is the quest id. Classic's is the log index, then the quest id (QuestLogDocumentation, QuestAccepted).
-events.QUEST_ACCEPTED = function(_, questIndex, questID)
-	local q = questID or questIndex
-	if q then accepted[q] = true; C_Timer.After(2, function() accepted[q] = nil end) end   -- the game may auto-track it
-	Queue(true)
+-- QUEST_ACCEPTED payload is questID (QuestLogDocumentation, QuestAccepted).
+events.QUEST_ACCEPTED = function(_, questID)
+	if questID then
+		-- ObjectiveTrackerFrame's QUEST_ACCEPTED handler runs before ours and calls C_QuestLog.AddQuestWatch
+		-- synchronously, so QUEST_WATCH_LIST_CHANGED(questID, true) may already have set pinned[questID].
+		if not ourAdd[questID] then ns.db.pinned[questID] = nil end
+		accepted[questID] = true
+		C_Timer.After(2, function() accepted[questID] = nil end)
+		if IsReady(questID) and MoveReadyOut({ questID }) then ns.UpdateReady() end
+	end
+	Queue(true, .3)
 end
 events.QUEST_TURNED_IN = function() Queue(false, .3) end
-events.QUEST_REMOVED = function(_, q) if q then ns.db.pinned[q] = nil end; Queue(false, .3) end
+events.QUEST_REMOVED = function(_, q)
+	if q then
+		ns.db.pinned[q] = nil
+		movedOut[q] = nil
+		accepted[q] = nil
+		ourAdd[q] = nil
+	end
+	Queue(false, .3)
+end
 -- A quest tracked or untracked. Untracked (by you, or moved to the ready section): no longer pinned. Tracked by you
 -- (the quest log, its shift-click, the map): pinned, so the zone tracking keeps it. Not when the zone tracking tracked
 -- it, when the game did on accepting it (autoQuestWatch), or when it's ready to turn in (those aren't pinnable).
 events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
-	if rebuildingWatch or not q then return end
+	if not q then return end
 	if added == false and keepFocus[q] then   -- (Unwatch: focused again, after Blizzard's handler for this has let it go)
 		C_Timer.After(0, function()
 			keepFocus[q] = nil   -- (only now: Layer.lua keeps the click's focus through the moment it's 0)
@@ -556,7 +572,11 @@ events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
 	if accepted[q] then accepted[q] = nil return end
 	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
 end
-events.QUEST_LOG_UPDATE = function() Queue(false, .3) end   -- an objective finished: the quest may be ready now
+events.QUEST_LOG_UPDATE = function()   -- an objective finished: the quest may be ready now
+	local _, _, ready = LogQuests()
+	if MoveReadyOut(ready) then ns.UpdateReady() end
+	Queue(false, .3)
+end
 events.ADDON_LOADED = function(_, name)
 	if name == "Blizzard_ObjectiveTracker" then Queue(false, .3) end
 end

@@ -45,7 +45,6 @@ def infer_flavors(addon_dir):
     folder = os.path.basename(addon_dir)
     found = []
     suffix_to_flavor = {info["TocSuffix"].lower(): name for name, info in wowkit.KNOWN_FLAVORS.items()}
-    suffix_to_flavor["standard"] = "retail"
     for name in sorted(os.listdir(addon_dir)):
         if not name.lower().endswith(".toc"):
             continue

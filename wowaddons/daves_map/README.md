@@ -2,7 +2,7 @@
 
 Map Genie's WoW Forever map, the points of interest, travel, quests and treasure, drawn as a layer of its own on Blizzard's world map. A search and filter panel sits beside it, modelled on Map Genie's sidebar, and quests are linked into chains.
 
-Targets: Forever, Classic Era, Anniversary (`## Interface: 16001, 11509, 20506`).
+Targets: WoW: Forever (`## Interface: 16001`).
 
 ## Use
 
@@ -84,7 +84,7 @@ The pins are plain textures on a frame of ours on the map canvas. One small butt
 
 | File | Purpose |
 | --- | --- |
-| `Core.lua` | Startup, saved settings (`daves_mapDB`, `daves_mapCharDB`), Classic shims, the slash command |
+| `Core.lua` | Startup, saved settings (`daves_mapDB`, `daves_mapCharDB`), quest-log/super-tracking helpers, the slash command |
 | `../daves_map_data/` | Generated, not in git: the data addon (`Data.lua`: groups, categories, pins in columns, links, as the global `DAVES_MAP_DATA`) |
 | `Calibrate.lua` | Map Genie pixels to game map positions, using the flight points |
 | `Layer.lua` | The pins, link lines, hover, click, quest focus filtering and tooltip on the world map |

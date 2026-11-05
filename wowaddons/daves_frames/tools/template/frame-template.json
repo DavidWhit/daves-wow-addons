@@ -24,6 +24,18 @@
       0,
       0.585938
     ],
+    "extTop": [
+      0.296875,
+      0.863281,
+      0.59375,
+      0.730469
+    ],
+    "extBot": [
+      0.296875,
+      0.863281,
+      0.738281,
+      0.835938
+    ],
     "strip": [
       0,
       0.292969,
@@ -114,6 +126,22 @@
       0,
       0.585938
     ],
+    "extL": 222,
+    "extR": 802,
+    "extTopT": -70,
+    "extBotB": 350,
+    "extTop": [
+      0.296875,
+      0.863281,
+      0.59375,
+      0.730469
+    ],
+    "extBot": [
+      0.296875,
+      0.863281,
+      0.738281,
+      0.835938
+    ],
     "strip": [
       0,
       0.292969,
@@ -129,8 +157,110 @@
     "band": 16,
     "d": 60
   },
+  "extended": {
+    "guide": "guides/frame-template-extended-ai.png",
+    "topCircle": {
+      "cx": 512,
+      "cy": 20,
+      "dy": -116,
+      "r": 37,
+      "d": 74,
+      "colour": "#FF8000"
+    },
+    "redBox": {
+      "l": 222,
+      "t": -70,
+      "r": 802,
+      "b": 350,
+      "w": 580,
+      "h": 420,
+      "imageL": 444,
+      "imageR": 1604,
+      "imageT": 136,
+      "imageB": 976,
+      "imageW": 1160,
+      "imageH": 840,
+      "colour": "#FF0000"
+    },
+    "plate": {
+      "w": 1024,
+      "h": 420,
+      "topPad": 70,
+      "botPad": 50,
+      "imageW": 2048,
+      "imageH": 840
+    },
+    "atlas": {
+      "extX": 608,
+      "extW": 1160,
+      "topY": 608,
+      "topH": 140,
+      "botY": 756,
+      "botH": 100,
+      "extTop": [
+        0.296875,
+        0.863281,
+        0.59375,
+        0.730469
+      ],
+      "extBot": [
+        0.296875,
+        0.863281,
+        0.738281,
+        0.835938
+      ]
+    },
+    "crestRedBox": {
+      "l": 354,
+      "t": -70,
+      "r": 670,
+      "b": 81,
+      "w": 316,
+      "h": 151,
+      "imageL": 708,
+      "imageR": 1340,
+      "imageT": 136,
+      "imageB": 438,
+      "imageW": 632,
+      "imageH": 302,
+      "colour": "#FF0000"
+    }
+  },
+  "layerGuides": {
+    "backdrop": {
+      "order": 1,
+      "guide": "guides/layers/layer-1-backdrop-ai.png",
+      "extendedOnly": true
+    },
+    "frame": {
+      "order": 2,
+      "guide": "guides/layers/layer-2-frame-ai.png",
+      "extendedOnly": false
+    },
+    "lip": {
+      "order": 3,
+      "guide": "guides/layers/layer-3-lip-ai.png",
+      "extendedOnly": false
+    },
+    "ring": {
+      "order": 4,
+      "guide": "guides/layers/layer-4-ring-ai.png",
+      "extendedOnly": false
+    },
+    "crest": {
+      "order": 5,
+      "guide": "guides/layers/layer-5-crest-ai.png",
+      "extendedOnly": true
+    },
+    "level": {
+      "order": 6,
+      "guide": "guides/layers/layer-6-level-ai.png",
+      "extendedOnly": false
+    }
+  },
   "colours": {
     "outside": "#FF00FF",
+    "extendedArt": "#FF0000",
     "game": "#0000FF",
     "lip": "#00FF00",
     "frame": "#808080",
@@ -142,11 +272,180 @@
     "lip",
     "frame",
     "ring",
-    "levelRing"
+    "levelRing",
+    "extendedArt"
   ],
   "doNotPaint": [
     "outside",
     "game",
     "levelHole"
+  ],
+  "drawableOrder": [
+    {
+      "order": 1,
+      "layerKey": "backdrop",
+      "guide": "guides/layers/layer-1-backdrop-ai.png",
+      "role": "drawable-optional-backdrop",
+      "name": "Red (#FF0000) upper background intricate-art box above bar & outside portrait/crest rings (behind everything; unfilled keys to transparent)",
+      "hex": "#FF0000",
+      "layoutBox": {
+        "l": 222,
+        "t": -70,
+        "r": 802,
+        "b": 81,
+        "w": 580,
+        "h": 151
+      },
+      "imageBox": {
+        "l": 444,
+        "t": 136,
+        "r": 1604,
+        "b": 438,
+        "w": 1160,
+        "h": 302
+      },
+      "safeMarginPx": {
+        "layout": 10,
+        "image": 20
+      },
+      "clearances": {
+        "topCenterAboveTopCircle": {
+          "layoutH": 53,
+          "imageH": 106,
+          "safeLayoutH": 43,
+          "safeImageH": 86
+        },
+        "upperFlanksAboveBar": {
+          "layoutW": 162,
+          "layoutH": 151,
+          "imageW": 324,
+          "imageH": 302,
+          "safeImageW": 304,
+          "safeImageH": 282
+        }
+      }
+    },
+    {
+      "order": 2,
+      "layerKey": "frame",
+      "guide": "guides/layers/layer-2-frame-ai.png",
+      "role": "drawable-solid",
+      "name": "Grey (#808080) 22px outer bar armor frame (in front of Red; zero vertical step-out past plateT..plateB)",
+      "hex": "#808080",
+      "layoutBox": {
+        "l": 8,
+        "t": 81,
+        "r": 1016,
+        "b": 191,
+        "band": 22
+      },
+      "imageBox": {
+        "l": 16,
+        "t": 438,
+        "r": 2032,
+        "b": 658,
+        "band": 44
+      }
+    },
+    {
+      "order": 3,
+      "layerKey": "lip",
+      "guide": "guides/layers/layer-3-lip-ai.png",
+      "role": "drawable-solid",
+      "name": "Green (#00FF00) 5px inner bar lip (in front of Grey; frames off-limits Blue bar holes)",
+      "hex": "#00FF00",
+      "layoutBox": {
+        "l": 30,
+        "t": 103,
+        "r": 994,
+        "b": 169,
+        "band": 5
+      },
+      "imageBox": {
+        "l": 60,
+        "t": 482,
+        "r": 1988,
+        "b": 614,
+        "band": 10
+      }
+    },
+    {
+      "order": 4,
+      "layerKey": "ring",
+      "guide": "guides/layers/layer-4-ring-ai.png",
+      "role": "drawable-solid",
+      "name": "Orange (#FF8000) central portrait ring (in front of bars & Red; r=105..128 layout / 210..256 image px)",
+      "hex": "#FF8000",
+      "layoutCircle": {
+        "cx": 512,
+        "cy": 136,
+        "rIn": 105,
+        "rOut": 128,
+        "band": 23
+      },
+      "imageCircle": {
+        "cx": 1024,
+        "cy": 548,
+        "rIn": 210,
+        "rOut": 256,
+        "band": 46
+      }
+    },
+    {
+      "order": 5,
+      "layerKey": "crest",
+      "guide": "guides/layers/layer-5-crest-ai.png",
+      "role": "drawable-crest",
+      "name": "Orange (#FF8000) top circular crest medallion + focused Red horn/crown headroom (blends with portrait ring; overlays portrait y=31..57 layout / y=338..390 image px)",
+      "hex": "#FF8000",
+      "layoutCircle": {
+        "cx": 512,
+        "cy": 20,
+        "r": 37,
+        "t": -17,
+        "b": 57
+      },
+      "imageCircle": {
+        "cx": 1024,
+        "cy": 316,
+        "r": 74,
+        "t": 242,
+        "b": 390
+      },
+      "crestRedLayoutBox": {
+        "l": 354,
+        "t": -70,
+        "r": 670,
+        "b": 81
+      },
+      "crestRedImageBox": {
+        "l": 708,
+        "t": 136,
+        "r": 1340,
+        "b": 438
+      }
+    },
+    {
+      "order": 6,
+      "layerKey": "level",
+      "guide": "guides/layers/layer-6-level-ai.png",
+      "role": "drawable-solid-frontmost",
+      "name": "White (#FFFFFF) lower circular level ring (frontmost armor layer on top of portrait ring; r=30..46 layout / 60..92 image px)",
+      "hex": "#FFFFFF",
+      "layoutCircle": {
+        "cx": 512,
+        "cy": 252,
+        "rIn": 30,
+        "rOut": 46,
+        "band": 16
+      },
+      "imageCircle": {
+        "cx": 1024,
+        "cy": 780,
+        "rIn": 60,
+        "rOut": 92,
+        "band": 32
+      }
+    }
   ]
 }

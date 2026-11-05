@@ -1,49 +1,37 @@
 -- daves_sack / Core.lua
--- Version-proof API layer, item categorisation and saved settings.
--- Everything that differs between Forever, Classic and Retail clients is resolved
--- once here, so the UI code never has to branch on game version.
+-- API helpers, item categorisation and saved settings for WoW: Forever (16001).
 
 local ADDON, ns = ...
 
 ns.MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 
--- WoW: Forever's client identifies itself as project "Camelot" (Blizzard's
--- Forever UI source: WOW_PROJECT_CAMELOT = 18, WOW_PROJECT_ID = WOW_PROJECT_CAMELOT).
-ns.IS_FOREVER = WOW_PROJECT_CAMELOT ~= nil and WOW_PROJECT_ID == WOW_PROJECT_CAMELOT
-
 ---------------------------------------------------------------------------
--- API compatibility (feature detection, never version numbers)
+-- API helpers
 ---------------------------------------------------------------------------
 local C_Container, C_Item = C_Container, C_Item
 
-ns.GetNumSlots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
-ns.GetCooldown = (C_Container and C_Container.GetContainerItemCooldown) or GetContainerItemCooldown
-ns.SortBags    = (C_Container and C_Container.SortBags) or SortBags            -- may be nil
-ns.GetQuestInfo = C_Container and C_Container.GetContainerItemQuestInfo       -- may be nil
+ns.GetNumSlots  = C_Container.GetContainerNumSlots
+ns.GetCooldown  = C_Container.GetContainerItemCooldown
+ns.SortBags     = C_Container.SortBags
+ns.GetQuestInfo = C_Container.GetContainerItemQuestInfo
 
-local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
-local GetQualityByID     = C_Item and C_Item.GetItemQualityByID
-local GetItemInfo        = (C_Item and C_Item.GetItemInfo) or GetItemInfo
-local ModernSlotInfo     = C_Container and C_Container.GetContainerItemInfo
-local LegacySlotInfo     = GetContainerItemInfo
+local GetItemInfoInstant = C_Item.GetItemInfoInstant
+local GetQualityByID     = C_Item.GetItemQualityByID
+local GetItemInfo        = C_Item.GetItemInfo
+local GetSlotInfo        = C_Container.GetContainerItemInfo
 local match, lower, select = string.match, string.lower, select
 
 -- Items whose full info isn't cached yet; UI re-categorises them when it arrives.
 ns.waiting = {}
 
--- Reads one bag slot into a reusable record table (no per-update garbage on
--- legacy clients). Returns true if the item identity changed, i.e. the slot needs
--- re-categorising / re-layout rather than just a visual refresh.
+-- Reads one bag slot into a reusable record table. Returns true if the item
+-- identity changed, i.e. the slot needs re-categorising / re-layout rather than
+-- just a visual refresh.
 function ns.ReadSlot(bag, slot, rec)
 	local tex, count, locked, quality, link, id
-	if ModernSlotInfo then
-		local i = ModernSlotInfo(bag, slot)
-		if i then
-			tex, count, locked, quality, link, id = i.iconFileID, i.stackCount, i.isLocked, i.quality, i.hyperlink, i.itemID
-		end
-	else
-		local _
-		tex, count, locked, quality, _, _, link, _, _, id = LegacySlotInfo(bag, slot)
+	local i = GetSlotInfo(bag, slot)
+	if i then
+		tex, count, locked, quality, link, id = i.iconFileID, i.stackCount, i.isLocked, i.quality, i.hyperlink, i.itemID
 	end
 
 	if id and (not quality or quality < 0) then
@@ -91,7 +79,7 @@ local CLASS_TO_CAT = {
 	[12] = QUEST,
 }
 
--- Classic-era profession tools that the game files as weapons or junk.
+-- Profession tools that the game files as weapons or junk.
 local PROFESSION_TOOLS = {
 	[2901] = true,  -- Mining Pick
 	[7005] = true,  -- Skinning Knife
@@ -107,7 +95,7 @@ local PROFESSION_TOOLS = {
 local FISHING_POLE = 20  -- weapon subclass
 
 -- Reagents are split into profession groups by their trade-goods subclass
--- (Enum.ItemTradeGoodsSubclass; same numbering on Classic and Retail).
+-- (Enum.ItemTradeGoodsSubclass).
 --
 -- Primary professions always win over secondary ones (Cooking, First Aid,
 -- Fishing): linen is Tailoring, not First Aid; a fish Alchemy turns into oil is
@@ -167,7 +155,7 @@ local function ReagentGroup(rec)
 	return OTHER_GROUP
 end
 
--- Consumables by Enum.ItemConsumableSubclass (same numbering everywhere).
+-- Consumables by Enum.ItemConsumableSubclass.
 local CONSUMABLE_TO_GROUP = {
 	[1] = C_ALCHEMY, [2] = C_ALCHEMY, [3] = C_ALCHEMY,  -- potions, elixirs, flasks & phials
 	[5] = C_FOOD, [7] = C_FIRSTAID, [4] = C_SCROLL, [6] = C_ENHANCE,   -- 7 = bandages
@@ -180,10 +168,10 @@ local FIRST_AID_ITEMS = {
 	[19440] = true,   -- Powerful Anti-Venom
 }
 local FIRST_AID_WORDS = { "bandage", "anti-venom", "antivenom" }
--- Very old item data files lots of consumables as plain "Consumable"
+-- Older item data files many consumables as plain "Consumable"
 -- (subclass 0); for those, fall back to the item's name / use-effect.
 local ALCHEMY_WORDS = { "potion", "elixir", "flask", "phial", "draught", "philter" }
-local GetItemSpell = (C_Item and C_Item.GetItemSpell) or GetItemSpell
+local GetItemSpell = C_Item.GetItemSpell
 local FOOD_SPELLS = { Food = true, Drink = true, ["Food & Drink"] = true, Refreshment = true }
 
 local function ConsumableGroup(rec)
@@ -206,8 +194,6 @@ end
 -- WoW: Forever camping. Its item data has no camping item type (checked in
 -- Blizzard's Forever UI source, 1.60.1), so camping gear is recognised by item
 -- ID (campfire materials) and by name: camp objects, blueprints, sleeping bags.
--- Only on Forever (elsewhere "Blueprint:" etc. mean other things), and the
--- names only match English clients.
 local CAMPING_ITEMS = { [4470] = true, [4471] = true }   -- Simple Wood, Flint and Tinder
 local CAMPING_WORDS = {
 	"%f[%a]camps?%f[%A]", "%f[%a]camping", "campfire", "sleeping bag", "blueprint",
@@ -217,7 +203,6 @@ local CAMPING_WORDS = {
 }
 local find = string.find
 local function IsCamping(rec)
-	if not ns.IS_FOREVER then return false end
 	if CAMPING_ITEMS[rec.id] then return true end
 	local c = rec.classID
 	if c == 2 or c == 4 or c == 12 then return false end   -- never weapons, armor or quest items
@@ -229,8 +214,7 @@ local function IsCamping(rec)
 	return false
 end
 
--- The reagent bag slot (bag 5 on the modern client: Enum.BagIndex.ReagentBag,
--- checked in Blizzard's Forever source). nil on clients without one (Classic).
+-- The reagent bag slot (bag 5 on Forever: Enum.BagIndex.ReagentBag).
 local REAGENT_BAGS = NUM_REAGENTBAG_SLOTS or 0
 ns.REAGENT_BAG = REAGENT_BAGS > 0 and ((Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag) or (NUM_BAG_SLOTS or 4) + 1) or nil
 
@@ -244,7 +228,7 @@ ns.IsReagentBag = IsReagentBag
 -- quivers, herb bags and the reagent bag: the item's family bits must overlap
 -- the bag's (C_Item.GetItemFamily / C_Container.GetContainerNumFreeSlots, both
 -- documented on Forever). A plain bag (family 0) takes anything.
-local GetItemFamily = (C_Item and C_Item.GetItemFamily) or GetItemFamily
+local GetItemFamily = C_Item.GetItemFamily
 local band = bit and bit.band
 function ns.FitsBagFamily(itemID, bagFamily)
 	if (bagFamily or 0) == 0 then return true end
@@ -288,7 +272,7 @@ function ns.BuildBagList(t)
 	for i = #t, 1, -1 do t[i] = nil end
 	local bags = NUM_BAG_SLOTS or 4
 	for i = 0, bags do t[#t + 1] = i end
-	for i = 1, (NUM_REAGENTBAG_SLOTS or 0) do t[#t + 1] = bags + i end   -- retail reagent bag
+	for i = 1, (NUM_REAGENTBAG_SLOTS or 0) do t[#t + 1] = bags + i end   -- reagent bag
 	if KEYRING_CONTAINER and HasKey and HasKey() then t[#t + 1] = KEYRING_CONTAINER end
 	return t
 end
@@ -308,8 +292,7 @@ local DEFAULTS = {
 	backgroundStyle = "dark",                        -- which Blizzard background shows at that darkness (UI.lua BACKGROUND_STYLES)
 }
 
-local GetAddOnMetadata = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
-ns.VERSION = GetAddOnMetadata(ADDON, "Version") or "dev"
+ns.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata(ADDON, "Version")) or "dev"
 
 local loader = CreateFrame("Frame")
 loader:RegisterEvent("ADDON_LOADED")

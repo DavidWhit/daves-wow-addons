@@ -6,25 +6,60 @@
 
 local _, ns = ...
 
--- Pinned to the top edge by default: the top of the whole frame on the screen's edge.
-local DEFAULT_POS = { point = "TOP", relPoint = "TOP", x = 0, y = 0 }
-
-local function ApplyPosition(frame)
-	local pos = ns.db.pos or DEFAULT_POS
+-- Pinned to the top edge by default: the top of the extended elite/boss frame (L.extTopT = -70
+-- layout px above the 1024x300 box) sits on the screen's top edge at the user's current scale,
+-- and every target shares this anchor so the target frame never shifts up and down when changing targets.
+function ns:ApplyPosition()
+	local frame = ns.frame
+	if not frame then return end
+	local L = ns.L
+	local s = ns.FrameScale()
+	local pos = ns.db.pos
+	if pos and pos.point == "TOP" and pos.relPoint == "TOP" and pos.x == 0 and (pos.y == 0 or pos.y == L.extTopT) then
+		pos = nil
+		ns.db.pos = nil
+	end
+	if not pos then
+		frame:ClearAllPoints()
+		frame:SetPoint("TOP", UIParent, "TOP", 0, L.extTopT)
+		return
+	end
+	if not pos.ui then
+		pos.x = pos.x * s
+		pos.y = pos.y * s
+		pos.ui = true
+	end
+	local x, y = pos.x, pos.y
+	local W, H = UIParent:GetWidth(), UIParent:GetHeight()
+	if W and H and W > 0 and H > 0 and pos.point == "CENTER" and pos.relPoint == "BOTTOMLEFT" then
+		local halfW = L.w * 0.5 * s
+		local minY = (L.h * 0.5 + (L.extBotB - L.h)) * s
+		local maxY = H - (L.h * 0.5 - L.extTopT) * s
+		if W > 2 * halfW then x = math.max(halfW, math.min(W - halfW, x)) end
+		if maxY > minY then y = math.max(minY, math.min(maxY, y)) end
+	end
 	frame:ClearAllPoints()
-	frame:SetPoint(pos.point, UIParent, pos.relPoint, pos.x, pos.y)
+	frame:SetPoint(pos.point, UIParent, pos.relPoint, x / s, y / s)
+end
+
+local function SavePosition(frame)
+	local cx, cy = frame:GetCenter()
+	if not cx then return end
+	local s = frame:GetScale()
+	ns.db.pos = { point = "CENTER", relPoint = "BOTTOMLEFT", x = cx * s, y = cy * s, ui = true }
+	ns:ApplyPosition()
 end
 
 
 function ns:InitEditMode(frame)
-	ApplyPosition(frame)
+	ns:ApplyPosition()
 
 	local d = ns.EditMode.CreateDialog("daves_framesEditDialog", "Dave's Frames")
 	d:AddSlider({ label = "Scale", min = ns.MinSize(), max = 1, step = 0.05, format = "%.2f",
 		get = function() return ns.db.size end,
 		set = function(v)
 			local wasAllowed = ns.StackedAllowed()
-			ns.db.size = v; frame:SetScale(ns.FrameScale())
+			ns.db.size = v; frame:SetScale(ns.FrameScale()); ns:ApplyPosition()
 			if ns.StackedAllowed() ~= wasAllowed then
 				ns:Apply()   -- crossed 0.85: below it Stacked switches to Overlay (Apply refreshes the dialog)
 			else
@@ -79,36 +114,33 @@ function ns:InitEditMode(frame)
 		get = function() return ns.db.swing end,
 		set = function(v) ns.db.swing = v end })
 
-	-- Preview: cycle every plate in turn while Edit Mode is open, or hold on one.
-	local previews = { { key = "all", text = "All" } }
+	-- Preview: show the unit's own plate ("Auto"), or pick any plate in the dialog to inspect it.
+	local previews = { { key = "auto", text = "Auto" } }
 	for _, k in ipairs(ns.VARIANT_ORDER) do
 		previews[#previews + 1] = { key = k, text = ns.VARIANTS[k].label }
 	end
 	d:AddButtonGrid({ label = "Preview", columns = 3,
 		buttons = previews,
 		onClick = function(key)
-			ns.editPreview = key ~= "all" and key or nil
-			ns:StepEditPreview(ns.editPreview)
+			ns.editPreview = key ~= "auto" and key or nil
+			if ns.editing then ns:ApplyArt(ns.ArtFor(ns.unit)) end
 		end,
-		isActive = function(key) return (key == "all" and not ns.editPreview) or key == ns.editPreview end })
+		isActive = function(key) return (key == "auto" and not ns.editPreview) or key == ns.editPreview end })
 
 	-- The default place, so this is also the reset (right-clicking the frame does the same).
 	d:AddButton({ text = "Pin to top edge", onClick = function()
 		ns.db.pos = nil
-		ApplyPosition(frame)
+		ns:ApplyPosition()
 	end })
 
 	ns.editDialog = d
 	ns.editMode = ns.EditMode.Attach(frame, {
 		label = "Dave's Frames",   -- on the Edit Mode outline
 		dialog = d,
-		onMoved = function(f)
-			local point, _, relPoint, x, y = f:GetPoint(1)
-			ns.db.pos = { point = point, relPoint = relPoint, x = x, y = y }
-		end,
-		onReset = function(f)
+		onMoved = SavePosition,
+		onReset = function()
 			ns.db.pos = nil
-			ApplyPosition(f)
+			ns:ApplyPosition()
 		end,
 	})
 end

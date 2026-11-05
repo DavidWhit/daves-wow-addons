@@ -14,7 +14,7 @@ For any World of Warcraft work here, use the `wow-forever-addons` plugin's skill
 | After any addon change | `wow-addon-test` skill → `scripts/Prepare-WowReview.py -Path <addon>` (validates + builds diff/API/NOTES packet; inline advisor review when `RecommendedMode: inline`, or pass packet to `wow-addon-reviewer` agent) |
 | New addon / install, link, Interface number / release | `wow-addon-new` / `wow-addon-setup` / `wow-addon-release` |
 | Refresh daves_map's Map Genie pins and quest links | `daves-map-refresh` skill (`.claude/skills/`) → `wowaddons/daves_map/tools/Update-MapData.py`; generates the companion addon `wowaddons/daves_map_data/`, never committed |
-| Paint or pack a `daves_frames` AI target-frame theme | `daves-frames-paint` skill (`.claude/skills/`) → `guides/frame-template-ai.png` (`2048×1152`, `16:9`) + `wowaddons/daves_frames/tools/Pack-FrameTemplate.py` |
+| Paint or pack a `daves_frames` AI target-frame theme | `daves-frames-paint` or `daves-frames-paint-extended` skill (`.claude/skills/`) → `guides/frame-template-ai.png`, `guides/frame-template-extended-ai.png`, or modular `Order 1..6` section stencils in `guides/layers/layer-1..6-*-ai.png` (`2048×1152`, `16:9`) + `wowaddons/daves_frames/tools/Pack-FrameTemplate.py [--extended] [--layer-dir <dir>] [--layer-* <img...>]` |
 
 When a plugin script or the local source is missing or stale, refresh it (`Update-WowApiIndex.py`, `Update-WowUiSource.py`) rather than working around it.
 

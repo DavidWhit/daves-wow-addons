@@ -45,8 +45,13 @@ end
 -- The name is 44 layout px. Scale stops at 0.65 so that stays at least 14 screen px (see ns.MinSize).
 -- Art slot: the 2x mask is 2048 x 600, the top of the 2048 x 1024 atlas (600/1024 = 0.585938).
 -- The 600 x 220 board strip still sits 8 px below it (y 608..828). The aura boards do not sample it.
+-- Extended-template overhang bands (x 222..802, y -70..0 and 300..350) sit to the right of the strip
+-- at x 608..1768, y 608..748 and y 756..856 (transparent on standard single-box atlases).
 local GEO = {
 	art = { 0, 1, 0, 0.585938 },
+	extL = 222, extR = 802, extTopT = -70, extBotB = 350,
+	extTop = { 0.296875, 0.863281, 0.59375, 0.730469 },
+	extBot = { 0.296875, 0.863281, 0.738281, 0.835938 },
 	strip = { 0, 0.292969, 0.59375, 0.808594 },
 	stripPx = { w = 600, h = 220 },
 	stripSlice = { top = 56, right = 56, bottom = 56, left = 56 },
@@ -80,15 +85,14 @@ local function Metal(r, g, b)
 	}
 end
 
--- plain: ordinary NPCs. rare: silver, same shape. elite / rareelite / boss: the same shape.
--- Class keys are UnitClass's English file token, lowercased. Forever's nine classes each have a plate.
+-- plain: ordinary NPCs. elite / rareelite (silver elite, for both "rare" and "rareelite") / boss:
+-- the same shape. Class keys are UnitClass's English file token, lowercased. Forever's nine classes each have a plate.
 ns.VARIANT_ORDER = {
-	"plain", "rare", "elite", "rareelite", "boss",
+	"plain", "elite", "rareelite", "boss",
 	"warrior", "paladin", "hunter", "rogue", "priest", "shaman", "mage", "warlock", "druid",
 }
 ns.VARIANTS = {
 	plain = Variant("plain", "Plain", "frame-plain.tga", "chain-gold.tga", GOLD),
-	rare = Variant("rare", "Rare", "frame-rare.tga", "chain-silver.tga", SILVER),
 	elite = Variant("elite", "Elite", "frame-elite.tga", "chain-gold.tga", GOLD),
 	rareelite = Variant("rareelite", "Rare Elite", "frame-rareelite.tga", "chain-silver.tga", SILVER),
 	boss = Variant("boss", "Boss", "frame-boss.tga", "chain-gold.tga", GOLD),

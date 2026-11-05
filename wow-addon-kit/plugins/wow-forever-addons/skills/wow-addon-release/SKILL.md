@@ -1,6 +1,6 @@
 ---
 name: wow-addon-release
-description: Prepare a WoW Forever addon release - bump the version, make sure the TOC Interface numbers match the live clients, validate, build a clean zip, and set up BigWigsMods/packager (.pkgmeta, GitHub Actions) for CurseForge/Wago/WoWInterface. Use when the user wants to publish, package, zip, release or update the version of a WoW addon.
+description: Prepare a WoW Forever addon release - bump the version, make sure the TOC Interface number matches the live client, validate, build a clean zip, and set up BigWigsMods/packager (.pkgmeta, GitHub Actions) for CurseForge/Wago/WoWInterface. Use when the user wants to publish, package, zip, release or update the version of a WoW addon.
 argument-hint: "[addon folder] [new version]"
 disable-model-invocation: true
 ---
@@ -13,7 +13,7 @@ Arguments: `$ARGUMENTS`.
 
 ```powershell
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowInstall.py"
-py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.py" -Path "<addon>" -Flavor forever[,retail,classic_era] -NoInfo
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.py" -Path "<addon>" -Flavor forever -NoInfo
 ```
 
 Don't release with errors. Warnings need either a fix or a stated reason. If changes since the last release haven't had a full advisor review yet, run `Prepare-WowReview.py -Path "<addon>" -Full` and complete **wow-addon-test** step 2 first.
@@ -21,7 +21,7 @@ Don't release with errors. Warnings need either a fix or a stated reason. If cha
 ## 2. Version and Interface
 
 - Bump `## Version:` in the TOC (semver, e.g. `1.4.0`). Add a changelog entry if the project keeps one.
-- `## Interface:` must include the current number for every supported flavor: 16001 for Forever, plus whatever `Find-WowInstall.py` reports for others. Keep older numbers only if those clients still exist.
+- `## Interface:` must match the current WoW: Forever Interface number (`16001`, or whatever `Find-WowInstall.py` reports).
 
 ## 3. Build a zip locally (no packager needed)
 
@@ -46,8 +46,8 @@ The packager (https://github.com/BigWigsMods/packager) builds zips from git tags
 - **Project IDs** go in the TOC (`## X-Curse-Project-ID:`, `## X-Wago-ID:`, `## X-WoWI-ID:`) or as arguments (`-p`, `-a`, `-w`).
 - **Keywords:** `@project-version@` in `## Version:`; `--@version-forever@` … `--@end-version-forever@` blocks keep code only in the Forever build.
 
-**Forever support** (checked in the packager's `release.sh`, 2026-10-03): game type `forever` (alias `camelot`), auto-detected from `## Interface: 16xxx`. `-S` generates a `<Name>_Camelot.toc`, and `-g forever` forces the flavor. A single TOC listing `16001, 120100, ...` works for multi-flavor releases.
+**Forever support** (checked in the packager's `release.sh`, 2026-10-03): game type `forever` (alias `camelot`), auto-detected from `## Interface: 16xxx`. `-S` generates a `<Name>_Camelot.toc`, and `-g forever` forces the flavor.
 
 ## 5. Report
 
-Give the zip path, version, Interface numbers shipped, and the validation result. Publishing to CurseForge/Wago is outward-facing, so let the user do it, or get explicit confirmation before pushing a tag that triggers an upload.
+Give the zip path, version, Interface number shipped, and the validation result. Publishing to CurseForge/Wago is outward-facing, so let the user do it, or get explicit confirmation before pushing a tag that triggers an upload.

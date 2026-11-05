@@ -6,13 +6,13 @@ World of Warcraft addons for **WoW: Forever** (Interface `16001`), plus the tool
 
 | Folder | What it is |
 | --- | --- |
-| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs with sloshing liquid and cursor glare (`v0.1.4`) |
-| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 20 procedural looks — 7 elements, 4 gathering & 6 crafting professions, Disenchant, First Aid, and Plain (`v0.5.3`) |
-| [`wowaddons/daves_chat`](wowaddons/daves_chat) | **Dave's Chat**: movable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with a collapsible left tab list, bordered inner chat pane, `Text direction`, and `Faint` mode (`v0.3.4`) |
-| [`wowaddons/daves_frames`](wowaddons/daves_frames) | **Dave's Frames**: custom target unit frame with central portrait ring, inward-emptying health & resource bars, hanging aura boards on chains, and 9 player class plates (`v0.2.6`) |
-| [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: Map Genie pin layer, quest chain links, search/filter sidebar, Ready-to-Turn-In & zone quest tracker, quest focus, and OpenMap seamless world map (`v0.5.3`) |
-| [`wowaddons/daves_outofmyway`](wowaddons/daves_outofmyway) | **Dave's Out Of My Way**: Edit Mode Need/Greed loot-roll mover and never-collapsed buff frame (`v0.1.4`) |
-| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories, reagent-bag routing, trash/delete button, and taint-safe secure controls (`v1.7.18`) |
+| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs with sloshing liquid and cursor glare (`v0.1.5`) |
+| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 20 procedural looks — 7 elements, 4 gathering & 6 crafting professions, Disenchant, First Aid, and Plain (`v0.5.4`) |
+| [`wowaddons/daves_chat`](wowaddons/daves_chat) | **Dave's Chat**: movable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with an auto-closing collapsible left tab list, bordered inner chat pane, `Text direction`, and frosted-glass `Faint` mode (`v0.3.8`) |
+| [`wowaddons/daves_frames`](wowaddons/daves_frames) | **Dave's Frames**: custom target unit frame with central portrait ring, inward-emptying health & resource bars, hanging aura boards on chains, and 9 player class plates (`v0.2.10`) |
+| [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: Map Genie pin layer, quest chain links, search/filter sidebar, Ready-to-Turn-In & zone quest tracker, quest focus, and OpenMap seamless world map (`v0.5.4`) |
+| [`wowaddons/daves_outofmyway`](wowaddons/daves_outofmyway) | **Dave's Out Of My Way**: Edit Mode Need/Greed loot-roll mover and never-collapsed buff frame (`v0.1.5`) |
+| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories, reagent-bag routing, trash/delete button, and taint-safe secure controls (`v1.7.19`) |
 | [`wow-addon-kit`](wow-addon-kit) | Plugin (`wow-forever-addons`) and Python CLI toolkit for scaffolding, static API/secret/taint validation, review packets, in-game error/taint inspection, and linking |
 
 ## The addons
@@ -48,7 +48,7 @@ In Edit Mode, click an orb for its own settings: liquid and accent colours, numb
 
 ### Dave's Chat (`daves_chat`)
 
-Movable, resizable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with a header eye button to show or hide an auto-fitted scrollable left-side tab list, a bordered inner chat frame with a pixel-aligned input box, selectable `Text direction` (`Bottom` stock default or `Top` newest-first), `Faint` mode (chrome fades out until hovered), Default Window tab selection, and collapse-to-bubble icon.
+Movable, resizable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with a header eye button to show or hide an auto-fitted scrollable left-side tab list (which also closes automatically back to full-width chat when your mouse leaves the window), a bordered inner chat frame with a pixel-aligned input box, selectable `Text direction` (`Bottom` stock default or `Top` newest-first), `Faint` mode (chrome fades down to a translucent frosted-glass backing on the chat section only, with `Faint glass` strength slider, `Faint glass color` picker, and auto-fade to `0` when old messages fade out until a new message arrives), Default Window tab selection, and collapse-to-bubble icon.
 
 ```text
 /daveschat               open Window Settings
@@ -61,12 +61,12 @@ More in [its README](wowaddons/daves_chat/README.md) and [NOTES.md](wowaddons/da
 
 ### Dave's Frames (`daves_frames`)
 
-Custom target unit frame built around a central portrait ring with health (left) and resource (right) bars emptying inward toward the portrait, damage trail, incoming heal and shield bars, cast overlay or stacked strips, hanging aura boards on chains, and automatic unit art (`plain`, `rare`, `elite`, `rareelite`, `boss`, plus nine player class plates).
+Custom target unit frame built around a central portrait ring with health (left) and resource (right) bars emptying inward toward the portrait, damage trail, incoming heal and shield bars, cast overlay or stacked strips, hanging aura boards on chains, and automatic unit art (`plain`, `elite`, `rareelite` / silver elite, `boss`, plus nine player class plates).
 
 ```text
 /davesframes             options
 /davesframes test        preview the target frame on yourself outside Edit Mode
-/davesframes art warrior preview a specific plate (plain, rare, elite, rareelite, boss, or class; auto restores unit art)
+/davesframes art warrior preview a specific plate (plain, elite, rareelite, boss, or class; auto restores unit art)
 ```
 
 More in [its README](wowaddons/daves_frames/README.md) and [NOTES.md](wowaddons/daves_frames/NOTES.md).

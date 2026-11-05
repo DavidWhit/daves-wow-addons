@@ -65,8 +65,7 @@ def main(argv):
         wowkit.host(f"\n{event['Time']}  {event['Text']}")
         for stack in event["Stack"]:
             wowkit.host(f"    {stack}")
-    branch = {"forever": "forever", "retail": "live"}.get(client.Flavor, "<branch>")
-    wowkit.host(f"\nNext: open each stack file:line in data/ui-source/{branch} and find who wrote the value named after 'while reading'.")
+    wowkit.host("\nNext: open each stack file:line in data/ui-source/forever and find who wrote the value named after 'while reading'.")
     wowkit.host("If Blizzard wrote it moments earlier in the same call, the taint came in before that: check what that call path read, and which of that state the addon touches.")
     raise SystemExit(0)
 

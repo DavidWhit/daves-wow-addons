@@ -167,9 +167,8 @@ events:SetScript("OnEvent", function(_, event, a, b)
 		wipe(pending)
 	elseif event == "PLAYER_LOGIN" then
 		Hook()
-		local GetMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
 		print(("|cff33ff99WowKit Error Log|r v%s: recording Lua errors, blocked actions and warnings (session %d, %d kept)."):format(
-			GetMeta(ADDON, "Version") or "?", session or 0, db and #db.entries or 0))
+			C_AddOns.GetAddOnMetadata(ADDON, "Version") or "?", session or 0, db and #db.entries or 0))
 	elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
 		-- a = the addon blamed, b = the protected function
 		local e = Record(event == "ADDON_ACTION_BLOCKED" and "blocked" or "forbidden", Safe(a) .. " tried to call " .. Safe(b), debugstack(2))

@@ -93,7 +93,18 @@ local function HasEditModeArt()
 		and C_Texture.GetAtlasInfo(HIGHLIGHT_KIT .. "-NineSlice-Corner") ~= nil
 end
 
+local function SyncSelectionScale(sel)
+	local target = sel and sel:GetParent()
+	if not target or (target:IsProtected() and InCombatLockdown()) then return end
+	local ts, us = target:GetEffectiveScale(), UIParent:GetEffectiveScale()
+	if ts and us and ts > 0 then
+		local s = us / ts
+		if math.abs(sel:GetScale() - s) > 1e-4 then sel:SetScale(s) end
+	end
+end
+
 local function PaintSelection(sel)
+	SyncSelectionScale(sel)
 	local selected = sel.selected
 	if sel.art then
 		NineSliceUtil.ApplyLayout(sel.art, SELECTION_LAYOUT, selected and SELECTED_KIT or HIGHLIGHT_KIT)
@@ -115,6 +126,10 @@ function EM.CreateSelection(target, label)
 	local sel = CreateFrame("Frame", nil, target)
 	sel:SetAllPoints()
 	sel:SetFrameLevel(target:GetFrameLevel() + 20)
+	SyncSelectionScale(sel)
+	if target.SetScale then
+		hooksecurefunc(target, "SetScale", function() SyncSelectionScale(sel) end)
+	end
 	if HasEditModeArt() then
 		sel.art = CreateFrame("Frame", nil, sel)
 		sel.art:SetAllPoints()
@@ -140,6 +155,7 @@ function EM.CreateSelection(target, label)
 	-- Hover glow. Addons set the frame's OnEnter/OnLeave after creating this, and SetScript drops
 	-- earlier hooks, so the hooks are (re)attached whenever the overlay shows and they're missing.
 	sel:SetScript("OnShow", function()
+		SyncSelectionScale(sel)
 		if not sel.hover then return end
 		if target:GetScript("OnEnter") ~= sel.hookedEnter or not sel.hookedEnter then
 			target:HookScript("OnEnter", function() if sel:IsShown() then sel.hover:Show() end end)
@@ -741,15 +757,32 @@ function EM.Attach(frame, o)
 
 	local function DragUpdate()
 		local scale, ui = frame:GetEffectiveScale(), UIParent:GetEffectiveScale()
+		local k = scale / ui
 		local cx, cy = GetCursorPosition()
 		local x, y = (cx - frame.emGrabX) / ui, (cy - frame.emGrabY) / ui
-		if not IsShiftKeyDown() then
-			local w, h = frame:GetWidth() * scale / ui, frame:GetHeight() * scale / ui
-			local left, bottom = EM.SnapRect(frame, x - w / 2, y - h / 2, w, h)
-			x, y = left + w / 2, bottom + h / 2
+		local w, h = frame:GetWidth() * k, frame:GetHeight() * k
+		local cl, cr, ct, cb = 0, 0, 0, 0
+		if frame.GetClampRectInsets then
+			local l, r, t, b = frame:GetClampRectInsets()
+			if l and not (issecretvalue and issecretvalue(l)) then
+				cl, cr, ct, cb = l * k, r * k, t * k, b * k
+			end
 		end
+		local bw, bh = w + cr - cl, h + ct - cb
+		local left, bottom = x - w / 2 + cl, y - h / 2 + cb
+		if not IsShiftKeyDown() then
+			left, bottom = EM.SnapRect(frame, left, bottom, bw, bh)
+		end
+		if not frame.IsClampedToScreen or frame:IsClampedToScreen() then
+			local W, H = UIParent:GetWidth(), UIParent:GetHeight()
+			if W and H and W > bw and H > bh then
+				left = Clamp(left, 0, W - bw)
+				bottom = Clamp(bottom, 0, H - bh)
+			end
+		end
+		x, y = left - cl + w / 2, bottom - cb + h / 2
 		frame:ClearAllPoints()
-		frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x * ui / scale, y * ui / scale)
+		frame:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x / k, y / k)
 	end
 
 	function handle:Update()

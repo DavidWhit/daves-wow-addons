@@ -13,7 +13,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wowkit
 
-BRANCHES = ("forever", "live", "ptr", "classic", "classic_era", "classic_anniversary", "classic_titan", "beta")
+BRANCHES = ("forever",)
 
 
 def like(name, pattern):
@@ -67,13 +67,9 @@ def search_ui_source(patterns, branch, limit, all_flavors):
     if not index_tsv.is_file():
         wowkit.warn(f"No UI source index at {index_tsv}. Run Update-WowUiSource.py -Branch {branch} first.")
         raise SystemExit(1)
-    mainline = branch in ("forever", "live", "ptr", "beta")
     exclude_rx = None
     if not all_flavors:
-        exclude_rx = re.compile(
-            r"/(Classic|Vanilla|TBC|Wrath|Cata|Mists)/" if mainline else r"/(Mainline|Camelot|Standard)/",
-            re.I,
-        )
+        exclude_rx = re.compile(r"/(Classic|Vanilla|TBC|Wrath|Cata|Mists)/", re.I)
     rows = []
     with index_tsv.open("r", encoding="utf-8-sig", errors="replace") as handle:
         for idx, line in enumerate(handle):

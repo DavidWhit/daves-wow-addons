@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wowkit
 
 REPO = "Gethe/wow-ui-source"
-BRANCHES = ("forever", "live", "ptr", "classic", "classic_era", "classic_anniversary", "classic_titan", "beta")
+BRANCHES = ("forever",)
 FUNC_RX = re.compile(r"^\s*function\s+([A-Za-z_][\w.]*)([:.])?(\w+)?\s*\(")
 XML_RX = re.compile(r'<(\w+)\s[^>]*?\bname="([^"$]+)"[^>]*>')
 

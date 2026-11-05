@@ -303,9 +303,23 @@ local function SelectTabFrame(frame)
 	end
 end
 
+function ns.IsTabMenuOpen()
+	if not (ns.openTabMenu and Menu and Menu.GetManager) then return false end
+	local mgr = Menu.GetManager()
+	if not (mgr and mgr.GetOpenMenu) then
+		ns.openTabMenu = nil
+		return false
+	end
+	if mgr:GetOpenMenu() == ns.openTabMenu then
+		return true
+	end
+	ns.openTabMenu = nil
+	return false
+end
+
 local function OpenTabContextMenu(owner, frame)
 	if not (frame and MenuUtil and MenuUtil.CreateContextMenu) then return end
-	MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
+	ns.openTabMenu = MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
 		if rootDescription.SetTag then
 			rootDescription:SetTag("MENU_DAVES_CHAT_TAB")
 		end
@@ -430,6 +444,7 @@ local function EnsureTabList(column)
 	local function StopThumbDrag()
 		if not dragger:IsShown() then return end
 		dragger:Hide()
+		column.isThumbDragging = nil
 		dragState.startY = nil
 	end
 	dragger:SetScript("OnUpdate", function()
@@ -448,6 +463,7 @@ local function EnsureTabList(column)
 		local _, cy = GetCursorPosition()
 		dragState.startY = cy / sc
 		dragState.startOffset = ns.tabScrollOffset or 0
+		column.isThumbDragging = true
 		dragger:Show()
 	end)
 	thumb:SetScript("OnMouseUp", StopThumbDrag)

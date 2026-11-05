@@ -1,10 +1,8 @@
 #!/usr/bin/env bash
 # link-wow-addons.sh - pure-bash macOS twin of Link-WowAddons.py for Macs without Python 3.
 #
-# Symlinks every addon folder (one holding <Folder>.toc or <Folder>_<Flavor>.toc) into
-# <client>/Interface/AddOns of every client folder (_retail_, _forever_, ...) under the
-# WoW root. Run it after cloning or pulling. Unlike Link-WowAddons.py it does not read the
-# TOC's Interface lines: every addon goes into every client.
+# Symlinks every addon folder (one holding <Folder>.toc or <Folder>_Camelot.toc) into
+# _forever_/Interface/AddOns under the WoW root. Run it after cloning or pulling.
 #
 #   - a symlink to this addon's folder is left alone;
 #   - a symlink pointing anywhere else is re-pointed;
@@ -119,7 +117,7 @@ row() {
 }
 
 found_client=0
-for client in "$wow_root"/_*_/; do
+for client in "$wow_root"/_forever_/; do
 	[ -d "$client" ] || continue
 	found_client=1
 	client="${client%/}"
@@ -184,7 +182,7 @@ for client in "$wow_root"/_*_/; do
 done
 
 if [ "$found_client" -eq 0 ]; then
-	echo "No client folders (_retail_, _forever_, ...) under $wow_root." >&2
+	echo "No WoW: Forever client folder (_forever_) under $wow_root." >&2
 	exit 1
 fi
 

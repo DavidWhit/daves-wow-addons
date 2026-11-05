@@ -2,7 +2,7 @@
 
 Kit test addon: a small character panel with a secret-safe health bar.
 
-Targets: forever, retail, classic_era (`## Interface: 16001, 120100, 11509`).
+Targets: WoW: Forever (`## Interface: 16001`).
 
 ## Use
 
@@ -13,8 +13,8 @@ Targets: forever, retail, classic_era (`## Interface: 16001, 120100, 11509`).
 
 | Task | Command |
 | --- | --- |
-| Check the addon | `Test-WowAddon.py -Path . -Flavor forever,retail,classic_era` |
-| Link into the game | `Deploy-WowAddon.py -Path . -Flavor forever` |
+| Check the addon | `Test-WowAddon.py -Path .` |
+| Link into the game | `Deploy-WowAddon.py -Path .` |
 | Reload after editing Lua | `/reload` in game (new files or TOC changes need a full restart) |
 
 Files: `HelloForever.toc` (manifest), `Core.lua` (startup, events, slash command), `Options.lua` (Settings panel), `Panel.lua` (movable character panel).

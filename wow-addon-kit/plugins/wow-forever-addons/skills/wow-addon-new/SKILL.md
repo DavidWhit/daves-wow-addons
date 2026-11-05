@@ -1,6 +1,6 @@
 ---
 name: wow-addon-new
-description: Create a new World of Warcraft addon for WoW Forever (and optionally Retail/Classic) from a tested template - TOC with the right Interface numbers, events, SavedVariables, slash command, Settings panel, luacheck/packager/VS Code config - then validate it and link it into the game. Use when the user wants to start, scaffold, create or set up a new WoW addon.
+description: Create a new World of Warcraft addon for WoW Forever from a tested template - TOC with the right Interface number (16001), events, SavedVariables, slash command, Settings panel, luacheck/packager/VS Code config - then validate it and link it into the game. Use when the user wants to start, scaffold, create or set up a new WoW addon.
 argument-hint: "[AddonName] [what it should do]"
 ---
 
@@ -10,13 +10,12 @@ Arguments: `$ARGUMENTS` (addon name and/or what it should do; may be empty).
 
 ## 1. Settle the basics (ask only for what's missing)
 
-Take what you can from `$ARGUMENTS` and the conversation. Ask for the rest with the **AskUserQuestion** tool, not a free-text message: up to 4 questions per call, 2-4 options each, the default first and labelled "(recommended)". The user can always pick "Other" and type their own answer. Ask in dependency order: purpose before name, and name before slash command and icon. With no arguments that is two calls: purpose, flavors, where and link first, then name, slash command and icon.
+Take what you can from `$ARGUMENTS` and the conversation. Ask for the rest with the **AskUserQuestion** tool, not a free-text message: up to 4 questions per call, 2-4 options each, the default first and labelled "(recommended)". The user can always pick "Other" and type their own answer. Ask in dependency order: purpose before name, and name before slash command and icon. With no arguments that is two calls: purpose, where and link first, then name, slash command and icon.
 
 | Question | Options (first is the default) |
 | --- | --- |
 | **What it does** (only if unknown) | 3-4 common kinds, e.g. unit frames or health bars / bags and inventory / cast bar or action bar tweak / tracker or info panel |
 | **Name** | 2-3 names in the style of the addons already in the repo's `wowaddons/` (`daves_balls`, `daves_sack`: `daves_<thing>`), based on the purpose. Skip any that already exist |
-| **Flavors** | Forever only (recommended) / Forever + Retail / Forever + Retail + Classic Era |
 | **Where** | The repo's `wowaddons/` folder (recommended) / Another folder |
 | **Slash command** | `/<lowercased name>` (recommended) / a short custom one such as `/<abbreviation>` |
 | **Icon** | 2-3 stock `Interface\Icons\...` icons that fit (orbs → `Spell_Priest_ShadowOrbs`, bags → `INV_Misc_Bag_08`, maps → `INV_Misc_Map_01`) |
@@ -27,7 +26,6 @@ If the user says "use defaults" (or skips), take the first option of each and do
 
 Rules behind the answers:
 - **Name**: folder-safe (letters, digits, underscore; starts with a letter). WoW only loads a TOC whose name matches its folder.
-- **Flavors**: `forever` and `retail` share one API; `classic_era` needs feature-detected fallbacks.
 - **Where**: the repo's `wowaddons/` is the nearest one walking up from the current folder. Outside the repo, use a dev folder such as `%USERPROFILE%\Documents\WowAddons\`. Never scaffold straight into the game folder; step 4 links it in.
 - **Icon**: always settle it before scaffolding. It's the `## IconTexture` shown in the AddOns list and the minimap addon menu. Never ship the template's `INV_Misc_QuestionMark`; the validator warns about it.
 
@@ -35,7 +33,7 @@ Rules behind the answers:
 
 ```powershell
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/New-WowAddon.py" `
-  -Name <Name> -OutDir "<repo>\wowaddons, or the chosen folder>" -Flavor forever[,retail,classic_era] `
+  -Name <Name> -OutDir "<repo>\wowaddons, or the chosen folder>" -Flavor forever `
   -Notes "<one line>" -Author "<author>" -Icon <IconName> [-Slash <cmd>] [-EditMode]
 ```
 
@@ -49,8 +47,8 @@ You get:
 
 | File | Purpose |
 | --- | --- |
-| `<Name>.toc` | Interface list, Title, Notes, Version, IconTexture, SavedVariables `<Name>DB`, Addon Compartment hook |
-| `Core.lua` | `local ADDON, ns = ...` namespace, `ns:EVENT()` dispatch, defaults merged into SavedVariables on `ADDON_LOADED`, version printed on `PLAYER_LOGIN`, slash command, `ns.IS_FOREVER` |
+| `<Name>.toc` | Interface (`16001`), Title, Notes, Version, IconTexture, SavedVariables `<Name>DB`, Addon Compartment hook |
+| `Core.lua` | `local ADDON, ns = ...` namespace, `ns:EVENT()` dispatch, defaults merged into SavedVariables on `ADDON_LOADED`, version printed on `PLAYER_LOGIN`, slash command |
 | `Options.lua` | Blizzard Settings panel (checkbox and slider), `ns:OpenOptions()` |
 | `.luacheckrc`, `.pkgmeta`, `.vscode/settings.json`, `.gitignore`, `README.md` | Lint, packaging and editor config |
 
@@ -93,7 +91,7 @@ Once the feature code is written, run the **wow-addon-test** skill on the addon 
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Link-WowAddons.py" -Path "<addon folder>"
 ```
 
-This links the addon into every installed client its TOC targets (so a Forever + Retail addon lands in both): a junction in each client's `Interface\AddOns`, so later edits are live after `/reload`. A real folder of the same name is moved to `AddOns.backup` first. It also links the kit's error recorder (`devaddons/!WowKitErrors`), so the addon's in-game errors are recorded for **wow-addon-test** from the first run. For one client only, use `Deploy-WowAddon.py -Path "<addon folder>" -Flavor forever` instead (it refuses to replace a real folder without `-Force`). On a Mac, run `python3 .../scripts/Link-WowAddons.py -Path "<addon folder>"` or `bash .../scripts/link-wow-addons.sh "<addon folder>"`. If the user answered "No" to linking, skip this and tell them the command. If linking was never asked, **ask first**, since it writes into the game folder.
+This links the addon into the installed WoW: Forever client (`_forever_\Interface\AddOns`) as a junction (or symlink on macOS), so later edits are live after `/reload`. A real folder of the same name is moved to `AddOns.backup` first. It also links the kit's error recorder (`devaddons/!WowKitErrors`), so the addon's in-game errors are recorded for **wow-addon-test** from the first run. You can also use `Deploy-WowAddon.py -Path "<addon folder>" -Flavor forever` (it refuses to replace a real folder without `-Force`). On a Mac, run `python3 .../scripts/Link-WowAddons.py -Path "<addon folder>"` or `bash .../scripts/link-wow-addons.sh "<addon folder>"`. If the user answered "No" to linking, skip this and tell them the command. If linking was never asked, **ask first**, since it writes into the game folder.
 
 ## 5. Tell the user
 

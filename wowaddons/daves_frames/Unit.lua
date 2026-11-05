@@ -171,10 +171,11 @@ end
 
 -- A player uses their class plate when the class token can be read. UnitClass is secret when
 -- unit identity is restricted, and a secret can't be a table key, so that frame stays plain.
--- NPCs follow classification. A secret classification stays plain rather than guessing.
+-- NPCs follow classification ("rare" and "rareelite" share the single silver "rareelite" plate,
+-- matching Forever's TargetFrameUtils.lua ShouldUseSilverUnitFrame). A secret classification stays plain.
 function ns.ArtFor(unit)
+	if ns.editing and ns.editPreview and ns.VARIANTS[ns.editPreview] then return ns.editPreview end
 	if ns.artForce and ns.VARIANTS[ns.artForce] then return ns.artForce end
-	if ns.editing and ns.editArt and ns.VARIANTS[ns.editArt] then return ns.editArt end
 	if not unit then return "plain" end
 	local player = UnitIsPlayer(unit)
 	if Secret(player) then return "plain" end
@@ -192,9 +193,8 @@ function ns.ArtFor(unit)
 	local class = UnitClassification(unit)
 	if Secret(class) then return "plain" end
 	if class == "worldboss" then return "boss" end
-	if class == "rareelite" then return "rareelite" end
+	if class == "rareelite" or class == "rare" then return "rareelite" end
 	if class == "elite" then return "elite" end
-	if class == "rare" then return "rare" end
 	return "plain"
 end
 
@@ -240,8 +240,11 @@ end
 function ns:SetDead(dead)
 	local f = ns.frame
 	ns.isDead = dead
-	f.art:SetDesaturated(dead)
-	f.art:SetVertexColor(dead and 0.72 or 1, dead and 0.72 or 1, dead and 0.72 or 1)
+	local tint = dead and 0.72 or 1
+	for _, tex in ipairs(f.artParts) do
+		tex:SetDesaturated(dead)
+		tex:SetVertexColor(tint, tint, tint)
+	end
 	f.portrait:SetDesaturated(dead)
 	f.dead:SetShown(dead)
 	f.pnHealth:SetAlpha(dead and 0 or 1); f.pnPower:SetAlpha(dead and 0 or 1)
