@@ -175,26 +175,6 @@ function ns.ActiveChatTextAlpha()
 	return 1
 end
 
--- The wheel delta is positive when the wheel rolls up. Bottom-insert chat scrolls up on a
--- positive amount; top-insert flips that, matching ScrollUtil.InitScrollingMessageFrameWithScrollBar
--- (ScrollUtil.lua:198-200) so wheel-down scrolls down toward older messages.
-function ns.ScrollFrameByWheel(frame, delta)
-	if not frame or not delta or delta == 0 then return end
-	local amount = delta
-	if frame.GetInsertMode and frame:GetInsertMode() == TOP_INSERT then
-		amount = -amount
-	end
-	if frame.ScrollByAmount then
-		frame:ScrollByAmount(amount * 3)
-		return
-	end
-	if amount > 0 and frame.ScrollUp then
-		frame:ScrollUp(); frame:ScrollUp(); frame:ScrollUp()
-	elseif frame.ScrollDown then
-		frame:ScrollDown(); frame:ScrollDown(); frame:ScrollDown()
-	end
-end
-
 function ns.DockEditFocused()
 	local focused = false
 	ns.EachDocked(function(frame)
@@ -593,13 +573,29 @@ function ns:SyncChatChrome(mode)
 		-- empty chat space, using SetHyperlinksEnabled for links (FloatingChatFrame.xml:443).
 		if frame.EnableMouse then frame:EnableMouse(false) end
 		if frame.SetHyperlinksEnabled and not frame.overrideHyperlinksEnabled then
-			frame:SetHyperlinksEnabled((not closed) and (not frame.isUninteractable))
+			if own then
+				frame:SetHyperlinksEnabled(not closed)
+			else
+				frame:SetHyperlinksEnabled((not closed) and (not frame.isUninteractable))
+			end
+		end
+		if own and frame.FontStringContainer and frame.FontStringContainer.SetHyperlinkPropagateToParent then
+			if not frame.FontStringContainer.DoesHyperlinkPropagateToParent
+				or not frame.FontStringContainer:DoesHyperlinkPropagateToParent() then
+				frame.FontStringContainer:SetHyperlinkPropagateToParent(true)
+			end
 		end
 		if frame.EnableMouseWheel then
 			frame:EnableMouseWheel((not closed) and cvarWheel)
 		end
-		if frame.clickAnywhereButton and frame.clickAnywhereButton.EnableMouse then
-			frame.clickAnywhereButton:EnableMouse(not closed)
+		if frame.clickAnywhereButton then
+			if own then
+				SuppressFrame(frame.clickAnywhereButton)
+			else
+				if frame.clickAnywhereButton.SetAlpha then frame.clickAnywhereButton:SetAlpha(1) end
+				if frame.clickAnywhereButton.EnableMouse then frame.clickAnywhereButton:EnableMouse(true) end
+				if frame.clickAnywhereButton.UpdateState then frame.clickAnywhereButton:UpdateState() end
+			end
 		end
 
 		frame:SetAlpha((own and closed) and 0 or 1)
@@ -683,13 +679,27 @@ function ns:EnforceOwnedChrome()
 			if frame.SetHyperlinksEnabled and not frame.overrideHyperlinksEnabled then
 				frame:SetHyperlinksEnabled(false)
 			end
-			if frame.clickAnywhereButton and frame.clickAnywhereButton.EnableMouse then
-				frame.clickAnywhereButton:EnableMouse(false)
+			if frame.clickAnywhereButton then
+				SuppressFrame(frame.clickAnywhereButton)
 			end
 			SetScrollBarInteractive(frame.ScrollBar, false)
 			HideOwnedScroll(frame)
 			SyncEditBox(frame.editBox, true)
 		else
+			if frame.GetAlpha and (frame:GetAlpha() or 1) < 1 then frame:SetAlpha(1) end
+			if frame.SetHyperlinksEnabled and not frame.overrideHyperlinksEnabled then
+				if not frame.GetHyperlinksEnabled or not frame:GetHyperlinksEnabled() then
+					frame:SetHyperlinksEnabled(true)
+				end
+			end
+			if frame.FontStringContainer and frame.FontStringContainer.SetHyperlinkPropagateToParent then
+				if not frame.FontStringContainer.DoesHyperlinkPropagateToParent or not frame.FontStringContainer:DoesHyperlinkPropagateToParent() then
+					frame.FontStringContainer:SetHyperlinkPropagateToParent(true)
+				end
+			end
+			if frame.clickAnywhereButton and frame.clickAnywhereButton.IsShown and frame.clickAnywhereButton:IsShown() then
+				SuppressFrame(frame.clickAnywhereButton)
+			end
 			ShowOwnedScroll(frame)
 		end
 	end)
@@ -902,13 +912,6 @@ function ns:SeatChat()
 		if ChatFrame2 and ChatFrame2.isDocked and type(Blizzard_CombatLog_Update_QuickButtons) == "function" then
 			Blizzard_CombatLog_Update_QuickButtons()
 		end
-	end
-
-	if ns.messageWheel then
-		ns.messageWheel:ClearAllPoints()
-		ns.messageWheel:SetPoint("TOPLEFT", anchor, "TOPLEFT", boxLeft, -top)
-		ns.messageWheel:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -EDGE, BOTTOM_BOX)
-		ns.messageWheel:SetShown(not closed)
 	end
 
 	ns:SyncChatChrome(closed and "closed" or "open")

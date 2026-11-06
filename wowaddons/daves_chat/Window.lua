@@ -237,8 +237,435 @@ local function WireDragHandle(handle, mover, resetOnRightClick)
 end
 
 ---------------------------------------------------------------------------
--- Window, inner chat frame, draggable message-bubble open icon, wheel catcher, and corner grips
+-- Window, inner chat frame, draggable message-bubble open icon, and corner grips
 ---------------------------------------------------------------------------
+local HYPERLINK_TOOLTIP_TYPES = {
+	item = true,
+	enchant = true,
+	spell = true,
+	mount = true,
+	quest = true,
+	achievement = true,
+	talent = true,
+	pvptal = true,
+	glyph = true,
+	currency = true,
+	instancelock = true,
+	battlePetAbil = true,
+	garrmission = true,
+	garrfollower = true,
+	garrfollowerability = true,
+	garrtech = true,
+	azessence = true,
+	conduit = true,
+	transmogappearance = true,
+	transmogillusion = true,
+	transmogset = true,
+	keystone = true,
+	mawpower = true,
+	apower = true,
+	unit = true,
+	outfit = true,
+	dungeonScore = true,
+	housingdecor = true,
+	housingblueprint = true,
+}
+
+local PLAYER_LINK_TYPES = {
+	player = true,
+	playerCommunity = true,
+	playerGM = true,
+	BNplayer = true,
+	BNplayerCommunity = true,
+}
+
+local playerInfoCache = {}
+local LOCALIZED_CLASS_TO_FILE = {}
+if LOCALIZED_CLASS_NAMES_MALE then
+	for file, loc in pairs(LOCALIZED_CLASS_NAMES_MALE) do LOCALIZED_CLASS_TO_FILE[loc] = file end
+end
+if LOCALIZED_CLASS_NAMES_FEMALE then
+	for file, loc in pairs(LOCALIZED_CLASS_NAMES_FEMALE) do LOCALIZED_CLASS_TO_FILE[loc] = file end
+end
+
+local function IsCleanString(s)
+	return type(s) == "string" and (not issecretvalue or not issecretvalue(s)) and s ~= ""
+end
+
+local function IsCleanPositiveNumber(n)
+	return type(n) == "number" and (not issecretvalue or not issecretvalue(n)) and n > 0
+end
+
+local function ShortPlayerName(name)
+	if not IsCleanString(name) then return nil end
+	if Ambiguate then
+		local ok, short = pcall(Ambiguate, name, "short")
+		if ok and IsCleanString(short) then return short end
+	end
+	return name:match("^([^%-]+)") or name
+end
+
+local function CachePlayerInfo(name, level, raceName, className, classFile, guildName, guildRank, zone, note)
+	local short = ShortPlayerName(name)
+	if not short then return nil end
+	local key = short:lower()
+	local entry = playerInfoCache[key]
+	if not entry then
+		entry = {}
+		playerInfoCache[key] = entry
+	end
+	if IsCleanString(name) and (not entry.fullName or name:find("-", 1, true)) then entry.fullName = name end
+	if IsCleanPositiveNumber(level) then entry.level = level end
+	if IsCleanString(raceName) then entry.raceName = raceName end
+	if IsCleanString(className) then
+		entry.className = className
+		if not IsCleanString(classFile) and LOCALIZED_CLASS_TO_FILE[className] then
+			classFile = LOCALIZED_CLASS_TO_FILE[className]
+		end
+	end
+	if IsCleanString(classFile) then entry.classFile = classFile end
+	if IsCleanString(guildName) then entry.guildName = guildName end
+	if IsCleanString(guildRank) then entry.guildRank = guildRank end
+	if IsCleanString(zone) then entry.zone = zone end
+	if IsCleanString(note) then entry.note = note end
+	return entry
+end
+
+local function CacheUnitPlayerInfo(unit, targetGuid, targetKey)
+	if not (UnitExists and UnitIsPlayer) then return nil end
+	local exists = UnitExists(unit)
+	if not exists or (issecretvalue and issecretvalue(exists)) then return nil end
+	local isPlayer = UnitIsPlayer(unit)
+	if not isPlayer or (issecretvalue and issecretvalue(isPlayer)) then return nil end
+	local uName, uRealm = UnitName(unit)
+	if not IsCleanString(uName) then return nil end
+	local short = ShortPlayerName(uName)
+	local key = short and short:lower()
+	if targetGuid or targetKey then
+		local uGuid = UnitGUID and UnitGUID(unit)
+		local guidMatch = targetGuid and IsCleanString(uGuid) and uGuid == targetGuid
+		local nameMatch = targetKey and key == targetKey
+		if not guidMatch and not nameMatch then return nil end
+	end
+	local full = IsCleanString(uRealm) and (uName .. "-" .. uRealm) or uName
+	local level = UnitLevel and UnitLevel(unit)
+	local raceName = UnitRace and UnitRace(unit)
+	local className, classFile = nil, nil
+	if UnitClass then className, classFile = UnitClass(unit) end
+	local guildName, guildRank = nil, nil
+	if GetGuildInfo then guildName, guildRank = GetGuildInfo(unit) end
+	return CachePlayerInfo(full, level, raceName, className, classFile, guildName, guildRank)
+end
+
+local function CacheWhoResults()
+	if not (C_FriendList and C_FriendList.GetNumWhoResults and C_FriendList.GetWhoInfo) then return end
+	local ok, numWhos = pcall(C_FriendList.GetNumWhoResults)
+	if not ok or not IsCleanPositiveNumber(numWhos) then return end
+	for i = 1, math.min(numWhos, 50) do
+		local okInfo, info = pcall(C_FriendList.GetWhoInfo, i)
+		if okInfo and type(info) == "table" then
+			CachePlayerInfo(info.fullName, info.level, info.raceStr, info.classStr, info.filename, info.fullGuildName, nil, info.area)
+		end
+	end
+end
+
+local UNIT_TOKENS = { "player", "target", "mouseover", "focus", "party1", "party2", "party3", "party4" }
+
+local function LookupClubMember(clubID, guid, shortKey, isGuild)
+	if not (C_Club and C_Club.GetClubMembers and C_Club.GetMemberInfo) then return end
+	local ok, members = pcall(C_Club.GetClubMembers, clubID)
+	if not ok or type(members) ~= "table" then return end
+	local playerGuild = isGuild and GetGuildInfo and GetGuildInfo("player") or nil
+	if not IsCleanString(playerGuild) then playerGuild = nil end
+	for i = 1, math.min(#members, 500) do
+		local okM, m = pcall(C_Club.GetMemberInfo, clubID, members[i])
+		if okM and type(m) == "table" and IsCleanString(m.name) then
+			local mShort = ShortPlayerName(m.name)
+			local mKey = mShort and mShort:lower()
+			local mGuid = IsCleanString(m.guid) and m.guid or nil
+			if (guid and mGuid == guid) or (shortKey and mKey == shortKey) then
+				local className, classFile, raceName
+				if IsCleanPositiveNumber(m.classID) and C_CreatureInfo and C_CreatureInfo.GetClassInfo then
+					local ci = C_CreatureInfo.GetClassInfo(m.classID)
+					if type(ci) == "table" then
+						className, classFile = ci.className, ci.classFile
+					end
+				end
+				if IsCleanPositiveNumber(m.race) and C_CreatureInfo and C_CreatureInfo.GetRaceInfo then
+					local ri = C_CreatureInfo.GetRaceInfo(m.race)
+					if type(ri) == "table" then raceName = ri.raceName end
+				end
+				CachePlayerInfo(m.name, m.level, raceName, className, classFile, playerGuild, m.guildRank, m.zone, m.memberNote)
+				return
+			end
+		end
+	end
+end
+
+local function ShowPlayerHyperlinkTooltip(chatFrame, linkType, linkOptions, link, text)
+	if not (GameTooltip and GameTooltip.SetText and GameTooltip.AddLine) then return end
+	if not IsCleanString(linkOptions) then return end
+
+	local rawName, lineIDStr, clubIDStr, bnetIDStr
+	if linkType == "playerCommunity" then
+		rawName, clubIDStr = linkOptions:match("^([^:]+):?([^:]*)")
+	elseif linkType == "BNplayer" then
+		rawName, bnetIDStr, lineIDStr = linkOptions:match("^([^:]+):([^:]*):?([^:]*)")
+	elseif linkType == "BNplayerCommunity" then
+		rawName, bnetIDStr, clubIDStr = linkOptions:match("^([^:]+):([^:]*):?([^:]*)")
+	else
+		rawName, lineIDStr = linkOptions:match("^([^:]+):?([^:]*)")
+	end
+	if not IsCleanString(rawName) then return end
+
+	local shortName = ShortPlayerName(rawName) or rawName
+	local shortKey = shortName:lower()
+	local inLockdown = C_ChatInfo and C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown()
+
+	local bnetTag, bnetCharName
+	local guid
+	local bnetID = tonumber(bnetIDStr)
+	if IsCleanPositiveNumber(bnetID) and C_BattleNet and C_BattleNet.GetAccountInfoByID then
+		local ok, acct = pcall(C_BattleNet.GetAccountInfoByID, bnetID)
+		if ok and type(acct) == "table" then
+			if IsCleanString(acct.battleTag) then bnetTag = acct.battleTag end
+			local ga = acct.gameAccountInfo
+			if type(ga) == "table" then
+				if IsCleanString(ga.characterName) then
+					bnetCharName = ga.characterName
+					shortName = ShortPlayerName(ga.characterName) or shortName
+					shortKey = shortName:lower()
+				end
+				if IsCleanString(ga.playerGuid) then guid = ga.playerGuid end
+				CachePlayerInfo(ga.characterName or rawName, ga.characterLevel, ga.raceName, ga.className, nil, nil, nil, ga.areaName, acct.note)
+			end
+		end
+	end
+
+	local lineID = tonumber(lineIDStr)
+	if not guid and IsCleanPositiveNumber(lineID) and not inLockdown and C_ChatInfo and C_ChatInfo.GetChatLineSenderGUID then
+		local valid = not C_ChatInfo.IsValidChatLine or C_ChatInfo.IsValidChatLine(lineID)
+		if valid then
+			local ok, g = pcall(C_ChatInfo.GetChatLineSenderGUID, lineID)
+			if ok and IsCleanString(g) then guid = g end
+		end
+	end
+
+	if guid then
+		if GetPlayerInfoByGUID then
+			local ok, locClass, engClass, locRace, _, _, pName, pRealm = pcall(GetPlayerInfoByGUID, guid)
+			if ok then
+				local full = (IsCleanString(pName) and IsCleanString(pRealm)) and (pName .. "-" .. pRealm) or (IsCleanString(pName) and pName or rawName)
+				CachePlayerInfo(full, nil, locRace, locClass, engClass)
+			end
+		end
+		if C_BattleNet and C_BattleNet.GetGameAccountInfoByGUID then
+			local ok, ga = pcall(C_BattleNet.GetGameAccountInfoByGUID, guid)
+			if ok and type(ga) == "table" then
+				CachePlayerInfo(ga.characterName or rawName, ga.characterLevel, ga.raceName, ga.className, nil, nil, nil, ga.areaName)
+			end
+		end
+		if C_RecentAllies and C_RecentAllies.IsSystemEnabled and C_RecentAllies.IsSystemEnabled()
+			and C_RecentAllies.IsRecentAllyDataReady and C_RecentAllies.IsRecentAllyDataReady()
+			and C_RecentAllies.GetRecentAllyByGUID then
+			local ok, ally = pcall(C_RecentAllies.GetRecentAllyByGUID, guid)
+			if ok and type(ally) == "table" and type(ally.characterData) == "table" then
+				local cd = ally.characterData
+				local className, classFile, raceName
+				if IsCleanPositiveNumber(cd.classID) and C_CreatureInfo and C_CreatureInfo.GetClassInfo then
+					local ci = C_CreatureInfo.GetClassInfo(cd.classID)
+					if type(ci) == "table" then className, classFile = ci.className, ci.classFile end
+				end
+				if IsCleanPositiveNumber(cd.raceID) and C_CreatureInfo and C_CreatureInfo.GetRaceInfo then
+					local ri = C_CreatureInfo.GetRaceInfo(cd.raceID)
+					if type(ri) == "table" then raceName = ri.raceName end
+				end
+				local loc = type(ally.stateData) == "table" and ally.stateData.currentLocation or nil
+				CachePlayerInfo(cd.fullName or rawName, cd.level, raceName, className, classFile, nil, nil, loc)
+			end
+		end
+	end
+
+	for i = 1, #UNIT_TOKENS do
+		if CacheUnitPlayerInfo(UNIT_TOKENS[i], guid, shortKey) then break end
+	end
+	local entry = playerInfoCache[shortKey]
+	if not (entry and entry.level) then
+		for i = 1, 40 do
+			if CacheUnitPlayerInfo("raid" .. i, guid, shortKey) or CacheUnitPlayerInfo("nameplate" .. i, guid, shortKey) then break end
+		end
+	end
+
+	if C_FriendList and C_FriendList.GetFriendInfo then
+		local ok, fInfo = pcall(C_FriendList.GetFriendInfo, rawName)
+		if not (ok and type(fInfo) == "table") and shortName ~= rawName then
+			ok, fInfo = pcall(C_FriendList.GetFriendInfo, shortName)
+		end
+		if ok and type(fInfo) == "table" then
+			CachePlayerInfo(fInfo.name or rawName, fInfo.level, nil, fInfo.className, nil, nil, nil, fInfo.area, fInfo.notes)
+		end
+	end
+
+	entry = playerInfoCache[shortKey]
+	if not (entry and entry.level) and not inLockdown then
+		local clubID = tonumber(clubIDStr)
+		if IsCleanPositiveNumber(clubID) then
+			LookupClubMember(clubID, guid, shortKey, false)
+		end
+		entry = playerInfoCache[shortKey]
+		if not (entry and entry.level) and C_Club and C_Club.GetGuildClubId then
+			local ok, guildClubID = pcall(C_Club.GetGuildClubId)
+			if ok and IsCleanPositiveNumber(guildClubID) and guildClubID ~= clubID then
+				LookupClubMember(guildClubID, guid, shortKey, true)
+			end
+		end
+	end
+
+	entry = playerInfoCache[shortKey]
+	if not (entry and entry.level) then
+		CacheWhoResults()
+		entry = playerInfoCache[shortKey]
+	end
+
+	local title = shortName
+	if IsCleanString(text) then
+		local bracketed = text:match("%[([^%]]+)%]")
+		if IsCleanString(bracketed) then title = bracketed end
+	end
+	if bnetTag then title = bnetTag end
+
+	local r, g, b = 1, 1, 1
+	if linkType == "BNplayer" or linkType == "BNplayerCommunity" then
+		r, g, b = 0.51, 0.77, 1.0
+	elseif entry and IsCleanString(entry.classFile) and RAID_CLASS_COLORS and RAID_CLASS_COLORS[entry.classFile] then
+		local cc = RAID_CLASS_COLORS[entry.classFile]
+		r, g, b = cc.r or 1, cc.g or 1, cc.b or 1
+	end
+
+	ns.AnchorTooltip(ns.anchor or chatFrame)
+	GameTooltip:SetText(title, r, g, b)
+
+	if bnetCharName then
+		local cr, cg, cb = 0.85, 0.85, 0.85
+		if entry and IsCleanString(entry.classFile) and RAID_CLASS_COLORS and RAID_CLASS_COLORS[entry.classFile] then
+			local cc = RAID_CLASS_COLORS[entry.classFile]
+			cr, cg, cb = cc.r or cr, cc.g or cg, cc.b or cb
+		end
+		GameTooltip:AddLine(bnetCharName, cr, cg, cb)
+	end
+
+	local level = entry and entry.level
+	local raceName = entry and entry.raceName
+	local className = entry and entry.className
+	if level and raceName and className then
+		GameTooltip:AddLine(("Level %d %s %s"):format(level, raceName, className), 1, 1, 1)
+	elseif level and className then
+		GameTooltip:AddLine(("Level %d %s"):format(level, className), 1, 1, 1)
+	elseif level and raceName then
+		GameTooltip:AddLine(("Level %d %s"):format(level, raceName), 1, 1, 1)
+	elseif level then
+		GameTooltip:AddLine(("Level %d"):format(level), 1, 1, 1)
+	elseif raceName and className then
+		GameTooltip:AddLine(("%s %s"):format(raceName, className), 1, 1, 1)
+	elseif className then
+		GameTooltip:AddLine(className, 1, 1, 1)
+	end
+
+	if entry and entry.guildName then
+		if entry.guildRank then
+			GameTooltip:AddLine(("<%s> (%s)"):format(entry.guildName, entry.guildRank), 0.4, 0.85, 0.4)
+		else
+			GameTooltip:AddLine(("<%s>"):format(entry.guildName), 0.4, 0.85, 0.4)
+		end
+	elseif entry and entry.guildRank then
+		GameTooltip:AddLine(entry.guildRank, 0.4, 0.85, 0.4)
+	end
+
+	if entry and entry.zone then
+		GameTooltip:AddLine(entry.zone, 0.85, 0.85, 0.85)
+	end
+	if entry and entry.note then
+		GameTooltip:AddLine(entry.note, 1, 0.82, 0, true)
+	end
+
+	if linkType == "playerGM" then
+		GameTooltip:AddLine("Click to whisper", 0.65, 0.65, 0.65)
+	elseif linkType == "BNplayer" or linkType == "BNplayerCommunity" then
+		GameTooltip:AddLine("Click to whisper • Right-click for menu", 0.65, 0.65, 0.65)
+	elseif not level then
+		GameTooltip:AddLine("Click to whisper • Right-click for menu • Shift-click for /who (level)", 0.65, 0.65, 0.65)
+	else
+		GameTooltip:AddLine("Click to whisper • Right-click for menu • Shift-click for /who", 0.65, 0.65, 0.65)
+	end
+
+	GameTooltip:Show()
+	ns.hyperlinkTooltipShown = true
+	ns.activePlayerTooltip = { chatFrame = chatFrame, link = link, text = text }
+end
+
+local function HideHyperlinkTooltip()
+	if not ns.hyperlinkTooltipShown then return end
+	ns.hyperlinkTooltipShown = false
+	ns.activePlayerTooltip = nil
+	if GameTooltip and GameTooltip.Hide then GameTooltip:Hide() end
+	if BattlePetTooltip and BattlePetTooltip.Hide then BattlePetTooltip:Hide() end
+end
+
+local function ShowHyperlinkTooltip(chatFrame, link, text)
+	if not (ns.db and ns.db.enabled) or (ns.db.collapsed and not ns.inEditMode) then return end
+	if not chatFrame or (chatFrame ~= ChatFrame1 and not chatFrame.isDocked) then return end
+	if not IsCleanString(link) then return end
+	local linkType, linkOptions = link:match("^([^:]+):(.*)$")
+	if not linkType then return end
+
+	if PLAYER_LINK_TYPES[linkType] then
+		ShowPlayerHyperlinkTooltip(chatFrame, linkType, linkOptions, link, text)
+		return
+	end
+
+	ns.activePlayerTooltip = nil
+	if linkType == "battlepet" then
+		if IsCleanString(text) and type(BattlePetToolTip_ShowLink) == "function" then
+			ns.AnchorTooltip(ns.anchor or chatFrame)
+			local ok, shown = pcall(BattlePetToolTip_ShowLink, text)
+			if ok and shown then ns.hyperlinkTooltipShown = true end
+		end
+		return
+	end
+
+	if not HYPERLINK_TOOLTIP_TYPES[linkType] or not (GameTooltip and GameTooltip.SetHyperlink) then return end
+	ns.AnchorTooltip(ns.anchor or chatFrame)
+	local ok, shown = pcall(GameTooltip.SetHyperlink, GameTooltip, link)
+	if ok and shown ~= false then
+		GameTooltip:Show()
+		ns.hyperlinkTooltipShown = true
+	else
+		GameTooltip:Hide()
+	end
+end
+
+function ns:UPDATE_MOUSEOVER_UNIT()
+	CacheUnitPlayerInfo("mouseover")
+end
+
+function ns:PLAYER_TARGET_CHANGED()
+	CacheUnitPlayerInfo("target")
+end
+
+function ns:GROUP_ROSTER_UPDATE()
+	for i = 1, #UNIT_TOKENS do
+		CacheUnitPlayerInfo(UNIT_TOKENS[i])
+	end
+end
+
+function ns:WHO_LIST_UPDATE()
+	CacheWhoResults()
+	local active = ns.activePlayerTooltip
+	if ns.hyperlinkTooltipShown and active then
+		ShowHyperlinkTooltip(active.chatFrame, active.link, active.text)
+	end
+end
+
 local function BuildWindow(anchor)
 	local border = ns.TryTemplate("Frame", nil, anchor, "DialogBorderTranslucentTemplate") -- editmode-ui: ok
 	if border then
@@ -254,6 +681,8 @@ local function BuildWindow(anchor)
 		})
 		border:SetBackdropColor(0, 0, 0, 0.8)
 	end
+	border:EnableMouse(false)
+	if border.EnableMouseWheel then border:EnableMouseWheel(false) end
 	ns.border = border
 	if border.Bg then border.Bg:Hide() end
 
@@ -427,18 +856,6 @@ local function BuildWindow(anchor)
 	toggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	toggle:Hide()
 	ns.toggle = toggle
-
-	-- Over the inner chat frame only. Mouse stays off so links, IM click-anywhere, and 3D world clicks
-	-- pass through; EnableMouseWheel catches wheel rolls above the dialog border.
-	local wheel = CreateFrame("Frame", nil, anchor)
-	wheel:SetFrameLevel(topLevel + 6)
-	wheel:EnableMouse(false)
-	wheel:EnableMouseWheel(true)
-	wheel:SetScript("OnMouseWheel", function(_, delta)
-		ns.ScrollFrameByWheel(ns.VisibleChatFrame(), delta)
-	end)
-	wheel:Hide()
-	ns.messageWheel = wheel
 
 	-- Bottom-left and bottom-right resize grips with EditMode.SnapEdge snapping.
 	ns.grips = {}
@@ -872,7 +1289,7 @@ function ns:ApplyEnabled()
 	if ns.chatBox then ns.chatBox:SetShown(open) end
 	if ns.chatBoxFill then ns.chatBoxFill:SetShown(open) end
 	if ns.dragStrip then ns.dragStrip:SetShown(open) end
-	if ns.messageWheel then ns.messageWheel:SetShown(open) end
+	if not open then HideHyperlinkTooltip() end
 	if ns.grips then
 		for i = 1, #ns.grips do ns.grips[i]:SetShown(open) end
 	end
@@ -1026,6 +1443,11 @@ function ns:Init()
 	ns.events:RegisterEvent("CHANNEL_UI_UPDATE")
 	ns.events:RegisterEvent("CHAT_MSG_WHISPER")
 	ns.events:RegisterEvent("CHAT_MSG_BN_WHISPER")
+	ns.events:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
+	ns.events:RegisterEvent("PLAYER_TARGET_CHANGED")
+	ns.events:RegisterEvent("GROUP_ROSTER_UPDATE")
+	ns.events:RegisterEvent("WHO_LIST_UPDATE")
+	ns:GROUP_ROSTER_UPDATE()
 	-- GLOBAL_MOUSE_DOWN is Mainline/Forever; skip it where the client does not know the event.
 	local validate = C_EventUtils and C_EventUtils.IsEventValid
 	if validate then
@@ -1053,6 +1475,16 @@ function ns:Init()
 			if ns.db.collapsed then
 				ns:SetCollapsed(false)
 			end
+		end, ns)
+		-- ChatFrameMixin:OnHyperlinkEnter / OnHyperlinkLeave (ChatFrame.lua:27-33) broadcast via
+		-- EventRegistry without showing a tooltip on their own; listening here shows link tooltips on
+		-- hover without touching or tainting ChatFrame1..10 scripts.
+		EventRegistry:RegisterCallback("ChatFrame.OnHyperlinkEnter", function(_, chatFrame, link, text)
+			ShowHyperlinkTooltip(chatFrame, link, text)
+		end, ns)
+		EventRegistry:RegisterCallback("ChatFrame.OnHyperlinkLeave", function(_, chatFrame)
+			if chatFrame and chatFrame ~= ChatFrame1 and not chatFrame.isDocked then return end
+			HideHyperlinkTooltip()
 		end, ns)
 	end
 end
