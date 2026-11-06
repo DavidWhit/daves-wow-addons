@@ -15,7 +15,21 @@ function ns.QuestLogIndex(questID)
 end
 
 function ns.QuestTitle(questID)
-	return C_QuestLog.GetTitleForQuestID(questID)
+	if type(questID) ~= "number" or questID == 0 or issecretvalue(questID) then return nil end
+	local t = C_QuestLog.GetTitleForQuestID(questID)
+	if type(t) == "string" and not issecretvalue(t) and t ~= "" then
+		if ns.db and ns.db.questTitles then ns.db.questTitles[questID] = t end
+		return t
+	end
+	return ns.db and ns.db.questTitles and ns.db.questTitles[questID] or nil
+end
+
+function ns.CompletedQuestIDs()
+	return C_QuestLog.GetAllCompletedQuestIDs()
+end
+
+function ns.RequestQuestTitle(questID)
+	if C_QuestLog.RequestLoadQuestByID then C_QuestLog.RequestLoadQuestByID(questID) end
 end
 
 function ns.QuestInfo(index)
@@ -115,6 +129,7 @@ function ns:ADDON_LOADED(name)
 	end
 	if type(daves_mapDB.hidden) ~= "table" then daves_mapDB.hidden = {} end   -- [Map Genie category id] = true: off
 	if type(daves_mapDB.pinned) ~= "table" then daves_mapDB.pinned = {} end   -- [questID] = true: stays tracked across zones
+	if type(daves_mapDB.questTitles) ~= "table" then daves_mapDB.questTitles = {} end   -- [questID] = title: Forever quest IDs -> titles
 	daves_mapDB.myZoneOnly = nil   -- 0.3.3's map filter, replaced by trackMyZone in 0.3.4
 	daves_mapDB.readyCollapsed = nil   -- the ready section opens expanded every session (Tracker.lua)
 	daves_mapDB.readySection = nil     -- 0.3.4's tick: the ready section is always on now

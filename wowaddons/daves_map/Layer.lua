@@ -142,18 +142,214 @@ end
 local CLASS_BITS = { WARRIOR = 1, PALADIN = 2, HUNTER = 4, ROGUE = 8, PRIEST = 16, SHAMAN = 32, MAGE = 64, WARLOCK = 128, DRUID = 256 }
 ns.CLASS_ORDER = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
 
--- a quest's pins in the map data (where it's picked up), by quest ID, in data order; built once
-local pinsOfQuest
-local function PinsOfQuest(q)   -- (ns.DATA, not D: the tracker asks before the map layer is set up)
-	if not pinsOfQuest then
-		pinsOfQuest = {}
-		local qid = ns.DATA.qid
-		for i = 1, #qid do
-			local id = qid[i]
-			if id ~= 0 then pinsOfQuest[id] = pinsOfQuest[id] or {}; table.insert(pinsOfQuest[id], i) end
+-- Map Genie quest pins carry Classic pfQuest IDs (or 0 for Forever-custom / unmatched quests), while WoW: Forever uses
+-- its own quest IDs for custom and modified quests. Index quest pins by both qid and normalized title, and resolve
+-- completed quest IDs (C_QuestLog.GetAllCompletedQuestIDs) to titles via C_QuestLog.GetTitleForQuestID + SavedVariables.
+local pinsOfQuest, pinsByTitle, questPinsByTitle, isMultiStepTitle
+local doneQuestsByTitle, donePinByTitle, pendingTitles = {}, {}, {}
+local syncedDone = false
+
+local function NormTitle(s)
+	if type(s) ~= "string" or issecretvalue(s) or s == "" then return nil end
+	s = s:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
+	return s ~= "" and s or nil
+end
+
+local function ReachesPre(pre, target, cur, depth)
+	if depth > 4 then return false end
+	for _, p in ipairs(pre[cur] or {}) do
+		if p == target or ReachesPre(pre, target, p, depth + 1) then return true end
+	end
+	return false
+end
+
+local function BuildQuestIndices()
+	if pinsOfQuest then return end
+	pinsOfQuest, pinsByTitle, questPinsByTitle, isMultiStepTitle = {}, {}, {}, {}
+	local data = ns.DATA
+	local qid, cat, cats, title, pre, endp, lvl = data.qid, data.cat, data.cats, data.title, data.pre, data.endp, data.lvl
+	for i = 1, #qid do
+		local id = qid[i]
+		if id ~= 0 then
+			pinsOfQuest[id] = pinsOfQuest[id] or {}
+			table.insert(pinsOfQuest[id], i)
+		end
+		local icon = cats[cat[i]] and cats[cat[i]].icon
+		if icon == "quest" or icon == "repeatable" then
+			local nt = NormTitle(title[i])
+			if nt then
+				pinsByTitle[nt] = pinsByTitle[nt] or {}
+				table.insert(pinsByTitle[nt], i)
+				if icon == "quest" then
+					questPinsByTitle[nt] = questPinsByTitle[nt] or {}
+					table.insert(questPinsByTitle[nt], i)
+				end
+			end
 		end
 	end
-	return pinsOfQuest[q]
+	for nt, pins in pairs(questPinsByTitle) do
+		if #pins > 1 then
+			local pset, firstLvl, diffLvl, linked = {}, nil, false, false
+			for _, i in ipairs(pins) do
+				pset[i] = true
+				local l = lvl[i]
+				if l ~= 0 then
+					if not firstLvl then firstLvl = l elseif l ~= firstLvl then diffLvl = true end
+				end
+			end
+			for _, i in ipairs(pins) do
+				if pset[endp[i]] then linked = true; break end
+				for _, j in ipairs(pins) do
+					if i ~= j and ReachesPre(pre, j, i, 1) then linked = true; break end
+				end
+				if linked then break end
+			end
+			if linked or diffLvl or nt:find("^a donation of ") then
+				isMultiStepTitle[nt] = true
+				local rank = {}
+				for _, i in ipairs(pins) do
+					local r = 0
+					for _, j in ipairs(pins) do
+						if i ~= j and (endp[j] == i or ReachesPre(pre, j, i, 1)) then r = r + 1 end
+					end
+					rank[i] = r
+				end
+				table.sort(pins, function(a, b)
+					if a == b then return false end
+					if rank[a] ~= rank[b] then return rank[a] < rank[b] end
+					local la, lb = lvl[a] ~= 0 and lvl[a] or 999, lvl[b] ~= 0 and lvl[b] or 999
+					if la ~= lb then return la < lb end
+					local qa, qb = qid[a] ~= 0 and qid[a] or 9999999, qid[b] ~= 0 and qid[b] or 9999999
+					if qa ~= qb then return qa < qb end
+					return a < b
+				end)
+			end
+		end
+	end
+end
+
+local function RecordDoneQuestTitle(q, title)
+	local nt = NormTitle(title)
+	if not nt then return false end
+	local set = doneQuestsByTitle[nt]
+	if not set then set = {}; doneQuestsByTitle[nt] = set end
+	if set[q] then return false end
+	set[q] = true
+	return true
+end
+
+local function RecomputeDoneByTitle()
+	wipe(donePinByTitle)
+	local data = ns.DATA
+	if not data then return end
+	BuildQuestIndices()
+	local qt = ns.db and ns.db.questTitles
+	local inLog = {}
+	for idx = 1, ns.NumQuestLogEntries() do
+		local info = ns.QuestInfo(idx)
+		if info and not info.isHeader and info.questID and info.questID ~= 0 then
+			local t = info.title
+			if qt and type(t) == "string" and not issecretvalue(t) and t ~= "" then qt[info.questID] = t end
+			if not info.isHidden then
+				local nt = NormTitle(t or ns.QuestTitle(info.questID))
+				if nt then inLog[nt] = true end
+			end
+		end
+	end
+	local factions = ns.db and ns.db.factions
+	local fac, qid = data.fac, data.qid
+	for nt, qset in pairs(doneQuestsByTitle) do
+		local pins = questPinsByTitle[nt]
+		if pins then
+			local total = 0
+			for _ in pairs(qset) do total = total + 1 end
+			if not isMultiStepTitle[nt] then
+				if total > 0 and not inLog[nt] then
+					for _, i in ipairs(pins) do
+						local f = fac[i]
+						if f == 0 or not factions or factions[f] then donePinByTitle[i] = true end
+					end
+				end
+			else
+				local matched = 0
+				for _, i in ipairs(pins) do
+					local f = fac[i]
+					if (f == 0 or not factions or factions[f]) and qid[i] ~= 0 and IsDone(qid[i]) then
+						matched = matched + 1
+					end
+				end
+				local rem = total - matched
+				if rem > 0 then
+					for _, i in ipairs(pins) do
+						local f = fac[i]
+						if (f == 0 or not factions or factions[f]) and not (qid[i] ~= 0 and IsDone(qid[i])) then
+							donePinByTitle[i] = true
+							rem = rem - 1
+							if rem == 0 then break end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
+local function SyncDoneQuests()
+	if not (ns.DATA and ns.db) then return end
+	BuildQuestIndices()
+	if not syncedDone then
+		local completed = ns.CompletedQuestIDs()
+		if completed and #completed > 0 then
+			syncedDone = true
+			local hasPending = false
+			for _, q in ipairs(completed) do
+				if type(q) == "number" and q ~= 0 and not issecretvalue(q) then
+					done[q] = true
+					local t = ns.QuestTitle(q)
+					if t then
+						RecordDoneQuestTitle(q, t)
+					else
+						pendingTitles[q] = true
+						hasPending = true
+						ns.RequestQuestTitle(q)
+					end
+				end
+			end
+			if hasPending then ns.events:RegisterEvent("QUEST_DATA_LOAD_RESULT") end
+		end
+	end
+	RecomputeDoneByTitle()
+end
+
+local function PinDone(i)
+	local q = ns.DATA.qid[i]
+	if q ~= 0 and IsDone(q) then return true end
+	return donePinByTitle[i] == true
+end
+
+-- a quest's pins in the map data (where it's picked up), by quest ID or normalized title, in data order
+local function PinsOfQuest(q)   -- (ns.DATA, not D: the tracker asks before the map layer is set up)
+	if type(q) ~= "number" or q == 0 or issecretvalue(q) then return nil end
+	BuildQuestIndices()
+	if pinsOfQuest[q] then return pinsOfQuest[q] end
+	local nt = NormTitle(ns.QuestTitle(q))
+	local list = nt and pinsByTitle[nt]
+	if not list then return nil end
+	if #list == 1 then return list end
+	if not syncedDone then SyncDoneQuests() end
+	local factions = ns.db and ns.db.factions
+	local fac = ns.DATA.fac
+	local active, byFac = {}, {}
+	for _, i in ipairs(list) do
+		local f = fac[i]
+		if f == 0 or not factions or factions[f] then
+			byFac[#byFac + 1] = i
+			if not PinDone(i) then active[#active + 1] = i end
+		end
+	end
+	if #active > 0 then return active end
+	if #byFac > 0 then return byFac end
+	return list
 end
 -- its first pin; nil when the data doesn't have it
 function ns.QuestPin(q)
@@ -209,8 +405,7 @@ local function Passes(i)
 		if db.hideHighLevel and lvl > me + 5 then return false end   -- more than 5 above you: up to 5 above is still doable
 		if db.hideLowLevel and lvl ~= 0 and lvl < me - db.lowLevelGap then return false end   -- more than the gap below; 0: level unknown, kept
 	end
-	local q = D.qid[i]
-	if q ~= 0 and db.hideCompleted and IsDone(q) then return false end
+	if db.hideCompleted and PinDone(i) then return false end
 	return true
 end
 ns.Passes = Passes
@@ -532,12 +727,12 @@ local function Rebuild()
 		if i == hoverPin then keepHover = true end
 		nIcons = nIcons + 1
 		local t = Icon(nIcons)
-		local q = D.qid[i]
-		PaintIcon(t, i, (q ~= 0 and IsDone(q)) and .35 or 1)   -- completed quests dimmed
+		PaintIcon(t, i, PinDone(i) and .35 or 1)   -- completed quests dimmed
 		Place(t, x, y, PinSize(i))
 		t:Show()
 	end
 	if ns.db.enabled and D and curMap and ns.Calibrate() then
+		SyncDoneQuests()
 		local u, v, zoom = nil, nil, nil
 		if Seamless() then u, v, zoom = stitch.ViewNow() end
 		if u then
@@ -972,8 +1167,7 @@ local function LinkLine(label, list, base)   -- base: the pin the tooltip is for
 end
 
 function ns.ShowTooltip(owner, i)
-	local q = D.qid[i]
-	local completed = q ~= 0 and IsDone(q)
+	local completed = PinDone(i)
 	local step = (chain and #chain.steps > 1) and chain.num[i] or nil
 	local isLocked = lockedPin == i
 	if GameTooltip:IsShown() and GameTooltip:GetOwner() == owner
@@ -1009,7 +1203,7 @@ function ns.ShowTooltip(owner, i)
 	elseif D.pre[i] or nextOf[i] then hint = "Click: show this quest chain, numbered in order"
 	else hint = "Click: keep its links drawn" end
 	GameTooltip:AddLine(" ")
-	GameTooltip:AddLine(hint .. "\nShift-click: set a waypoint", .5, .8, 1)
+	GameTooltip:AddLine(hint .. "\nShift/Ctrl-click: set a waypoint", .5, .8, 1)
 	GameTooltip:Show()
 end
 
@@ -1137,14 +1331,24 @@ local function Init()
 	if hot.SetPassThroughButtons then
 		if InCombatLockdown() then ns.events:RegisterEvent("PLAYER_REGEN_ENABLED") else hot:SetPassThroughButtons("RightButton") end
 	end
+	hot.owningMap = WorldMapFrame
 	hot:SetScript("OnClick", function()
 		if not hoverPin then return end
-		if IsShiftKeyDown() then ns.SetWaypoint(hoverPin) else ns.Focus(hoverPin) end
+		local pinBtn = WorldMapFrame and WorldMapFrame.WorldMapTrackingPinButton
+		local pinArmed = (stitch and stitch.PinMode and stitch.PinMode()) or (pinBtn and pinBtn.isActive)
+		if IsShiftKeyDown() or IsControlKeyDown() or pinArmed then
+			if stitch and stitch.SetPinMode then stitch.SetPinMode(false)
+			elseif pinBtn and pinBtn.SetActive then pinBtn:SetActive(false) end
+			ns.SetWaypoint(hoverPin)
+		else
+			ns.Focus(hoverPin)
+		end
 	end)
 
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
 	ns.RegisterSuperTracking(ns.events)   -- a quest focused or unfocused: the map's pins follow
+	SyncDoneQuests()
 	UpdateFocus()
 	-- opening a quest's details page (the quest log, the tracker's menu, its pop-up): stand in for a missing map location
 	if QuestMapFrame_ShowQuestDetails then hooksecurefunc("QuestMapFrame_ShowQuestDetails", OnQuestDetails) end
@@ -1195,8 +1399,36 @@ local function Init()
 	end
 end
 
+local doneRefreshQueued = false
+function ns:QUEST_DATA_LOAD_RESULT(questID, success)
+	if not (questID and not issecretvalue(questID) and pendingTitles[questID]) then return end
+	pendingTitles[questID] = nil
+	if not next(pendingTitles) then ns.events:UnregisterEvent("QUEST_DATA_LOAD_RESULT") end
+	if not success then return end
+	local t = ns.QuestTitle(questID)
+	if t and RecordDoneQuestTitle(questID, t) and not doneRefreshQueued then
+		doneRefreshQueued = true
+		C_Timer.After(0.15, function()
+			doneRefreshQueued = false
+			RecomputeDoneByTitle()
+			ns.Refresh()
+		end)
+	end
+end
+
 function ns:QUEST_TURNED_IN(questID)
-	if questID and not issecretvalue(questID) then done[questID] = true end
+	if questID and not issecretvalue(questID) then
+		done[questID] = true
+		local t = ns.QuestTitle(questID)
+		if t then
+			RecordDoneQuestTitle(questID, t)
+		else
+			pendingTitles[questID] = true
+			ns.events:RegisterEvent("QUEST_DATA_LOAD_RESULT")
+			ns.RequestQuestTitle(questID)
+		end
+		RecomputeDoneByTitle()
+	end
 	ns.Refresh()
 end
 

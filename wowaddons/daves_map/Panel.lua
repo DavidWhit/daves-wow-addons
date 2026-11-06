@@ -179,12 +179,12 @@ local function OnRowClick(row)
 		ns.Refresh()
 	elseif item.kind == "chainhead" then
 		ns.Focus(ns.FocusedPin())   -- toggles it off (with its own sound)
-	elseif item.kind == "step" then   -- the seamless map flies there, zoomed in on it; shift-click: a waypoint
+	elseif item.kind == "step" then   -- the seamless map flies there, zoomed in on it; shift/ctrl-click: a waypoint
 		Sound("IG_QUEST_LIST_SELECT")   -- (without the seamless map: a step on another map opens that map; on this one, a waypoint)
-		if IsShiftKeyDown() or not ns.ShowPinMap(item.i, true) then ns.SetWaypoint(item.i) end
-	else   -- a search result: select it (its chain is drawn and listed) and open its map; shift-click for a waypoint
+		if IsShiftKeyDown() or IsControlKeyDown() or not ns.ShowPinMap(item.i, true) then ns.SetWaypoint(item.i) end
+	else   -- a search result: select it (its chain is drawn and listed) and open its map; shift/ctrl-click for a waypoint
 		Sound("IG_QUEST_LIST_SELECT")
-		if IsShiftKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i); ns.ShowPinMap(item.i) end
+		if IsShiftKeyDown() or IsControlKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i); ns.ShowPinMap(item.i) end
 	end
 	RefreshIfMapHidden()   -- Refresh / Focus already update the list while the map is open
 end

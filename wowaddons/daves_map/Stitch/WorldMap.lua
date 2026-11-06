@@ -902,8 +902,9 @@ local function Dropping(button)
 end
 
 local function DropAtCursor()
+	local fromButton = mod.PinMode and mod.PinMode()
 	if mod.SetPinMode then mod.SetPinMode(false) end
-	mod.DropWaypoint(mod.CursorWorld())     -- (not the click position Blizzard passes: that's clamped to this map's rectangle)
+	mod.DropWaypoint(mod.CursorWorld(), fromButton)     -- (not the click position Blizzard passes: that's clamped to this map's rectangle)
 end
 
 -- clicks: in = the next map down under the cursor, out = the map above
@@ -985,7 +986,7 @@ local function OnPinMouseUp(pin, button)
 		return
 	end
 	sc.mouseButtonInfo.LeftButton.down = false
-	if Dropping(button) then DropAtCursor() return end
+	if Dropping(button) and (not pin.isWaypoint or (mod.PinMode and mod.PinMode())) then DropAtCursor() return end
 	if pin.OnClick then pin:OnClick() end
 end
 
@@ -1087,13 +1088,7 @@ local function Setup()
 		hooksecurefunc(map, "GamepadTryPlaceWaypoint", function()
 			if not active or not PadCursor() or not (C_Map.HasUserWaypoint and C_Map.HasUserWaypoint()) then return end
 			local u, v = mod.CursorWorld()
-			local chain = u and S.ChainAt(u, v)
-			local mapID = chain and chain[#chain]
-			local setWaypoint = C_Map.SetUserWaypoint and C_Map.SetUserWaypoint
-			if not mapID or mapID == WORLD or not (setWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates) then return end
-			if C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(mapID) then return end
-			local x, y = FromWorld(mapID, u, v)
-			pcall(setWaypoint, UiMapPoint.CreateFromCoordinates(mapID, x, y))
+			if u and mod.DropWaypoint then mod.DropWaypoint(u, v) end
 		end)
 	end
 	if map.NavigateToParentMap then
@@ -1441,4 +1436,197 @@ function mod:Diag()
 	end
 	if #list > 0 then ns:Print("Zoom update, slowest parts, ms: %s.", table.concat(list, "; ")) end
 	for name, err in pairs(S.closeFailed or {}) do ns:Print("|cffff6060%s failed:|r %s", name, err) end
+end
+
+--------------------------------------------------------------------------------
+-- Waypoints (daves_map: adapted from OpenMap/Map/Nav.lua so Ctrl-click and the
+-- World Map's top-right Map Pin button place & display user waypoints across
+-- the entire stitched map, even when the host map is WORLD or another zone)
+--------------------------------------------------------------------------------
+do
+	local Safe = ns.Safe
+	local wpSet, RefreshWaypoint
+	local pinArmed = false
+	local WAYPOINT_TRACKED = { atlas = "Waypoint-MapPin-Tracked", texture = "Interface\\Minimap\\Ping\\ping5", size = 30 }
+	local WAYPOINT_UNTRACKED = { atlas = "Waypoint-MapPin-Untracked", texture = "Interface\\Minimap\\Ping\\ping5", size = 30 }
+
+	local function BlizzardPin()
+		if not (C_Map.HasUserWaypoint and C_Map.GetUserWaypoint) then return end
+		local ok, has = pcall(C_Map.HasUserWaypoint)
+		if not ok or not has then return end
+		local point = C_Map.GetUserWaypoint()
+		if point and point.position then
+			local x, y = Safe.XY(point.position)
+			return point.uiMapID, x, y
+		end
+	end
+
+	local function HideBlizzardPin()
+		if not active or not map or not map.EnumeratePinsByTemplate then return end
+		for pin in map:EnumeratePinsByTemplate("WaypointLocationPinTemplate") do pin:Hide() end
+	end
+
+	local function ClearPin()
+		if C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+		if mod.char then mod.char.pin = nil end
+		if SOUNDKIT and SOUNDKIT.UI_MAP_WAYPOINT_REMOVE then PlaySound(SOUNDKIT.UI_MAP_WAYPOINT_REMOVE) end
+		RefreshWaypoint()
+	end
+
+	local function PinClick()
+		if IsModifiedClick and IsModifiedClick("CHATLINK") then
+			local ok, link = pcall(C_Map.GetUserWaypointHyperlink or nop)
+			if ok and link then
+				local insert = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
+				if insert then insert(link) end
+			end
+			return
+		end
+		if IsControlKeyDown() and C_SuperTrack and C_SuperTrack.IsSuperTrackingUserWaypoint and C_SuperTrack.SetSuperTrackedUserWaypoint then
+			local track = not C_SuperTrack.IsSuperTrackingUserWaypoint()
+			pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, track)
+			if SOUNDKIT then
+				PlaySound(track and SOUNDKIT.UI_MAP_WAYPOINT_SUPER_TRACK_ON or SOUNDKIT.UI_MAP_WAYPOINT_SUPER_TRACK_OFF)
+			end
+			RefreshWaypoint()
+			return
+		end
+		ClearPin()
+	end
+
+	function mod.WaypointPoint()
+		local mapID, x, y = BlizzardPin()
+		if mapID then
+			if mod.char then mod.char.pin = nil end
+			return mapID, x, y, false
+		end
+		local own = mod.char and mod.char.pin
+		if own then return own[1], own[2], own[3], true end
+	end
+
+	function RefreshWaypoint()
+		if not wpSet then return end
+		S.ClearPinSet(wpSet)
+		local mapID, x, y, own = mod.WaypointPoint()
+		HideBlizzardPin()
+		if not mapID or not S.Rect(mapID) then return end
+		local tracked = own or not (C_SuperTrack and C_SuperTrack.IsSuperTrackingUserWaypoint) or C_SuperTrack.IsSuperTrackingUserWaypoint()
+		local u, v = ToWorld(mapID, x, y)
+		local pin = S.AddPin(wpSet, u, v, tracked and WAYPOINT_TRACKED or WAYPOINT_UNTRACKED)
+		pin.owningMap = map
+		pin.isWaypoint = true
+		pin:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			local info = C_Map.GetMapInfo(mapID)
+			GameTooltip:AddLine(ns.L["Waypoint"], 1, 0.82, 0)
+			GameTooltip:AddLine(("%s  %.1f, %.1f"):format(info and info.name or "", x * 100, y * 100), 1, 1, 1)
+			GameTooltip:AddLine(ns.L["Click to clear waypoint"], 0.6, 0.6, 0.6)
+			if not own then
+				GameTooltip:AddLine(ns.L["Ctrl-click to toggle super tracking"], 0.6, 0.6, 0.6)
+				GameTooltip:AddLine(ns.L["Shift-click to share in chat"], 0.6, 0.6, 0.6)
+			end
+			GameTooltip:Show()
+		end)
+		pin:SetScript("OnLeave", GameTooltip_Hide)
+		pin.OnClick = PinClick
+	end
+
+	function mod.TrackPoint(mapID, x, y, _, fromButton)
+		local blizzard = false
+		if C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates
+			and (not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(mapID)) then
+			blizzard = pcall(C_Map.SetUserWaypoint, UiMapPoint.CreateFromCoordinates(mapID, x, y)) and BlizzardPin() ~= nil
+			if blizzard and C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+				pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, true)
+			end
+		end
+		if mod.char then mod.char.pin = not blizzard and { mapID, x, y } or nil end
+		if SOUNDKIT then
+			PlaySound(fromButton and SOUNDKIT.UI_MAP_WAYPOINT_CLICK_TO_PLACE or SOUNDKIT.UI_MAP_WAYPOINT_CONTROL_CLICK)
+		end
+		RefreshWaypoint()
+	end
+
+	function mod.DropWaypoint(u, v, fromButton)
+		if not u then return end
+		local chain = S.ChainAt(u, v)
+		local mapID
+		for i = #chain, 1, -1 do
+			local id = chain[i]
+			if id ~= WORLD then
+				local x, y = FromWorld(id, u, v)
+				if x >= 0 and x <= 1 and y >= 0 and y <= 1 then
+					if not C_Map.CanSetUserWaypointOnMap or C_Map.CanSetUserWaypointOnMap(id) then
+						mapID = id
+						break
+					elseif not mapID then
+						mapID = id
+					end
+				end
+			end
+		end
+		if not mapID then return end
+		local x, y = FromWorld(mapID, u, v)
+		mod.TrackPoint(mapID, x, y, nil, fromButton)
+	end
+
+	function mod.PinMode() return pinArmed end
+
+	function mod.SetPinMode(on)
+		pinArmed = on and true or false
+		local btn = map and map.WorldMapTrackingPinButton
+		if btn and btn.SetActive and (btn.isActive and true or false) ~= pinArmed then
+			btn:SetActive(pinArmed)
+		end
+		if mod.OnPinMode then mod.OnPinMode(pinArmed) end
+	end
+
+	function mod.ClearPin() ClearPin() end
+
+	function mod:BuildNav()
+		wpSet = S.PinSet("waypoint", 0, 20)
+		RefreshWaypoint()
+	end
+
+	function mod:SetupNav(worldMap)
+		ns.RegisterEvent(mod, "USER_WAYPOINT_UPDATED", RefreshWaypoint)
+		ns.RegisterEvent(mod, "SUPER_TRACKING_CHANGED", RefreshWaypoint)
+		for provider in pairs(worldMap.dataProviders or {}) do
+			if type(provider) == "table" and provider.OnWayPointLocationToggleUpdate and provider.RefreshAllData then
+				hooksecurefunc(provider, "RefreshAllData", HideBlizzardPin) -- taint-hook: ok
+			end
+		end
+		if worldMap.RegisterCallback then
+			worldMap:RegisterCallback("WaypointLocationToggleUpdate", function(_, isActive)
+				pinArmed = isActive and true or false
+			end, mod)
+		end
+		local btn = worldMap.WorldMapTrackingPinButton
+		if btn then
+			if btn.Refresh then
+				hooksecurefunc(btn, "Refresh", function(self) -- taint-hook: ok
+					if active then
+						self:Enable()
+						if self.DesaturateHierarchy then self:DesaturateHierarchy(0) end
+					end
+				end)
+			end
+			btn:HookScript("OnEnter", function(self)
+				if active and C_Map.CanSetUserWaypointOnMap and not C_Map.CanSetUserWaypointOnMap(worldMap:GetMapID()) then
+					GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+					GameTooltip_SetTitle(GameTooltip, MAP_PIN)
+					GameTooltip_AddNormalLine(GameTooltip, MAP_PIN_TOOLTIP)
+					GameTooltip_AddBlankLineToTooltip(GameTooltip)
+					GameTooltip_AddInstructionLine(GameTooltip, MAP_PIN_TOOLTIP_INSTRUCTIONS)
+					GameTooltip:Show()
+				end
+			end)
+		end
+	end
+
+	function mod:RefreshNav()
+		RefreshWaypoint()
+		local btn = map and map.WorldMapTrackingPinButton
+		if active and btn and btn.Refresh then btn:Refresh() end
+	end
 end

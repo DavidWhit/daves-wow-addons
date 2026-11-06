@@ -53,6 +53,7 @@ end
 -- the quests in your log: all of them, the set that is this zone's, and the ones ready to turn in (in log order)
 local function LogQuests()
 	local names, all, here, ready = ZoneNames(), {}, {}, {}
+	local qt = ns.db and ns.db.questTitles
 	local header
 	for idx = 1, ns.NumQuestLogEntries() do
 		local info = ns.QuestInfo(idx)
@@ -61,9 +62,12 @@ local function LogQuests()
 				header = info.title
 			elseif not info.isHidden and info.questID and info.questID ~= 0 then
 				local q = info.questID
+				if qt and type(info.title) == "string" and not issecretvalue(info.title) and info.title ~= "" then
+					qt[q] = info.title
+				end
 				all[#all + 1] = q
 				if (header and names[header]) or ns.QuestOnMap(q, info) then here[q] = true end
-				if IsReady(q) then ready[#ready + 1] = q end
+				if IsReady(q) then ready[#ready + 1] = q else movedOut[q] = nil end
 			end
 		end
 	end
@@ -99,6 +103,7 @@ local function MoveReadyOut(ready)
 	for _, q in ipairs(ready) do
 		if not movedOut[q] and Watched(q) then
 			movedOut[q] = true
+			ns.db.pinned[q] = nil
 			Unwatch(q)
 			moved = true
 		end
@@ -231,9 +236,9 @@ local function UpdatePins()
 			if m and m.usedBlocks and m:IsVisible() then
 				for _, blocks in pairs(m.usedBlocks) do
 					for id, block in pairs(blocks) do
-						if type(id) == "number" and block:IsVisible() and Watched(id) and not IsReady(id) and not block.cached then
+						if type(id) == "number" and block:IsVisible() and Watched(id) and not block.cached then
 							RestoreBlockAlpha(block)
-							if ns.db.trackMyZone then
+							if ns.db.trackMyZone and not IsReady(id) then
 								n = n + 1
 								local b = PinButton(n)
 								-- just left of the quest's map icon (its POI button sits left of the title:
@@ -363,24 +368,56 @@ end
 -- (DirtiableMixin:SetDirtyMethod), so hooksecurefunc on Update never sees them. A cheap check a few times a second
 -- re-anchors only when the last section, or the tracker's shown or collapsed state, changes.
 local ALL_H, GAP = 32, 4
+local function IsQuestModule(m)
+	for _, name in ipairs(PIN_MODULES) do
+		if m == _G[name] then return true end
+	end
+	return false
+end
+
+-- For Quest / Campaign tracker modules, anchor below the lowest visible active (watched, non-cached) block rather than
+-- the module frame's bottom: when quests are untracked or a turn-in block is cached/fading, the module's height only
+-- catches up on a later layout pass, which otherwise leaves a blank gap above Ready to Turn In.
+local function ModuleBottom(m)
+	if not IsQuestModule(m) then return m end
+	if m.IsCollapsed and m:IsCollapsed() then return m.Header or m end
+	local low, lowY
+	for _, blocks in pairs(m.usedBlocks or {}) do
+		for id, block in pairs(blocks) do
+			if block:IsShown() and not block.cached and (type(id) ~= "number" or Watched(id)) then
+				local y = block:GetBottom()
+				if y and not issecretvalue(y) then
+					if not lowY or y < lowY then low, lowY = block, y end
+				elseif not low then
+					low = block
+				end
+			end
+		end
+	end
+	return low
+end
+
 local function TrackerState()
 	local tracker = ObjectiveTrackerFrame
-	local last
+	local last, bottom
 	for _, m in ipairs(tracker.modules or {}) do
-		if m.GetContentsHeight and (m:GetContentsHeight() or 0) > 0 and m:IsShown() then last = m end
+		if m.GetContentsHeight and (m:GetContentsHeight() or 0) > 0 and m:IsShown() then
+			local b = ModuleBottom(m)
+			if b then last, bottom = m, b end
+		end
 	end
 	local shown = tracker:IsShown()
 	local collapsed = tracker.IsCollapsed and tracker:IsCollapsed() or false
-	return last, shown, collapsed
+	return last, bottom, shown, collapsed
 end
 
-local placedLast, placedShown, placedCollapsed, placedWant
+local placedLast, placedBottom, placedShown, placedCollapsed, placedWant
 local function Place(force)
 	local tracker = ObjectiveTrackerFrame
 	if not (section and tracker) then return end
-	local last, shown, collapsed = TrackerState()
-	if not force and last == placedLast and shown == placedShown and collapsed == placedCollapsed and section.want == placedWant then return end
-	placedLast, placedShown, placedCollapsed, placedWant = last, shown, collapsed, section.want
+	local last, bottom, shown, collapsed = TrackerState()
+	if not force and last == placedLast and bottom == placedBottom and shown == placedShown and collapsed == placedCollapsed and section.want == placedWant then return end
+	placedLast, placedBottom, placedShown, placedCollapsed, placedWant = last, bottom, shown, collapsed, section.want
 	local alone = not (last and shown)
 	if alone ~= section.alone then
 		section.alone = alone
@@ -393,7 +430,8 @@ local function Place(force)
 	if alone then   -- where the tracker's own header would be
 		section:SetPoint("TOPLEFT", tracker.Header or tracker, "TOPLEFT")   -- its header keeps its place while hidden
 	else
-		section:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -(tracker.moduleSpacing or 10) - GAP)
+		section:SetPoint("TOP", bottom, "BOTTOM", 0, -(tracker.moduleSpacing or 10) - GAP)
+		section:SetPoint("LEFT", last, "LEFT", 0, 0)
 	end
 end
 
@@ -572,12 +610,45 @@ events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
 	if accepted[q] then accepted[q] = nil return end
 	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
 end
+-- A quest whose objective advances (QUEST_WATCH_UPDATE / QUEST_LOG_CRITERIA_UPDATE): pin it and track it if not
+-- already tracked (unless the advancement completed the quest, in which case it moves to Ready to Turn In).
+local function OnQuestAdvance(_, q)
+	if type(q) ~= "number" or q == 0 or issecretvalue(q) or not ns.QuestLogIndex(q) then return end
+	ourAdd[q], accepted[q], movedOut[q] = nil, nil, nil
+	if IsReady(q) then
+		ns.db.pinned[q] = nil
+		if MoveReadyOut({ q }) then ns.UpdateReady() end
+		return
+	end
+	if ns.db.trackMyZone then ns.db.pinned[q] = true end
+	if not Watched(q) then ns.AddQuestWatch(q) end
+end
+events.QUEST_WATCH_UPDATE = OnQuestAdvance
+events.QUEST_LOG_CRITERIA_UPDATE = OnQuestAdvance
 events.QUEST_LOG_UPDATE = function()   -- an objective finished: the quest may be ready now
 	local _, _, ready = LogQuests()
 	if MoveReadyOut(ready) then ns.UpdateReady() end
 	Queue(false, .3)
 end
+-- ScenarioObjectiveTracker runs first in ObjectiveTrackerFrame:Update() and calls ShouldShowMawBuffs(), which calls
+-- C_UnitAuras.GetAuraDataByIndex("player", 1, "MAW"). When AddQuestWatch / RemoveQuestWatch / SetSuperTrackedQuestID
+-- marks ObjectiveTrackerFrame dirty from addon code, RunNextFrame runs Update() with addon taint; if player auras are
+-- secret, GetAuraDataByIndex throws before QuestObjectiveTracker:Update() and before DirtiableMixin clears .dirty,
+-- freezing the tracker and leaving untracked quest blocks in place. Guard ShouldShowMawBuffs so it cannot throw.
+local mawGuarded = false
+local function GuardMawBuffs()
+	if mawGuarded or type(ShouldShowMawBuffs) ~= "function" then return end
+	mawGuarded = true
+	local orig = ShouldShowMawBuffs
+	_G.ShouldShowMawBuffs = function()   -- taint-hook: ok
+		if not (IsInJailersTower and IsInJailersTower()) then return false end
+		local ok, res = pcall(orig)
+		return ok and res or false
+	end
+end
+
 events.ADDON_LOADED = function(_, name)
+	if name == "Blizzard_MawBuffs" then GuardMawBuffs() end
 	if name == "Blizzard_ObjectiveTracker" then Queue(false, .3) end
 end
 
@@ -632,8 +703,10 @@ UpdateQuestClicks = function()   -- (declared with the pins: their watcher runs 
 end
 
 local EVENTS = { "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "PLAYER_CONTROL_GAINED", "QUEST_ACCEPTED",
-	"QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_WATCH_LIST_CHANGED", "QUEST_LOG_UPDATE", "ADDON_LOADED" }
+	"QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_WATCH_LIST_CHANGED", "QUEST_WATCH_UPDATE",
+	"QUEST_LOG_CRITERIA_UPDATE", "QUEST_LOG_UPDATE", "ADDON_LOADED" }
 function ns.InitTracker()   -- Core.lua, at PLAYER_LOGIN (before the first loading screen ends)
+	GuardMawBuffs()
 	for _, e in ipairs(EVENTS) do events:RegisterEvent(e) end
 end
 
