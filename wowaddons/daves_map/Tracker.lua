@@ -3,9 +3,9 @@
 --
 -- Track only my zone's quests: the tracker shows the quests in your log for the zone you're in, and the rest are
 -- untracked (they stay in the log, and the map's markers are unchanged). A quest is this zone's when the quest log
--- files it under this zone's header, or the game puts it on this zone's map (C_QuestLog.IsOnMap). Event driven, no
--- polling: entering a zone, the loading screen, accepting a quest. On a flight the zones go by underneath, so it waits
--- for the landing (PLAYER_CONTROL_GAINED) and changes once.
+-- files it under this zone's header, or the game puts its objective on this zone's map (GetQuestUiMapID). Event driven,
+-- no polling: entering a zone, the loading screen, accepting a quest. On a flight the zones go by underneath, so it
+-- waits for the landing (PLAYER_CONTROL_GAINED) and changes once.
 --
 -- Ready to Turn In: quests whose objectives are done leave Blizzard's tracker and are listed in a collapsible section
 -- of our own just under it, wherever they're turned in; the zone tracking leaves them alone. Why not a module inside
@@ -33,26 +33,42 @@ local function ZoneOf(mapID)   -- the zone-level map holding mapID (a city or a 
 	end
 end
 
--- the names this zone goes by in the quest log's headers: the game's zone text, your map and its zone
+-- the names and map IDs this zone goes by: the game's zone text, your map and its zone
 local function ZoneNames()
-	local names = {}
-	local real = GetRealZoneText and GetRealZoneText()
-	if type(real) == "string" and real ~= "" then names[real] = true end
+	local names, maps = {}, {}
+	for _, fn in ipairs({ GetRealZoneText, GetZoneText }) do
+		local z = fn and fn()
+		if type(z) == "string" and not issecretvalue(z) and z ~= "" then names[z] = true end
+	end
 	local best = C_Map.GetBestMapForUnit("player")
 	for _, id in ipairs({ best or 0, ZoneOf(best) or 0 }) do
-		local info = id ~= 0 and C_Map.GetMapInfo(id)
-		if info and info.name then names[info.name] = true end
+		if id ~= 0 then
+			maps[id] = true
+			local info = C_Map.GetMapInfo(id)
+			if info and info.name then names[info.name] = true end
+		end
 	end
-	return names
+	return names, maps
+end
+
+local function QuestInZone(q, maps)
+	local m = ns.QuestUiMapID and ns.QuestUiMapID(q) or 0
+	if m == 0 or issecretvalue(m) then return false end
+	return (maps[m] or maps[ZoneOf(m) or 0]) and true or false
 end
 
 local function IsReady(q)
 	return ns.QuestReady(q)
 end
 
+-- Each ready quest is moved out of Blizzard's tracker once, when it's first seen ready. Tracking it again yourself
+-- sticks (it was untracked again on every quest log update, which fought you).
+local movedOut = {}
+
 -- the quests in your log: all of them, the set that is this zone's, and the ones ready to turn in (in log order)
 local function LogQuests()
-	local names, all, here, ready = ZoneNames(), {}, {}, {}
+	local names, maps = ZoneNames()
+	local all, here, ready = {}, {}, {}
 	local qt = ns.db and ns.db.questTitles
 	local header
 	for idx = 1, ns.NumQuestLogEntries() do
@@ -66,7 +82,7 @@ local function LogQuests()
 					qt[q] = info.title
 				end
 				all[#all + 1] = q
-				if (header and names[header]) or ns.QuestOnMap(q, info) then here[q] = true end
+				if (header and names[header]) or QuestInZone(q, maps) then here[q] = true end
 				if IsReady(q) then ready[#ready + 1] = q else movedOut[q] = nil end
 			end
 		end
@@ -79,9 +95,6 @@ end
 ---------------------------------------------------------------------------
 local function Watched(q) return ns.QuestWatched(q) end
 
--- Each ready quest is moved out of Blizzard's tracker once, when it's first seen ready. Tracking it again yourself
--- sticks (it was untracked again on every quest log update, which fought you).
-local movedOut = {}
 local ourAdd = {}     -- [questID] = true: tracked by the zone tracking, not by you (QUEST_WATCH_LIST_CHANGED)
 local accepted = {}   -- [questID] = true: just accepted, tracked by the game's own autoQuestWatch, not by you
 -- untracks a quest, keeping its focus: Blizzard lets go of a focused quest when it's untracked (its
@@ -111,29 +124,27 @@ local function MoveReadyOut(ready)
 	return moved
 end
 
--- `unpinned`: a quest you've just unpinned, checked whether it's focused or not (its pin was what kept it here)
-local function TrackZoneQuests(unpinned)
+local function TrackZoneQuests()
 	local db = ns.db
-	local all, here, ready = LogQuests()
+	local all, here, ready, names = LogQuests()
 	local isReady = {}
 	for _, q in ipairs(ready) do isReady[q] = true end
 	-- ready quests live in our section: out of Blizzard's tracker, whatever the zone
 	MoveReadyOut(ready)
 	if not db.trackMyZone or UnitOnTaxi("player") then return end   -- on a flight the landing comes back here
-	if not next(ZoneNames()) then return end                          -- a loading screen: leave the tracker alone
-	local focused = ns.SuperTrackedQuest()
+	if not next(names) then return end                               -- a loading screen: leave the tracker alone
 	for _, q in ipairs(all) do
-		-- the zone tracking ignores ready quests, pinned ones and the focused one (unless you've just unpinned it)
-		if not isReady[q] and not db.pinned[q] and (q ~= focused or q == unpinned) then
+		-- the zone tracking ignores ready quests and pinned ones
+		if not isReady[q] and not db.pinned[q] then
 			local watched = Watched(q)
 			if here[q] and not watched then
 				ourAdd[q] = true; C_Timer.After(2, function() ourAdd[q] = nil end)   -- its event, not a later one of yours
 				ns.AddQuestWatch(q)
-			elseif not here[q] and watched then ns.RemoveQuestWatch(q) end   -- (the focused one only when unpinned)
+			elseif not here[q] and watched then ns.RemoveQuestWatch(q) end
 		end
 	end
 end
-ns.TrackZoneQuests = function(unpinned) TrackZoneQuests(unpinned); ns.UpdateReady() end
+ns.TrackZoneQuests = function() TrackZoneQuests(); ns.UpdateReady() end
 
 ---------------------------------------------------------------------------
 -- Pins: a pinned quest stays tracked when you change zone. A small pin sits beside each quest in Blizzard's tracker
@@ -178,13 +189,13 @@ local function PinButton(n)
 	b.icon:SetAllPoints()
 	if PIN_ATLAS then b.icon:SetAtlas(PIN_ATLAS) else b.icon:SetTexture("Interface\\Buttons\\UI-CheckBox-Check") end
 	b:SetScript("OnClick", function(self)
-		-- (on a flight the zone check waits for the landing, which would skip a focused quest: no unpinning till then)
+		-- (on a flight the zone check waits for the landing: no unpinning till then)
 		if ns.db.pinned[self.questID] and UnitOnTaxi("player") then return end
 		local q = self.questID
 		ns.db.pinned[q] = not ns.db.pinned[q] or nil
 		-- unpinned: the zone check runs now, so a quest from another zone leaves the tracker straight away (its
 		-- tooltip with it); one from this zone stays, its tooltip saying so
-		if not ns.db.pinned[q] then ns.TrackZoneQuests(q) end
+		if not ns.db.pinned[q] then ns.TrackZoneQuests() end
 		if Watched(q) then PaintPin(self); PinTooltip(self) else GameTooltip:Hide() end
 	end)
 	b:SetScript("OnEnter", function(self) PaintPin(self); PinTooltip(self) end)
@@ -560,11 +571,32 @@ local function Queue(zone, delay)
 		ns.UpdateReady()
 	end)
 end
-events.ZONE_CHANGED_NEW_AREA = function() ns.TrackZoneQuests(); Queue(true) end   -- at once too (see below)
+local lastZoneKey
+local function ZoneKey()
+	local r = GetRealZoneText and GetRealZoneText()
+	local z = GetZoneText and GetZoneText()
+	local b = C_Map.GetBestMapForUnit("player") or 0
+	return ((type(r) == "string" and not issecretvalue(r)) and r or "") .. "\1"
+		.. ((type(z) == "string" and not issecretvalue(z)) and z or "") .. "\1" .. b
+end
+events.ZONE_CHANGED_NEW_AREA = function()
+	lastZoneKey = ZoneKey()
+	ns.TrackZoneQuests()
+	Queue(true)
+end
+events.ZONE_CHANGED = function()
+	local k = ZoneKey()
+	if k ~= lastZoneKey then
+		lastZoneKey = k
+		ns.TrackZoneQuests()
+		Queue(true)
+	end
+end
 -- The loading screen: the rules apply at once, in this event, before the tracker draws (its updates run on the next
 -- frame: DirtiableMixin), so it never shows the quests it is about to drop; then again a second later in case the
 -- quest log was still filling in.
 events.PLAYER_ENTERING_WORLD = function()
+	lastZoneKey = ZoneKey()
 	if ns.NumQuestLogEntries() > 0 then ns.TrackZoneQuests() end
 	Queue(true)
 end
@@ -702,7 +734,7 @@ UpdateQuestClicks = function()   -- (declared with the pins: their watcher runs 
 	end
 end
 
-local EVENTS = { "ZONE_CHANGED_NEW_AREA", "PLAYER_ENTERING_WORLD", "PLAYER_CONTROL_GAINED", "QUEST_ACCEPTED",
+local EVENTS = { "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED", "PLAYER_ENTERING_WORLD", "PLAYER_CONTROL_GAINED", "QUEST_ACCEPTED",
 	"QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_WATCH_LIST_CHANGED", "QUEST_WATCH_UPDATE",
 	"QUEST_LOG_CRITERIA_UPDATE", "QUEST_LOG_UPDATE", "ADDON_LOADED" }
 function ns.InitTracker()   -- Core.lua, at PLAYER_LOGIN (before the first loading screen ends)

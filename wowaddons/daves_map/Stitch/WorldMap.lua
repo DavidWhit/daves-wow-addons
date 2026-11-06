@@ -904,7 +904,8 @@ end
 local function DropAtCursor()
 	local fromButton = mod.PinMode and mod.PinMode()
 	if mod.SetPinMode then mod.SetPinMode(false) end
-	mod.DropWaypoint(mod.CursorWorld(), fromButton)     -- (not the click position Blizzard passes: that's clamped to this map's rectangle)
+	local u, v = mod.CursorWorld()
+	mod.DropWaypoint(u, v, fromButton)     -- (not the click position Blizzard passes: that's clamped to this map's rectangle)
 end
 
 -- clicks: in = the next map down under the cursor, out = the map above

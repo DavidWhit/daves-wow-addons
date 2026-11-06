@@ -25,6 +25,7 @@ local ipairs, pairs, wipe = ipairs, pairs, wipe
 -- Look
 ---------------------------------------------------------------------------
 local TRIM   = { 0.23, 0.23, 0.25, 1 }     -- edge of common/empty slots
+local REAGENT_TRIM = { 0.3, 0.45, 0.3, 1 } -- edge of empty reagent-bag slots: a hint of Blizzard's green bag art
 local LINE   = { 1, 1, 1, 0.14 }           -- dividers
 local SLOTBG = { 0.08, 0.08, 0.09, 1 }
 local MUTED  = { 0.55, 0.55, 0.55, 1 }
@@ -198,7 +199,7 @@ local function NewButton(bag, slot)
 
 	-- Tooltips/clicks stay entirely Blizzard's own handlers (no wrapping), so
 	-- hovering and using items never runs through addon code (no taint).
-	b.fbRec, b.fbKey = {}, bag * 100 + slot
+	b.fbRec, b.fbKey, b.fbReagent = {}, bag * 100 + slot, ns.IsReagentBag(bag)
 	b.pTex = false             -- forces the first paint
 	return b
 end
@@ -244,7 +245,8 @@ local function Paint(b)
 		b.fbEdge:SetVertexColor(c.r, c.g, c.b, 0.9)
 		if r.quality >= 3 then b.fbGlow:SetVertexColor(c.r, c.g, c.b, 0.45); b.fbGlow:Show() else b.fbGlow:Hide() end
 	else
-		b.fbEdge:SetVertexColor(TRIM[1], TRIM[2], TRIM[3], 1)
+		local trim = (not r.id and b.fbReagent) and REAGENT_TRIM or TRIM
+		b.fbEdge:SetVertexColor(trim[1], trim[2], trim[3], 1)
 		b.fbGlow:Hide()
 	end
 end
@@ -515,8 +517,6 @@ do
 	BaseSetAlpha = f or function(b, a) b:SetAlpha(a) end
 end
 
-local REAGENT_TRIM = { 0.3, 0.45, 0.3, 1 }    -- the reagent tile's edge: a hint of Blizzard's green bag art
-
 local function ShowCount(b, n, trim)
 	if not b then return end
 	local c = b.fbCount
@@ -526,6 +526,7 @@ local function ShowCount(b, n, trim)
 end
 
 local function ShowFreeCount()
+	if ns.db.oneBag then return end
 	ShowCount(freeButton, freeCount, TRIM)
 	ShowCount(freeReagentButton, reagentFree, REAGENT_TRIM)
 end
@@ -556,6 +557,9 @@ Layout = function()
 	freeButton, freeCount, totalSlots = nil, 0, 0
 	freeReagentButton, reagentFree, reagentTotal = nil, 0, 0
 
+	local oneBag = ns.db.oneBag
+	local allSlots = sections[1]
+
 	for _, bag in ipairs(bagList) do
 		local list = buttons[bag]
 		local n = list and list.n or 0
@@ -563,26 +567,39 @@ Layout = function()
 		if general then totalSlots = totalSlots + n elseif reagent then reagentTotal = reagentTotal + n end
 		for slot = 1, n do
 			local b = list[slot]
-			if b.fbCat then
+			if not b.fbCat then
+				if general then
+					freeCount = freeCount + 1
+					if not oneBag and not freeButton then freeButton = b end
+				elseif reagent then
+					reagentFree = reagentFree + 1
+					if not oneBag and not freeReagentButton then freeReagentButton = b end
+				end
+			end
+			if oneBag then
+				-- Keyring reports 32 capacity slots even with 1 key; only include filled keyring slots in the flat grid.
+				if bag ~= KEYRING_CONTAINER or b.fbRec.id then
+					Paint(b)
+					allSlots[#allSlots + 1] = b
+				else
+					b:Hide()
+				end
+			elseif b.fbCat then
 				local s = sections[b.fbCat]; s[#s + 1] = b
-			elseif general then
-				freeCount = freeCount + 1
-				if not freeButton then freeButton = b else b:Hide() end
-			elseif reagent then
-				reagentFree = reagentFree + 1
-				if not freeReagentButton then freeReagentButton = b else b:Hide() end
-			else
+			elseif b ~= freeButton and b ~= freeReagentButton then
 				b:Hide()
 			end
 		end
 	end
-	-- Every item has a category (Miscellaneous catches the rest), so the Free
-	-- Space tiles hold no items: they're the empty slots you drop onto (e.g.
-	-- the other half of a split stack): one for your bags and, when a reagent
-	-- bag is equipped, one for it. On by default; can be hidden.
-	local freeS, show = sections[FREE_CAT], ns.db.showFreeSpace
-	if freeButton then if show then freeS[#freeS + 1] = freeButton else freeButton:Hide() end end
-	if freeReagentButton then if show then freeS[#freeS + 1] = freeReagentButton else freeReagentButton:Hide() end end
+	if not oneBag then
+		-- Every item has a category (Miscellaneous catches the rest), so the Free
+		-- Space tiles hold no items: they're the empty slots you drop onto (e.g.
+		-- the other half of a split stack): one for your bags and, when a reagent
+		-- bag is equipped, one for it. On by default; can be hidden.
+		local freeS, show = sections[FREE_CAT], ns.db.showFreeSpace
+		if freeButton then if show then freeS[#freeS + 1] = freeButton else freeButton:Hide() end end
+		if freeReagentButton then if show then freeS[#freeS + 1] = freeReagentButton else freeReagentButton:Hide() end end
+	end
 
 	UpdateFooter()                                 -- strings first: the minimum width is measured from them
 	local cols = ns.ClampColumns(ns.db.columns)
@@ -594,52 +611,59 @@ Layout = function()
 	local collapsed = ns.db.collapsed
 	local y = 0
 	wipe(usedSub)
-	for cat = 1, FREE_CAT do
-		local s = sections[cat]
-		if #s > 0 then
-			local h = GetHeader(cat)
-			h:ClearAllPoints(); h:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y); h:SetWidth(width)
-			h.count:SetText(cat == FREE_CAT and FreeHeaderText() or #s)
-			h:Show()
-			y = y + HEADER_H + 5
-			if collapsed[cat] then
-				h.toggle:SetTexture(PLUS)
-				for _, b in ipairs(s) do b:Hide() end
-				y = y + SECTION_GAP - 5
-			elseif cat == FREE_CAT then
-				h.toggle:SetTexture(MINUS)
-				y = PlaceGrid(s, 1, #s, y, cols) + SECTION_GAP   -- bags tile first, reagent tile beside it: never sorted
-			elseif SPLIT_SETTING[cat] and ns.db[SPLIT_SETTING[cat]] ~= false then
-				h.toggle:SetTexture(MINUS)
-				if #s > 1 then sort(s, SortReagent) end
-				local i, n = 1, #s
-				while i <= n do
-					local g = EffGroup(s[i])
-					local j = i
-					while j < n and EffGroup(s[j + 1]) == g do j = j + 1 end
-					local sh = GetSubHeader(g)
-					sh:ClearAllPoints(); sh:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y); sh:SetWidth(width)
-					sh.count:SetText(j - i + 1)
-					sh:Show(); usedSub[g] = true
-					y = y + SUB_H + 3
-					if collapsed["r" .. g] then
-						sh.toggle:SetTexture(PLUS)
-						for k = i, j do s[k]:Hide() end
-					else
-						sh.toggle:SetTexture(MINUS)
-						y = PlaceGrid(s, i, j, y, cols)
+	if oneBag then
+		for _, h in pairs(headers) do h:Hide() end
+		if #allSlots > 0 then
+			y = PlaceGrid(allSlots, 1, #allSlots, 0, cols) + SECTION_GAP
+		end
+	else
+		for cat = 1, FREE_CAT do
+			local s = sections[cat]
+			if #s > 0 then
+				local h = GetHeader(cat)
+				h:ClearAllPoints(); h:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y); h:SetWidth(width)
+				h.count:SetText(cat == FREE_CAT and FreeHeaderText() or #s)
+				h:Show()
+				y = y + HEADER_H + 5
+				if collapsed[cat] then
+					h.toggle:SetTexture(PLUS)
+					for _, b in ipairs(s) do b:Hide() end
+					y = y + SECTION_GAP - 5
+				elseif cat == FREE_CAT then
+					h.toggle:SetTexture(MINUS)
+					y = PlaceGrid(s, 1, #s, y, cols) + SECTION_GAP   -- bags tile first, reagent tile beside it: never sorted
+				elseif SPLIT_SETTING[cat] and ns.db[SPLIT_SETTING[cat]] ~= false then
+					h.toggle:SetTexture(MINUS)
+					if #s > 1 then sort(s, SortReagent) end
+					local i, n = 1, #s
+					while i <= n do
+						local g = EffGroup(s[i])
+						local j = i
+						while j < n and EffGroup(s[j + 1]) == g do j = j + 1 end
+						local sh = GetSubHeader(g)
+						sh:ClearAllPoints(); sh:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y); sh:SetWidth(width)
+						sh.count:SetText(j - i + 1)
+						sh:Show(); usedSub[g] = true
+						y = y + SUB_H + 3
+						if collapsed["r" .. g] then
+							sh.toggle:SetTexture(PLUS)
+							for k = i, j do s[k]:Hide() end
+						else
+							sh.toggle:SetTexture(MINUS)
+							y = PlaceGrid(s, i, j, y, cols)
+						end
+						y = y + SUB_GAP
+						i = j + 1
 					end
-					y = y + SUB_GAP
-					i = j + 1
+					y = y - SUB_GAP + SECTION_GAP
+				else
+					h.toggle:SetTexture(MINUS)
+					if #s > 1 then sort(s, SortCompare) end
+					y = PlaceGrid(s, 1, #s, y, cols) + SECTION_GAP
 				end
-				y = y - SUB_GAP + SECTION_GAP
-			else
-				h.toggle:SetTexture(MINUS)
-				if #s > 1 then sort(s, SortCompare) end
-				y = PlaceGrid(s, 1, #s, y, cols) + SECTION_GAP
+			elseif headers[cat] then
+				headers[cat]:Hide()
 			end
-		elseif headers[cat] then
-			headers[cat]:Hide()
 		end
 	end
 
@@ -711,7 +735,7 @@ local function Update(force)
 	if layoutDirty then
 		-- Re-sort right away unless gaps are being held (see HoldGaps), and
 		-- always just after Sort or when the Free Space tile itself got filled.
-		if force or GetTime() < (ns.sortingUntil or 0) or not HoldGaps()
+		if force or ns.db.oneBag or GetTime() < (ns.sortingUntil or 0) or not HoldGaps()
 			or (freeButton and freeButton.fbRec.id) or (freeReagentButton and freeReagentButton.fbRec.id) then Layout()
 		else
 			freeCount, reagentFree = 0, 0

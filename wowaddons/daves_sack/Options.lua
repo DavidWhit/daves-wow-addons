@@ -134,6 +134,10 @@ local function Check(x, y, width, label, get, set, tip, size)
 	end)
 	Tooltip(cb, tip)
 	function cb:Refresh() self:SetChecked(get() and true or false) end
+	function cb:SetActive(on)
+		if on and self.Enable then self:Enable() elseif not on and self.Disable then self:Disable() end
+		self:SetAlpha(on and 1 or 0.4)
+	end
 	controls[#controls + 1] = cb
 	return cb
 end
@@ -199,10 +203,13 @@ end
 local function RefreshAll()
 	for _, c in ipairs(controls) do c:Refresh() end
 	if controls.height then controls.height:SetActive(ns.db.viewHeight ~= nil) end
-	local splitOn = ns.db.splitConsumables ~= false
+	local catsOn = not ns.db.oneBag
+	for _, cb in ipairs(controls.catControls or {}) do
+		cb:SetActive(catsOn)
+	end
+	local splitOn = catsOn and ns.db.splitConsumables ~= false
 	for _, cb in ipairs(controls.consGroups or {}) do
-		if splitOn and cb.Enable then cb:Enable() elseif not splitOn and cb.Disable then cb:Disable() end
-		cb:SetAlpha(splitOn and 1 or 0.4)
+		cb:SetActive(splitOn)
 	end
 end
 
@@ -285,15 +292,21 @@ local function Build()
 		function(key) db.backgroundStyle = key; ns.ApplyBackground() end,
 		"Which of Blizzard's standard backgrounds shows behind your items, at the darkness set above. The Settings window follows it too.")
 
-	-- Right column: Sub-categories + Show -------------------------------------
+	-- Right column: Categories + Extras ---------------------------------------
 	local y = -50
-	Header("Sub-categories", RIGHT_X, y, RIGHT_W); y = y - 20
-	Check(RIGHT_X, y, RIGHT_W, "Reagents by profession",
+	controls.catControls = {}
+	Header("Categories", RIGHT_X, y, RIGHT_W); y = y - 20
+	Check(RIGHT_X, y, RIGHT_W, "One big bag",
+		function() return db.oneBag and true or false end,
+		function(on) db.oneBag = on; ns.Relayout(); RefreshAll() end,
+		"Show every slot of your bags (filled and empty) in one continuous grid in bag/slot order instead of sorting items into categories.")
+	y = y - 26
+	controls.catControls[#controls.catControls + 1] = Check(RIGHT_X, y, RIGHT_W, "Reagents by profession",
 		function() return db.splitReagents ~= false end,
 		function(on) db.splitReagents = on; ns.Relayout() end,
 		"Tailoring, Mining, Herbalism… Main professions win over Cooking and First Aid (linen stays under Tailoring).")
 	y = y - 26
-	Check(RIGHT_X, y, RIGHT_W, "Consumables by type",
+	controls.catControls[#controls.catControls + 1] = Check(RIGHT_X, y, RIGHT_W, "Consumables by type",
 		function() return db.splitConsumables ~= false end,
 		function(on) db.splitConsumables = on; ns.Relayout(); RefreshAll() end,
 		"Split Consumables into the groups below. Untick a group to move its items into Other Consumables.")
@@ -325,11 +338,10 @@ local function Build()
 		ns.HasCurrencyAPI and "Currencies you ticked \"Show on Backpack\" in the Currency tab appear in the footer."
 			or "This version of the game has no currencies.")
 	if not ns.HasCurrencyAPI then
-		if cur.Disable then cur:Disable() end
-		cur:SetAlpha(0.4)
+		cur:SetActive(false)
 	end
 	y = y - 26
-	Check(RIGHT_X, y, RIGHT_W, "Free Space tile",
+	controls.catControls[#controls.catControls + 1] = Check(RIGHT_X, y, RIGHT_W, "Free Space tile",
 		function() return db.showFreeSpace ~= false end,
 		function(on) db.showFreeSpace = on; ns.Relayout() end,
 		"An empty slot to drop items on. You can also drop items anywhere on the bag window.")
@@ -345,8 +357,7 @@ local function Build()
 		ns.REAGENT_BAG and "Reagents you drop on the window (and split reagent stacks) go into your reagent bag first, while it has room. Everything else goes into your bags."
 			or "This version of the game has no reagent bag.")
 	if not ns.REAGENT_BAG then
-		if reagent.Disable then reagent:Disable() end
-		reagent:SetAlpha(0.4)
+		reagent:SetActive(false)
 	end
 	y = y - 26
 
@@ -359,7 +370,7 @@ local function Build()
 	local colW = floor(FULL_W / 3)
 	for i, name in ipairs(names) do
 		local col, row = (i - 1) % 3, floor((i - 1) / 3)
-		Check(LEFT_X + col * colW, foldY - 20 - row * 26, colW, name,
+		controls.catControls[#controls.catControls + 1] = Check(LEFT_X + col * colW, foldY - 20 - row * 26, colW, name,
 			function() return db.startFolded[i] end,
 			function(on)
 				db.startFolded[i] = on or nil
@@ -380,7 +391,7 @@ local function Build()
 	defaults:SetPoint("TOPRIGHT", -24, resetY - 22)
 	defaults:SetScript("OnClick", function()
 		db.columns, db.scale, db.viewHeight, db.pos, db.background, db.backgroundStyle = ns.ClampColumns(10), 1, nil, nil, 0.8, "dark"
-		db.splitReagents, db.splitConsumables = true, true
+		db.oneBag, db.splitReagents, db.splitConsumables = false, true, true
 		db.showCurrencies, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag, db.confirmDestroy = true, true, true, true, true
 		wipe(db.collapsed); wipe(db.startFolded); wipe(db.offGroups)
 		ns.ApplyScale(); ns.ApplyBackground(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies(); RefreshAll()
@@ -441,6 +452,15 @@ function ns.InitSettingsPanel()
 	if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end
 
 	local category = Settings.RegisterVerticalLayoutCategory("Dave's Sack")
+
+	local oneBag = Settings.RegisterAddOnSetting(category, ADDON .. "_oneBag", "oneBag", ns.db,
+		Settings.VarType.Boolean, "One big bag", false)
+	Settings.CreateCheckbox(category, oneBag,
+		"Show every slot of your bags (filled and empty) in one continuous grid in bag/slot order instead of sorting items into categories.")
+	oneBag:SetValueChangedCallback(function()
+		ns.Relayout()
+		ns.RefreshOptions()
+	end)
 
 	local confirm = Settings.RegisterAddOnSetting(category, ADDON .. "_confirmDestroy", "confirmDestroy", ns.db,
 		Settings.VarType.Boolean, "Confirm delete (trash)", true)

@@ -283,6 +283,7 @@ end
 local CATEGORY_VERSION = 4  -- bump when category numbering changes
 local DEFAULTS = {
 	columns = 10, scale = 1, collapsed = {}, startFolded = {}, offGroups = {},   -- startFolded = "Start collapsed"
+	oneBag = false,                                  -- show all bag slots as one single uncategorised grid
 	splitReagents = true, splitConsumables = true,
 	showCurrencies = true, showFreeSpace = true,     -- Free Space: drop target for split stacks
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot

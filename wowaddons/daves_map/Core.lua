@@ -48,8 +48,8 @@ function ns.QuestReady(questID)
 	return C_QuestLog.ReadyForTurnIn(questID) and true or false
 end
 
-function ns.QuestOnMap(questID)
-	return C_QuestLog.IsOnMap(questID)
+function ns.QuestUiMapID(questID)
+	return GetQuestUiMapID and GetQuestUiMapID(questID) or 0
 end
 
 function ns.QuestWatched(questID)
