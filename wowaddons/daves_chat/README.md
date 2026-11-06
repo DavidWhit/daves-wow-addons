@@ -1,6 +1,6 @@
 # Dave's Chat
 
-Movable chat dock for wide screens (`v0.3.9`). Party, whispers, and say on the first tab, the combat log on the second, and general on the third — with a collapsible, auto-fitted, scrollable tab list on the left inside the window (closing automatically back to full width when your mouse leaves the window), chat messages in their own bordered inner frame on the right, a choice of text direction (stock bottom-up or newest on top), and an optional faint mode that fades the window chrome down to a translucent frosted-glass pane behind the chat text (which also fades to `0` when old messages fade out and returns when a new message arrives).
+Movable chat dock for wide screens (`v0.3.11`). Party, whispers, and say on the first tab, the combat log on the second, and general on the third — with a collapsible, auto-fitted, scrollable tab list on the left inside the window (closing automatically back to full width when your mouse leaves the window), chat messages in their own bordered inner frame on the right, a choice of text direction (stock bottom-up or newest on top), and an optional faint mode that fades the window chrome down to a translucent frosted-glass pane behind the chat text (which also fades to `0` when old messages fade out and returns when a new message arrives).
 
 Targets: WoW: Forever (`## Interface: 16001`).
 

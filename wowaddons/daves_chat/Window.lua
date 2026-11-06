@@ -370,9 +370,13 @@ local function CacheWhoResults()
 end
 
 local UNIT_TOKENS = { "player", "target", "mouseover", "focus", "party1", "party2", "party3", "party4" }
+local clubScanTimes = {}
 
 local function LookupClubMember(clubID, guid, shortKey, isGuild)
 	if not (C_Club and C_Club.GetClubMembers and C_Club.GetMemberInfo) then return end
+	local now = GetTime and GetTime() or 0
+	if clubScanTimes[clubID] and (now - clubScanTimes[clubID]) < 60 then return end
+	clubScanTimes[clubID] = now
 	local ok, members = pcall(C_Club.GetClubMembers, clubID)
 	if not ok or type(members) ~= "table" then return end
 	local playerGuild = isGuild and GetGuildInfo and GetGuildInfo("player") or nil
@@ -380,24 +384,18 @@ local function LookupClubMember(clubID, guid, shortKey, isGuild)
 	for i = 1, math.min(#members, 500) do
 		local okM, m = pcall(C_Club.GetMemberInfo, clubID, members[i])
 		if okM and type(m) == "table" and IsCleanString(m.name) then
-			local mShort = ShortPlayerName(m.name)
-			local mKey = mShort and mShort:lower()
-			local mGuid = IsCleanString(m.guid) and m.guid or nil
-			if (guid and mGuid == guid) or (shortKey and mKey == shortKey) then
-				local className, classFile, raceName
-				if IsCleanPositiveNumber(m.classID) and C_CreatureInfo and C_CreatureInfo.GetClassInfo then
-					local ci = C_CreatureInfo.GetClassInfo(m.classID)
-					if type(ci) == "table" then
-						className, classFile = ci.className, ci.classFile
-					end
+			local className, classFile, raceName
+			if IsCleanPositiveNumber(m.classID) and C_CreatureInfo and C_CreatureInfo.GetClassInfo then
+				local ci = C_CreatureInfo.GetClassInfo(m.classID)
+				if type(ci) == "table" then
+					className, classFile = ci.className, ci.classFile
 				end
-				if IsCleanPositiveNumber(m.race) and C_CreatureInfo and C_CreatureInfo.GetRaceInfo then
-					local ri = C_CreatureInfo.GetRaceInfo(m.race)
-					if type(ri) == "table" then raceName = ri.raceName end
-				end
-				CachePlayerInfo(m.name, m.level, raceName, className, classFile, playerGuild, m.guildRank, m.zone, m.memberNote)
-				return
 			end
+			if IsCleanPositiveNumber(m.race) and C_CreatureInfo and C_CreatureInfo.GetRaceInfo then
+				local ri = C_CreatureInfo.GetRaceInfo(m.race)
+				if type(ri) == "table" then raceName = ri.raceName end
+			end
+			CachePlayerInfo(m.name, m.level, raceName, className, classFile, playerGuild, m.guildRank, m.zone, m.memberNote)
 		end
 	end
 end
@@ -486,45 +484,55 @@ local function ShowPlayerHyperlinkTooltip(chatFrame, linkType, linkOptions, link
 		end
 	end
 
-	for i = 1, #UNIT_TOKENS do
-		if CacheUnitPlayerInfo(UNIT_TOKENS[i], guid, shortKey) then break end
-	end
-	local entry = playerInfoCache[shortKey]
-	if not (entry and entry.level) then
-		for i = 1, 40 do
-			if CacheUnitPlayerInfo("raid" .. i, guid, shortKey) or CacheUnitPlayerInfo("nameplate" .. i, guid, shortKey) then break end
-		end
-	end
-
-	if C_FriendList and C_FriendList.GetFriendInfo then
-		local ok, fInfo = pcall(C_FriendList.GetFriendInfo, rawName)
-		if not (ok and type(fInfo) == "table") and shortName ~= rawName then
-			ok, fInfo = pcall(C_FriendList.GetFriendInfo, shortName)
-		end
-		if ok and type(fInfo) == "table" then
-			CachePlayerInfo(fInfo.name or rawName, fInfo.level, nil, fInfo.className, nil, nil, nil, fInfo.area, fInfo.notes)
-		end
-	end
-
-	entry = playerInfoCache[shortKey]
-	if not (entry and entry.level) and not inLockdown then
-		local clubID = tonumber(clubIDStr)
-		if IsCleanPositiveNumber(clubID) then
-			LookupClubMember(clubID, guid, shortKey, false)
+	local isBNet = (linkType == "BNplayer" or linkType == "BNplayerCommunity")
+	local canMatchCharacter = (not isBNet) or bnetCharName ~= nil or guid ~= nil
+	local entry = canMatchCharacter and playerInfoCache[shortKey] or nil
+	if canMatchCharacter then
+		for i = 1, #UNIT_TOKENS do
+			if CacheUnitPlayerInfo(UNIT_TOKENS[i], guid, shortKey) then break end
 		end
 		entry = playerInfoCache[shortKey]
-		if not (entry and entry.level) and C_Club and C_Club.GetGuildClubId then
-			local ok, guildClubID = pcall(C_Club.GetGuildClubId)
-			if ok and IsCleanPositiveNumber(guildClubID) and guildClubID ~= clubID then
-				LookupClubMember(guildClubID, guid, shortKey, true)
+		if not (entry and entry.level) then
+			local inRaid = IsInRaid and IsInRaid()
+			for i = 1, 40 do
+				if (inRaid and CacheUnitPlayerInfo("raid" .. i, guid, shortKey))
+					or CacheUnitPlayerInfo("nameplate" .. i, guid, shortKey) then
+					break
+				end
 			end
 		end
-	end
 
-	entry = playerInfoCache[shortKey]
-	if not (entry and entry.level) then
-		CacheWhoResults()
+		if C_FriendList and C_FriendList.GetFriendInfo then
+			local lookupName = bnetCharName or rawName
+			local ok, fInfo = pcall(C_FriendList.GetFriendInfo, lookupName)
+			if not (ok and type(fInfo) == "table") and shortName ~= lookupName then
+				ok, fInfo = pcall(C_FriendList.GetFriendInfo, shortName)
+			end
+			if ok and type(fInfo) == "table" then
+				CachePlayerInfo(fInfo.name or lookupName, fInfo.level, nil, fInfo.className, nil, nil, nil, fInfo.area, fInfo.notes)
+			end
+		end
+
 		entry = playerInfoCache[shortKey]
+		if not (entry and entry.level) and not inLockdown then
+			local clubID = tonumber(clubIDStr)
+			if IsCleanPositiveNumber(clubID) then
+				LookupClubMember(clubID, guid, shortKey, false)
+			end
+			entry = playerInfoCache[shortKey]
+			if not (entry and entry.level) and C_Club and C_Club.GetGuildClubId then
+				local ok, guildClubID = pcall(C_Club.GetGuildClubId)
+				if ok and IsCleanPositiveNumber(guildClubID) and guildClubID ~= clubID then
+					LookupClubMember(guildClubID, guid, shortKey, true)
+				end
+			end
+		end
+
+		entry = playerInfoCache[shortKey]
+		if not (entry and entry.level) then
+			CacheWhoResults()
+			entry = playerInfoCache[shortKey]
+		end
 	end
 
 	local title = shortName
@@ -645,20 +653,24 @@ local function ShowHyperlinkTooltip(chatFrame, link, text)
 end
 
 function ns:UPDATE_MOUSEOVER_UNIT()
+	if not (ns.db and ns.db.enabled) then return end
 	CacheUnitPlayerInfo("mouseover")
 end
 
 function ns:PLAYER_TARGET_CHANGED()
+	if not (ns.db and ns.db.enabled) then return end
 	CacheUnitPlayerInfo("target")
 end
 
 function ns:GROUP_ROSTER_UPDATE()
+	if not (ns.db and ns.db.enabled) then return end
 	for i = 1, #UNIT_TOKENS do
 		CacheUnitPlayerInfo(UNIT_TOKENS[i])
 	end
 end
 
 function ns:WHO_LIST_UPDATE()
+	if not (ns.db and ns.db.enabled) then return end
 	CacheWhoResults()
 	local active = ns.activePlayerTooltip
 	if ns.hyperlinkTooltipShown and active then

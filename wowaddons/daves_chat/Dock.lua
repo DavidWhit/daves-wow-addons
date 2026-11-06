@@ -398,9 +398,14 @@ local function AnchorOwnedScroll(frame)
 	SuppressFrame(frame.ScrollToBottomButton)
 	if frame.ResizeButton and frame.ResizeButton:IsShown() then frame.ResizeButton:Hide() end
 	local bar = frame.ScrollBar
-	bar:ClearAllPoints()
-	bar:SetPoint("TOPLEFT", frame, "TOPRIGHT", 6, 0)
-	bar:SetPoint("BOTTOMLEFT", frame, "BOTTOMRIGHT", 6, 0)
+	local p1, r1, rp1, x1, y1 = bar:GetPoint(1)
+	local p2, r2, rp2, x2, y2 = bar:GetPoint(2)
+	if p1 ~= "TOPLEFT" or r1 ~= frame or rp1 ~= "TOPRIGHT" or math.abs((x1 or 0) - 6) > 0.5 or math.abs(y1 or 0) > 0.5
+		or p2 ~= "BOTTOMLEFT" or r2 ~= frame or rp2 ~= "BOTTOMRIGHT" or math.abs((x2 or 0) - 6) > 0.5 or math.abs(y2 or 0) > 0.5 then
+		bar:ClearAllPoints()
+		bar:SetPoint("TOPLEFT", frame, "TOPRIGHT", 6, 0)
+		bar:SetPoint("BOTTOMLEFT", frame, "BOTTOMRIGHT", 6, 0)
+	end
 end
 
 -- Anchors editBox directly beneath ns.chatBox (independent of MinimalScrollBar visibility/width)
@@ -408,10 +413,18 @@ end
 -- visual margins above (to ns.chatBox) and below (to the outer dialog border's inner lip).
 local function AnchorOwnedEditBox(frame)
 	local edit = frame and frame.editBox
-	if not edit or not ns.chatBox then return end
-	edit:ClearAllPoints()
-	edit:SetPoint("TOPLEFT", ns.chatBox, "BOTTOMLEFT", -EDIT_PAD_X, -EDIT_OFFSET_Y)
-	edit:SetPoint("TOPRIGHT", ns.chatBox, "BOTTOMRIGHT", EDIT_PAD_X, -EDIT_OFFSET_Y)
+	local box = ns.chatBox
+	if not edit or not box then return end
+	local p1, r1, rp1, x1, y1 = edit:GetPoint(1)
+	local p2, r2, rp2, x2, y2 = edit:GetPoint(2)
+	if p1 ~= "TOPLEFT" or r1 ~= box or rp1 ~= "BOTTOMLEFT"
+		or math.abs((x1 or 0) + EDIT_PAD_X) > 0.5 or math.abs((y1 or 0) + EDIT_OFFSET_Y) > 0.5
+		or p2 ~= "TOPRIGHT" or r2 ~= box or rp2 ~= "BOTTOMRIGHT"
+		or math.abs((x2 or 0) - EDIT_PAD_X) > 0.5 or math.abs((y2 or 0) + EDIT_OFFSET_Y) > 0.5 then
+		edit:ClearAllPoints()
+		edit:SetPoint("TOPLEFT", box, "BOTTOMLEFT", -EDIT_PAD_X, -EDIT_OFFSET_Y)
+		edit:SetPoint("TOPRIGHT", box, "BOTTOMRIGHT", EDIT_PAD_X, -EDIT_OFFSET_Y)
+	end
 end
 
 -- Restores Blizzard's default XML anchors (FloatingChatFrame.xml:558-559) when unowned/undocked.
@@ -494,9 +507,14 @@ end
 -- Re-applies scrollbar and resting edit-box alpha for the current ns.chromeAlpha (faint fader).
 function ns:ApplyOwnedChromeAlpha()
 	if not ns.db.enabled or (ns.db.collapsed and not ns.inEditMode) then return end
+	local selected = ns.VisibleChatFrame()
 	ns.EachDocked(function(frame)
 		if frame == ChatFrame1 or frame.isDocked then
-			ShowOwnedScroll(frame)
+			if frame == selected then
+				ShowOwnedScroll(frame)
+			else
+				HideOwnedScroll(frame)
+			end
 			SyncEditBox(frame.editBox, false)
 		end
 	end)
@@ -513,7 +531,8 @@ local function SyncCombatLogQuickBar(ownCombatLog, closed)
 			quick:SetFrameStrata("MEDIUM")
 		end
 		quick:SetAlpha(1)
-		quick:SetShown((not closed) and ChatFrame2 ~= nil and ChatFrame2:IsShown())
+		local combatLogActive = (not closed) and ChatFrame2 ~= nil and ns.VisibleChatFrame() == ChatFrame2 and ChatFrame2:IsShown()
+		quick:SetShown(combatLogActive)
 	elseif ChatFrame2Tab and quick:GetParent() == ns.anchor then
 		quick:SetParent(ChatFrame2Tab)
 		quick:SetFrameStrata("MEDIUM")
@@ -538,9 +557,11 @@ function ns:SyncChatChrome(mode)
 	local restoring = (mode == "restore")
 	local closed = (mode == "closed")
 	local cvarWheel = not GetCVarBool or GetCVarBool("chatMouseScroll")
+	local selected = ns.VisibleChatFrame()
 
 	EachTrackedOrDocked(function(frame, isDocked)
 		local own = not restoring and isDocked
+		local isSelected = (frame == selected)
 		if own then
 			ownedFrames[frame] = true
 		else
@@ -561,6 +582,13 @@ function ns:SyncChatChrome(mode)
 		if own then
 			AnchorOwnedScroll(frame)
 			AnchorOwnedEditBox(frame)
+			if not closed then
+				if isSelected then
+					if frame.IsShown and not frame:IsShown() then frame:Show() end
+				else
+					if frame.IsShown and frame:IsShown() then frame:Hide() end
+				end
+			end
 		else
 			RestoreEditBoxAnchor(frame)
 			if frame.ScrollToBottomButton and frame.ScrollToBottomButton.SetAlpha then
@@ -571,12 +599,18 @@ function ns:SyncChatChrome(mode)
 
 		-- FloatingChatFrameTemplate keeps enableMouse="false" so 3D camera clicks pass through
 		-- empty chat space, using SetHyperlinksEnabled for links (FloatingChatFrame.xml:443).
+		-- Only enable hyperlinks on the active selected docked tab so unselected docked tabs
+		-- cannot intercept hyperlink clicks at the same frameLevel.
 		if frame.EnableMouse then frame:EnableMouse(false) end
 		if frame.SetHyperlinksEnabled and not frame.overrideHyperlinksEnabled then
+			local wantLinks
 			if own then
-				frame:SetHyperlinksEnabled(not closed)
+				wantLinks = (not closed) and isSelected
 			else
-				frame:SetHyperlinksEnabled((not closed) and (not frame.isUninteractable))
+				wantLinks = (not closed) and (not frame.isUninteractable)
+			end
+			if not frame.GetHyperlinksEnabled or (frame:GetHyperlinksEnabled() and true or false) ~= wantLinks then
+				frame:SetHyperlinksEnabled(wantLinks)
 			end
 		end
 		if own and frame.FontStringContainer and frame.FontStringContainer.SetHyperlinkPropagateToParent then
@@ -586,7 +620,10 @@ function ns:SyncChatChrome(mode)
 			end
 		end
 		if frame.EnableMouseWheel then
-			frame:EnableMouseWheel((not closed) and cvarWheel)
+			local wantWheel = (not closed) and cvarWheel and (not own or isSelected)
+			if not frame.IsMouseWheelEnabled or (frame:IsMouseWheelEnabled() and true or false) ~= wantWheel then
+				frame:EnableMouseWheel(wantWheel)
+			end
 		end
 		if frame.clickAnywhereButton then
 			if own then
@@ -599,9 +636,10 @@ function ns:SyncChatChrome(mode)
 		end
 
 		frame:SetAlpha((own and closed) and 0 or 1)
-		SetScrollBarInteractive(frame.ScrollBar, not (own and closed))
+		local scrollActive = (not (own and closed)) and (not own or isSelected)
+		SetScrollBarInteractive(frame.ScrollBar, scrollActive)
 		if own then
-			if closed then HideOwnedScroll(frame) else ShowOwnedScroll(frame) end
+			if closed or not isSelected then HideOwnedScroll(frame) else ShowOwnedScroll(frame) end
 		end
 		SyncEditBox(frame.editBox, own and closed)
 
@@ -653,9 +691,12 @@ end
 function ns:EnforceOwnedChrome()
 	if not ns.db.enabled then return end
 	local closed = ns.db.collapsed and not ns.inEditMode
+	local selected = ns.VisibleChatFrame()
+	local cvarWheel = not GetCVarBool or GetCVarBool("chatMouseScroll")
 	ns.EachDocked(function(frame)
 		local own = frame == ChatFrame1 or frame.isDocked
 		if not own then return end
+		local isSelected = (frame == selected)
 		ownedFrames[frame] = true
 		ApplyInsertMode(frame, true)
 		local name = frame.GetName and frame:GetName()
@@ -677,7 +718,9 @@ function ns:EnforceOwnedChrome()
 			if frame.EnableMouse then frame:EnableMouse(false) end
 			if frame.EnableMouseWheel then frame:EnableMouseWheel(false) end
 			if frame.SetHyperlinksEnabled and not frame.overrideHyperlinksEnabled then
-				frame:SetHyperlinksEnabled(false)
+				if not frame.GetHyperlinksEnabled or frame:GetHyperlinksEnabled() then
+					frame:SetHyperlinksEnabled(false)
+				end
 			end
 			if frame.clickAnywhereButton then
 				SuppressFrame(frame.clickAnywhereButton)
@@ -686,10 +729,15 @@ function ns:EnforceOwnedChrome()
 			HideOwnedScroll(frame)
 			SyncEditBox(frame.editBox, true)
 		else
+			if isSelected then
+				if frame.IsShown and not frame:IsShown() then frame:Show() end
+			else
+				if frame.IsShown and frame:IsShown() then frame:Hide() end
+			end
 			if frame.GetAlpha and (frame:GetAlpha() or 1) < 1 then frame:SetAlpha(1) end
 			if frame.SetHyperlinksEnabled and not frame.overrideHyperlinksEnabled then
-				if not frame.GetHyperlinksEnabled or not frame:GetHyperlinksEnabled() then
-					frame:SetHyperlinksEnabled(true)
+				if not frame.GetHyperlinksEnabled or (frame:GetHyperlinksEnabled() and true or false) ~= isSelected then
+					frame:SetHyperlinksEnabled(isSelected)
 				end
 			end
 			if frame.FontStringContainer and frame.FontStringContainer.SetHyperlinkPropagateToParent then
@@ -697,10 +745,17 @@ function ns:EnforceOwnedChrome()
 					frame.FontStringContainer:SetHyperlinkPropagateToParent(true)
 				end
 			end
+			if frame.EnableMouseWheel then
+				local wantWheel = cvarWheel and isSelected
+				if not frame.IsMouseWheelEnabled or (frame:IsMouseWheelEnabled() and true or false) ~= wantWheel then
+					frame:EnableMouseWheel(wantWheel)
+				end
+			end
 			if frame.clickAnywhereButton and frame.clickAnywhereButton.IsShown and frame.clickAnywhereButton:IsShown() then
 				SuppressFrame(frame.clickAnywhereButton)
 			end
-			ShowOwnedScroll(frame)
+			SetScrollBarInteractive(frame.ScrollBar, isSelected)
+			if isSelected then ShowOwnedScroll(frame) else HideOwnedScroll(frame) end
 		end
 	end)
 	SyncCombatLogQuickBar(ChatFrame2 ~= nil and (ChatFrame2.isDocked and true or false), closed)
@@ -726,7 +781,11 @@ function ns:HookChatFlickerGuards()
 		if not ns.db.enabled or not chatFrame or not ownedFrames[chatFrame] then return end
 		SuppressFrame(chatFrame.ScrollToBottomButton)
 		local closed = ns.db.collapsed and not ns.inEditMode
-		if closed then HideOwnedScroll(chatFrame) else ShowOwnedScroll(chatFrame) end
+		if closed or chatFrame ~= ns.VisibleChatFrame() then
+			HideOwnedScroll(chatFrame)
+		else
+			ShowOwnedScroll(chatFrame)
+		end
 	end
 
 	local function ClampOwnedTab(chatFrame, refreshStack)
@@ -852,13 +911,22 @@ function ns:SeatChat()
 
 	if ns.tabColumn then
 		if showTabs and tabW > 0 then
-			ns.tabColumn:ClearAllPoints()
-			ns.tabColumn:SetPoint("TOPLEFT", anchor, "TOPLEFT", EDGE, -top)
-			ns.tabColumn:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", EDGE, BOTTOM_TAB)
-			ns.tabColumn:SetWidth(tabW)
-			ns.tabColumn:Show()
+			local p1, r1, rp1, x1, y1 = ns.tabColumn:GetPoint(1)
+			local p2, r2, rp2, x2, y2 = ns.tabColumn:GetPoint(2)
+			if p1 ~= "TOPLEFT" or r1 ~= anchor or rp1 ~= "TOPLEFT"
+				or math.abs((x1 or 0) - EDGE) > 0.5 or math.abs((y1 or 0) + top) > 0.5
+				or p2 ~= "BOTTOMLEFT" or r2 ~= anchor or rp2 ~= "BOTTOMLEFT"
+				or math.abs((x2 or 0) - EDGE) > 0.5 or math.abs((y2 or 0) - BOTTOM_TAB) > 0.5 then
+				ns.tabColumn:ClearAllPoints()
+				ns.tabColumn:SetPoint("TOPLEFT", anchor, "TOPLEFT", EDGE, -top)
+				ns.tabColumn:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", EDGE, BOTTOM_TAB)
+			end
+			if math.abs((ns.tabColumn:GetWidth() or 0) - tabW) > 0.5 then
+				ns.tabColumn:SetWidth(tabW)
+			end
+			if not ns.tabColumn:IsShown() then ns.tabColumn:Show() end
 		else
-			ns.tabColumn:Hide()
+			if ns.tabColumn:IsShown() then ns.tabColumn:Hide() end
 		end
 	end
 	if ns.tabColumnFill then
@@ -866,9 +934,16 @@ function ns:SeatChat()
 	end
 
 	if ns.chatBox then
-		ns.chatBox:ClearAllPoints()
-		ns.chatBox:SetPoint("TOPLEFT", anchor, "TOPLEFT", boxLeft, -top)
-		ns.chatBox:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -EDGE, BOTTOM_BOX)
+		local p1, r1, rp1, x1, y1 = ns.chatBox:GetPoint(1)
+		local p2, r2, rp2, x2, y2 = ns.chatBox:GetPoint(2)
+		if p1 ~= "TOPLEFT" or r1 ~= anchor or rp1 ~= "TOPLEFT"
+			or math.abs((x1 or 0) - boxLeft) > 0.5 or math.abs((y1 or 0) + top) > 0.5
+			or p2 ~= "BOTTOMRIGHT" or r2 ~= anchor or rp2 ~= "BOTTOMRIGHT"
+			or math.abs((x2 or 0) + EDGE) > 0.5 or math.abs((y2 or 0) - BOTTOM_BOX) > 0.5 then
+			ns.chatBox:ClearAllPoints()
+			ns.chatBox:SetPoint("TOPLEFT", anchor, "TOPLEFT", boxLeft, -top)
+			ns.chatBox:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMRIGHT", -EDGE, BOTTOM_BOX)
+		end
 		ns.chatBox:SetShown(not closed)
 	end
 	if ns.chatBoxFill then
@@ -884,20 +959,29 @@ function ns:SeatChat()
 
 	-- Use Base anchor methods (EditModeSystemTemplates.lua:13-17) so seating never invokes
 	-- SetPointOverride -> SetSnappedToFrame(anchor) or OnEditModeSystemAnchorChanged.
-	if chat.ClearAllPointsBase then chat:ClearAllPointsBase() else chat:ClearAllPoints() end
-	if chat.SetPointBase then
-		chat:SetPointBase("BOTTOMLEFT", anchor, "BOTTOMLEFT", chatLeft, chatBottom)
-	else
-		chat:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", chatLeft, chatBottom)
+	-- Only mutate points/size when they actually change so ScrollingMessageFrameMixin:OnPreSizeChanged
+	-- never marks the layout dirty or releases pooled FontStrings mid-click.
+	local point, rel, relPoint, curX, curY = chat:GetPoint(1)
+	local numPoints = chat.GetNumPoints and chat:GetNumPoints() or 1
+	if numPoints ~= 1 or point ~= "BOTTOMLEFT" or rel ~= anchor or relPoint ~= "BOTTOMLEFT"
+		or math.abs((curX or 0) - chatLeft) > 0.5 or math.abs((curY or 0) - chatBottom) > 0.5 then
+		if chat.ClearAllPointsBase then chat:ClearAllPointsBase() else chat:ClearAllPoints() end
+		if chat.SetPointBase then
+			chat:SetPointBase("BOTTOMLEFT", anchor, "BOTTOMLEFT", chatLeft, chatBottom)
+		else
+			chat:SetPoint("BOTTOMLEFT", anchor, "BOTTOMLEFT", chatLeft, chatBottom)
+		end
 	end
-	chat:SetSize(width, height)
+	if math.abs((chat:GetWidth() or 0) - width) > 0.5 or math.abs((chat:GetHeight() or 0) - height) > 0.5 then
+		chat:SetSize(width, height)
+	end
 	seatedLeft, seatedBottom, seatedW, seatedH = chatLeft, chatBottom, width, height
 
 	local dockDrifted = false
 	ns.EachDocked(function(frame)
 		if frame ~= chat then
-			local _, rel = frame:GetPoint(1)
-			if rel ~= chat then dockDrifted = true end
+			local _, dockRel = frame:GetPoint(1)
+			if dockRel ~= chat then dockDrifted = true end
 		end
 	end)
 	if dockDrifted then
@@ -906,6 +990,13 @@ function ns:SeatChat()
 		end
 		if FCF_DockUpdate then FCF_DockUpdate() end
 	end
+	ns.EachDocked(function(frame)
+		if frame ~= chat and frame.SetSize then
+			if math.abs((frame:GetWidth() or 0) - width) > 0.5 or math.abs((frame:GetHeight() or 0) - height) > 0.5 then
+				frame:SetSize(width, height)
+			end
+		end
+	end)
 
 	if width ~= lastSeatedWidth then
 		lastSeatedWidth = width

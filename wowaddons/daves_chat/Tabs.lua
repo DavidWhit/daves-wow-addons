@@ -360,14 +360,13 @@ local function OpenTabContextMenu(owner, frame)
 	end)
 end
 
--- Selects the default window if it is a shown docked tab. When `final` is true (the last login pass,
+-- Selects the default window if it is a docked tab. When `final` is true (the last login pass,
 -- once Blizzard has docked every window) a default that no longer exists falls back to Chat.
 function ns:SelectDefaultTab(final)
 	if not ns.db or not ns.db.enabled then return end
 	local id = DefaultTabID()
 	local frame = _G["ChatFrame" .. id]
-	local usable = frame and (frame == ChatFrame1 or frame.isDocked) and frame.IsShown and frame:IsShown()
-		and not frame.isTemporary
+	local usable = frame and (frame == ChatFrame1 or frame.isDocked) and not frame.isTemporary
 	if not usable then
 		if final and id ~= 1 then ns.db.defaultTab = 1 end
 		frame = ChatFrame1
