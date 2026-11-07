@@ -40,6 +40,7 @@ Run them with Python 3 (`py -3` on Windows, `python3` on macOS) from `plugins/wo
 | `Get-WowTaintLog.py [-Addon X]` | The client's `Logs\taint.log`: which addon tainted what, and the blocked call. Read when nothing was recorded, or when the taint probe names nothing. Reads the live log while the game runs (a `/reload` starts a new one) |
 | `Deploy-WowAddon.py -Path X [-Mode Link/Copy] [-Remove]` | Junction or copy into `Interface\AddOns`; never deletes real folders |
 | `Link-WowAddons.py [-Path dir] [-Flavor ...] [-Remove] [-NoDevAddons] [-WhatIf]` | After cloning or pulling: links every addon in `wowaddons/` into the WoW: Forever client (`_forever_`), plus the kit's error recorder; real folders go to `AddOns.backup` (junctions on Windows, symlinks on macOS) |
+| `Publish-WowReleases.py [-Branch releases] [-Remote origin] [-OutputDir dir] [-Push] [-WhatIf]` | Packs each of the 7 `daves_*` addons into a clean `<addon>.zip` (excluding dev files) and force-updates the orphan `releases` branch without switching the working tree |
 | `link-wow-addons.sh [--dry-run] [--remove] [--no-dev-addons] [--wow-root DIR] [dir]` | Pure-bash macOS fallback (symlinks every addon into `_forever_/Interface/AddOns`, error recorder included) |
 | `Install-WowDevTools.py` | luacheck from its official GitHub release, plus the API index |
 | `Update-WowUiSource.py [-Branch forever]` | Download/refresh a local copy of Blizzard's UI source and `INDEX.tsv` under `data/ui-source/<branch>` |

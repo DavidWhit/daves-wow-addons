@@ -23,7 +23,17 @@ Don't release with errors. Warnings need either a fix or a stated reason. If cha
 - Bump `## Version:` in the TOC (semver, e.g. `1.4.0`). Add a changelog entry if the project keeps one.
 - `## Interface:` must match the current WoW: Forever Interface number (`16001`, or whatever `Find-WowInstall.py` reports).
 
-## 3. Build a zip locally (no packager needed)
+## 3. Publish all `<addon>.zip` packages to the `releases` branch
+
+Whenever committing and pushing to `main`, update the orphan `releases` branch with fresh `<addon>.zip` archives for all 7 `daves_*` addons (`daves_balls`, `daves_castbar`, `daves_chat`, `daves_frames`, `daves_map`, `daves_outofmyway`, `daves_sack`):
+
+```powershell
+py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Publish-WowReleases.py" -Push
+```
+
+`Publish-WowReleases.py` packs each addon's runtime files under `<addon>/...` (excluding `tools/`, `tests/`, `guides/`, `.vscode/`, `.luacheckrc`, `.pkgmeta`, `.gitignore`, `README.md`, `NOTES.md`, `*.zip`), generates an install `README.md` with versions and sizes, writes a single parentless (orphan) commit onto `refs/heads/releases` without switching the working tree, and force-pushes `releases` to `origin` so binary zips never bloat history. Pass `-OutputDir <dir>` to write the `.zip` files to a local folder instead.
+
+## 4. Build a single zip by hand (optional)
 
 The zip must contain the addon **folder** at its root (`MyAddon/MyAddon.toc`), not loose files. Exclude dev files:
 

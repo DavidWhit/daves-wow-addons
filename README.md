@@ -8,7 +8,7 @@ World of Warcraft addons for **WoW: Forever** (Interface `16001`), plus the tool
 | --- | --- |
 | [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs with sloshing liquid and cursor glare (`v0.1.5`) |
 | [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 20 procedural looks — 7 elements, 4 gathering & 6 crafting professions, Disenchant, First Aid, and Plain (`v0.5.4`) |
-| [`wowaddons/daves_chat`](wowaddons/daves_chat) | **Dave's Chat**: movable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with an auto-closing collapsible left tab list, bordered inner chat pane, `Text direction`, and frosted-glass `Faint` mode (`v0.3.9`) |
+| [`wowaddons/daves_chat`](wowaddons/daves_chat) | **Dave's Chat**: movable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with an auto-closing collapsible left tab list, bordered inner chat pane, `Text direction`, and frosted-glass `Faint` mode (`v0.3.11`) |
 | [`wowaddons/daves_frames`](wowaddons/daves_frames) | **Dave's Frames**: custom target unit frame with central portrait ring, inward-emptying health & resource bars, hanging aura boards on chains, and 9 player class plates (`v0.2.10`) |
 | [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: Map Genie pin layer, quest chain links, search/filter sidebar, Ready-to-Turn-In & zone quest tracker, quest focus, and OpenMap seamless world map (`v0.5.7`) |
 | [`wowaddons/daves_outofmyway`](wowaddons/daves_outofmyway) | **Dave's Out Of My Way**: Edit Mode Need/Greed loot-roll mover and never-collapsed buff frame (`v0.1.5`) |
@@ -131,7 +131,7 @@ Add `-WhatIf` (`--dry-run` for bash) to preview, and `-Remove` (`--remove`) to u
 
 ## Installing an addon without the repo
 
-Copy an addon folder from `wowaddons/` into your game's AddOns folder, e.g.:
+Ready-to-extract `<addon>.zip` packages for all 7 addons live on the [`releases` branch](https://github.com/DavidWhit/daves-wow-addons/tree/releases) (updated automatically via `Publish-WowReleases.py -Push`). Download any `<addon>.zip` and extract it into your game's `AddOns` folder, or copy an addon folder from `wowaddons/` into:
 
 ```
 <WoW install>\_forever_\Interface\AddOns\daves_sack
