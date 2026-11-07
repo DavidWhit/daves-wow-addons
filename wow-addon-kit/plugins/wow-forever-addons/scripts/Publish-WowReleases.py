@@ -114,14 +114,13 @@ def run_git(args: list[str], input_text: str | None = None) -> str:
     proc = subprocess.run(
         ["git", *args],
         cwd=REPO_ROOT,
-        input=input_text,
+        input=input_text.encode("utf-8") if input_text is not None else None,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
     )
     if proc.returncode != 0:
-        wowkit.die(f"git {' '.join(args)} failed: {(proc.stderr or proc.stdout).strip()}")
-    return proc.stdout.strip()
+        err = (proc.stderr or proc.stdout).decode("utf-8", errors="replace").strip()
+        wowkit.die(f"git {' '.join(args)} failed: {err}")
+    return proc.stdout.decode("utf-8", errors="replace").strip()
 
 
 def main(argv: list[str]) -> None:
