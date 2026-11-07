@@ -12,7 +12,7 @@ World of Warcraft addons for **WoW: Forever** (Interface `16001`), plus the tool
 | [`wowaddons/daves_frames`](wowaddons/daves_frames) | **Dave's Frames**: custom target unit frame with central portrait ring, inward-emptying health & resource bars, hanging aura boards on chains, and 9 player class plates (`v0.2.10`) |
 | [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: Map Genie pin layer, quest chain links, search/filter sidebar, Ready-to-Turn-In & zone quest tracker, quest focus, and OpenMap seamless world map (`v0.5.7`) |
 | [`wowaddons/daves_outofmyway`](wowaddons/daves_outofmyway) | **Dave's Out Of My Way**: Edit Mode Need/Greed loot-roll mover and never-collapsed buff frame (`v0.1.5`) |
-| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories or an optional "One big bag" slot grid, reagent-bag routing, trash/delete button, and taint-safe secure controls (`v1.7.21`) |
+| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories or an optional "One big bag" slot grid, reagent-bag routing, trash/delete button, local Auction House price cache & tooltips, and taint-safe secure controls (`v1.7.25`) |
 | [`wow-addon-kit`](wow-addon-kit) | Plugin (`wow-forever-addons`) and Python CLI toolkit for scaffolding, static API/secret/taint validation, review packets, in-game error/taint inspection, and linking |
 
 ## The addons
@@ -98,7 +98,7 @@ More in [its README](wowaddons/daves_outofmyway/README.md).
 
 ### Dave's Sack (`daves_sack`)
 
-One bag window for all your bags, styled like Blizzard's HUD Edit Mode window. Items are sorted into collapsible categories (including Forever Camping & Keys, Consumables split into Alchemy / Food & Drink / First Aid, and Reagents split by profession) or shown in one continuous **"One big bag"** slot grid, with search, sort, quality-coloured slots, reagent-bag routing, an item destroy/trash button (with `"Confirm delete (trash)"`), backpack currencies, and corner resizing.
+One bag window for all your bags, styled like Blizzard's HUD Edit Mode window. Items are sorted into collapsible categories (including Forever Camping & Keys, Consumables split into Alchemy / Food & Drink / First Aid, and Reagents split by profession) or shown in one continuous **"One big bag"** slot grid, with search, sort, quality-coloured slots, reagent-bag routing, an item destroy/trash button (with `"Confirm delete (trash)"`), local Auction House price caching (unit & stack prices on item tooltips plus tradeable bag AH value and cache age in the footer), backpack currencies, and corner resizing.
 
 ```text
 /sack                    open or close the bags (/davessack alias)

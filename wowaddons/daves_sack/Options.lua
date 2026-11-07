@@ -341,6 +341,14 @@ local function Build()
 		cur:SetActive(false)
 	end
 	y = y - 26
+	Check(RIGHT_X, y, RIGHT_W, "Auction House prices",
+		function() return db.showAuctionPrices ~= false end,
+		function(on)
+			db.showAuctionPrices = on
+			if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
+		end,
+		"Cache item prices when you visit or browse the Auction House, show unit and stack prices on item tooltips, and show your bags' tradeable AH value and last update time at the bottom of the window.")
+	y = y - 26
 	controls.catControls[#controls.catControls + 1] = Check(RIGHT_X, y, RIGHT_W, "Free Space tile",
 		function() return db.showFreeSpace ~= false end,
 		function(on) db.showFreeSpace = on; ns.Relayout() end,
@@ -392,9 +400,11 @@ local function Build()
 	defaults:SetScript("OnClick", function()
 		db.columns, db.scale, db.viewHeight, db.pos, db.background, db.backgroundStyle = ns.ClampColumns(10), 1, nil, nil, 0.8, "dark"
 		db.oneBag, db.splitReagents, db.splitConsumables = false, true, true
-		db.showCurrencies, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag, db.confirmDestroy = true, true, true, true, true
+		db.showCurrencies, db.showAuctionPrices, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag, db.confirmDestroy = true, true, true, true, true, true
 		wipe(db.collapsed); wipe(db.startFolded); wipe(db.offGroups)
-		ns.ApplyScale(); ns.ApplyBackground(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies(); RefreshAll()
+		ns.ApplyScale(); ns.ApplyBackground(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies()
+		if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
+		RefreshAll()
 	end)
 
 	local tips = Label(opt, ns.TIPS or "", "GameFontDisableSmall")
@@ -485,6 +495,15 @@ function ns.InitSettingsPanel()
 	Settings.CreateCheckbox(category, autoSplit,
 		"After you split a stack, the new stack goes straight into a free slot next to the original. Paused while a merchant, mailbox, trade, bank or auction window is open.")
 	autoSplit:SetValueChangedCallback(function()
+		ns.RefreshOptions()
+	end)
+
+	local ahPrices = Settings.RegisterAddOnSetting(category, ADDON .. "_showAuctionPrices", "showAuctionPrices", ns.db,
+		Settings.VarType.Boolean, "Auction House prices", true)
+	Settings.CreateCheckbox(category, ahPrices,
+		"Cache item prices when you visit or browse the Auction House, show unit and stack prices on item tooltips, and show your bags' tradeable AH value and last update time at the bottom of the window.")
+	ahPrices:SetValueChangedCallback(function()
+		if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
 		ns.RefreshOptions()
 	end)
 

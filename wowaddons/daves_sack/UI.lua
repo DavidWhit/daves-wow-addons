@@ -112,6 +112,7 @@ local function MoneyString(m)
 	if c > 0 or out == "" then out = out .. (out ~= "" and "  " or "") .. c .. COPPER_ICON end
 	return out
 end
+ns.MoneyString = MoneyString
 
 local function Sound(kit)
 	if SOUNDKIT and SOUNDKIT[kit] then PlaySound(SOUNDKIT[kit]) end
@@ -122,6 +123,10 @@ end
 ---------------------------------------------------------------------------
 local frame, content, search, slotsText, barBg, barFill, money
 local reagentText, reagentBarBg, reagentBarFill      -- footer: the reagent bag's own counter
+local ahRow, ahValueText, ahTimeText, ahScanBarBg, ahScanBarFill  -- footer bottom row: cached AH bag value, status & scan progress bar
+local ahBagValue, ahPricedStacks, ahTradeableStacks = 0, 0, 0
+local AH_ROW_H = 18
+local function AhRowOffset() return (ns.db and ns.db.showAuctionPrices ~= false) and AH_ROW_H or 0 end
 local scroll, track, thumb, nativeBar, maxScroll = nil, nil, nil, nil, 0
 local contentW, contentH = 1, 1
 -- "Fit height to my items" fits when the bags open (or you change a setting /
@@ -441,11 +446,126 @@ local function FillBar(fill, used, total, width)
 	else fill:SetColorTexture(0.85, 0.85, 0.85, 1) end
 end
 
+-- Unique tradeable itemKeys currently in the player's bags (for a fast AH browse query on AUCTION_HOUSE_SHOW).
+local seenTradeable = {}
+function ns.BuildTradeableItemKeys(makeKey)
+	if not makeKey then return nil end
+	wipe(seenTradeable)
+	local keys = {}
+	local GetSlotInfo = C_Container and C_Container.GetContainerItemInfo
+	for _, bag in ipairs(bagList) do
+		if bag ~= KEYRING_CONTAINER then
+			local list = buttons[bag]
+			if list and list.n and list.n > 0 then
+				for slot = 1, list.n do
+					local b = list[slot]
+					local r = b and b.fbRec
+					local id = r and r.id
+					if id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST and not seenTradeable[id] then
+						seenTradeable[id] = true
+						keys[#keys + 1] = makeKey(id)
+					end
+				end
+			elseif GetSlotInfo then
+				local num = GetNumSlots(bag) or 0
+				for slot = 1, num do
+					local info = GetSlotInfo(bag, slot)
+					local id = info and info.itemID
+					if id and (info.stackCount or 0) > 0 and not info.isBound and not seenTradeable[id] then
+						local cat = ns.Categorise(id, info.hyperlink, bag, slot)
+						if cat ~= ns.CAT_QUEST then
+							seenTradeable[id] = true
+							keys[#keys + 1] = makeKey(id)
+						end
+					end
+				end
+			end
+		end
+	end
+	return keys
+end
+
+local lastAhShow
+local function UpdateAuctionFooter()
+	if not ahRow then return end
+	local show = ns.db and ns.db.showAuctionPrices ~= false
+	if show ~= lastAhShow then
+		lastAhShow = show
+		local off = show and AH_ROW_H or 0
+		slotsText:ClearAllPoints(); slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24 + off)
+		barBg:ClearAllPoints(); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14 + off)
+		money:ClearAllPoints(); money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
+		ahRow:SetShown(show)
+	end
+	if not show then return end
+
+	local prices = ns.db and ns.db.ahPrices
+	local total, priced, tradeable = 0, 0, 0
+	for _, bag in ipairs(bagList) do
+		if bag ~= KEYRING_CONTAINER then
+			local list = buttons[bag]
+			if list then
+				for slot = 1, list.n do
+					local b = list[slot]
+					local r = b.fbRec
+					if r.id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST then
+						tradeable = tradeable + 1
+						local p = prices and prices[r.id]
+						if p and p > 0 then
+							total = total + p * r.count
+							priced = priced + 1
+						end
+					end
+				end
+			end
+		end
+	end
+	ahBagValue, ahPricedStacks, ahTradeableStacks = total, priced, tradeable
+
+	local hasCache = (ns.db and ns.db.ahUpdated) or (ns.ahCachedCount or 0) > 0
+	local doneFlash = not ns.ahScanning and ns.ahScanDoneUntil and GetTime and GetTime() < ns.ahScanDoneUntil
+	local scanText
+	if ns.ahScanning then
+		scanText = ns.ahScanProgress and format("|cffd4a94eCaching AH %d%%…|r", ns.ahScanProgress) or "|cffd4a94eCaching AH…|r"
+	elseif doneFlash then
+		scanText = "|cff5cd65cAH Cache Complete|r"
+	end
+	if hasCache then
+		ahValueText:SetText(format("|cffd4a94eAH:|r %s", MoneyString(total)))
+		if scanText then
+			ahTimeText:SetText(scanText)
+		else
+			local age = ns.FormatAge and ns.FormatAge(ns.db.ahUpdated)
+			ahTimeText:SetText(age and ("Updated " .. age) or "")
+		end
+	else
+		ahValueText:SetText("|cff8c8c8cAH: Visit Auction House to cache prices|r")
+		ahTimeText:SetText(scanText or "")
+	end
+
+	if ahScanBarBg and ahScanBarFill then
+		if ns.ahScanning or doneFlash then
+			local pct = doneFlash and 100 or max(5, min(100, ns.ahScanProgress or 15))
+			local barW = max(40, (frame:GetWidth() or 300) - (PAD + 4) * 2)
+			if doneFlash then
+				ahScanBarFill:SetColorTexture(0.35, 0.82, 0.42, 1)
+			else
+				ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
+			end
+			ahScanBarFill:SetWidth(max(2, barW * pct / 100))
+			ahScanBarBg:Show(); ahScanBarFill:Show()
+		else
+			ahScanBarBg:Hide(); ahScanBarFill:Hide()
+		end
+	end
+end
+
 -- Two counters side by side: your bags, then the reagent bag (only while one
 -- is equipped). Nothing shrinks or overlaps: the window's minimum width is
 -- measured from these strings and the gold (ns.MinColumns, below).
 local lastUsed, lastTotal, lastRUsed, lastRTotal
 local function UpdateFooter()
+	UpdateAuctionFooter()
 	local used, rUsed = totalSlots - freeCount, reagentTotal - reagentFree
 	if used == lastUsed and totalSlots == lastTotal and rUsed == lastRUsed and reagentTotal == lastRTotal then return end
 	lastUsed, lastTotal, lastRUsed, lastRTotal = used, totalSlots, rUsed, reagentTotal
@@ -489,6 +609,10 @@ function ns.MinColumns()
 	local w = 4 + max(BAR_W, slotsText:GetStringWidth() or 0)
 	if reagentTotal > 0 then w = w + BAR_GAP + max(BAR_W, reagentText:GetStringWidth() or 0) end
 	w = w + 12 + (money:GetStringWidth() or 0) + 4
+	if ahRow and ahRow:IsShown() then
+		local ahW = 4 + (ahValueText:GetStringWidth() or 0) + 12 + (ahTimeText:GetStringWidth() or 0) + 4
+		if ahW > w then w = ahW end
+	end
 	return max(MIN_COLS, min(ns.MaxColumns(), ceil((w + GAP) / (SLOT + GAP))))
 end
 
@@ -694,6 +818,7 @@ end
 
 local function UpdateMoney()
 	money:SetText(MoneyString(GetMoney()))
+	if numTokens > 0 and ns.RefitCurrencies then ns.RefitCurrencies() end
 	if frame:IsShown() and ns.MinColumns() > ns.db.columns then Layout() end   -- more digits: widen
 end
 
@@ -982,7 +1107,7 @@ local function GetBackpackToken(i)
 	if t then return t.iconFileID, t.quantity, t.currencyTypesID end
 end
 
-local FOOT_BASE, TOKEN_ROW_Y, TOKEN_ROW_H, TOKEN_GAP = 44, 38, 20, 10
+local FOOT_BASE, TOKEN_ROW_Y, TOKEN_ROW_H, TOKEN_GAP = 44, 26, 20, 10
 ns.HasCurrencyAPI = GetBackpackToken ~= nil
 
 local function FormatCount(n)
@@ -991,12 +1116,19 @@ local function FormatCount(n)
 	return s
 end
 
-local function TokenTooltip(owner, index)
+local function TokenTooltip(owner, token)
+	if not token then return end
 	GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-	if GameTooltip.SetBackpackToken then GameTooltip:SetBackpackToken(index) end
-	if TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION then
-		GameTooltip:AddLine(" ")
-		GameTooltip:AddLine(TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION, 0.1, 1, 0.1, true)
+	if token.index and GameTooltip.SetBackpackToken then
+		GameTooltip:SetBackpackToken(token.index)
+		if TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION then
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine(TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION, 0.1, 1, 0.1, true)
+		end
+	elseif token.listIndex and GameTooltip.SetCurrencyToken then
+		GameTooltip:SetCurrencyToken(token.listIndex)
+	elseif token.currencyID and GameTooltip.SetCurrencyByID then
+		GameTooltip:SetCurrencyByID(token.currencyID, token.quantity)
 	end
 	GameTooltip:Show()
 end
@@ -1006,11 +1138,13 @@ end
 local function TokenClick(b)
 	if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
 	local C = C_CurrencyInfo
-	if IsModifiedClick and b.currencyID and C then
-		if IsModifiedClick("CHATLINK") and C.GetCurrencyLink and HandleModifiedItemClick then
-			if HandleModifiedItemClick(C.GetCurrencyLink(b.currencyID, b.quantity)) then return end
+	if IsModifiedClick and C then
+		if IsModifiedClick("CHATLINK") and HandleModifiedItemClick then
+			local link = (b.currencyID and C.GetCurrencyLink and C.GetCurrencyLink(b.currencyID, b.quantity))
+				or (b.listIndex and C.GetCurrencyListLink and C.GetCurrencyListLink(b.listIndex))
+			if link and HandleModifiedItemClick(link) then return end
 		end
-		if IsModifiedClick("TOKENWATCHTOGGLE") and C.SetCurrencyBackpackByID then
+		if IsModifiedClick("TOKENWATCHTOGGLE") and b.index and b.currencyID and C.SetCurrencyBackpackByID then
 			C.SetCurrencyBackpackByID(b.currencyID, false)   -- our hook refreshes the row
 		end
 	end
@@ -1044,7 +1178,7 @@ local function MakeCurrencyOpen()
 	b:SetScript("PostClick", function(self)
 		if self.token and not self:GetAttribute("type") then TokenClick(self.token) end
 	end)
-	b:SetScript("OnEnter", function(self) if self.token then TokenTooltip(self, self.token.index) end end)
+	b:SetScript("OnEnter", function(self) if self.token then TokenTooltip(self, self.token) end end)
 	b:SetScript("OnLeave", function() GameTooltip:Hide(); ns.ParkCurrencyOpen() end)
 	b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
 	currencyOpen = b
@@ -1067,7 +1201,7 @@ local function TokenButton(i)
 	b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(14, 14); b.icon:SetPoint("RIGHT")
 	b.count = b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
 	b.count:SetPoint("RIGHT", b.icon, "LEFT", -3, 0)
-	b:SetScript("OnEnter", function(self) TokenTooltip(self, self.index); CoverToken(self) end)
+	b:SetScript("OnEnter", function(self) TokenTooltip(self, self); CoverToken(self) end)
 	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
 	b:SetScript("OnClick", TokenClick)
@@ -1081,37 +1215,78 @@ local function PlaceFooterLine()
 	footLine:SetPoint("BOTTOMRIGHT", -PAD, FOOT_H - 4)
 end
 
--- Lays the currencies out right-to-left (like Blizzard's) in the current
--- width, wrapping onto extra rows when they don't fit; the footer grows one
--- row per line of currencies.
+-- Lays the currencies out right-to-left: on the same line to the left of your
+-- gold when the window width permits it, or stacked with the gold alongside
+-- the stacked bag capacity + fill bar when narrower.
 function ns.RefitCurrencies()
 	if refitting then return end
 	refitting = true
 	refitWidth = frame:GetWidth()
 	local avail = refitWidth - PAD * 2 - 8
-	-- pass 1: widths and row breaks
-	local row, used = 0, 0
+	local off = AhRowOffset()
+	local leftW = max(BAR_W, slotsText:GetStringWidth() or 0)
+	if reagentTotal > 0 then
+		leftW = leftW + BAR_GAP + max(BAR_W, reagentText:GetStringWidth() or 0)
+	end
+	local moneyW = money:GetStringWidth() or 0
+
+	local totalTokenW = 0
 	for i = 1, numTokens do
 		local t, b = tokens[i], TokenButton(i)
-		b.index, b.currencyID, b.quantity = t[1], t[4], t[3]
+		b.index, b.currencyID, b.quantity, b.listIndex = t[1], t[4], t[3], t[5]
 		b.icon:SetTexture(t[2])
 		b.count:SetText(FormatCount(t[3]))
 		local w = (b.count:GetStringWidth() or 0) + 20
-		if used > 0 and used + w > avail then row, used = row + 1, 0 end
-		b.w, b.row, b.x = w, row, used
-		used = used + w + TOKEN_GAP
-	end
-	local rows = numTokens > 0 and row + 1 or 0
-	-- pass 2: place them, first row on top (nearest the items)
-	for i = 1, numTokens do
-		local b = tokenButtons[i]
-		b:SetWidth(b.w)
-		b:ClearAllPoints()
-		b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(PAD + 4 + b.x), TOKEN_ROW_Y + (rows - 1 - b.row) * TOKEN_ROW_H)
-		b:Show()
+		b.w = w
+		totalTokenW = totalTokenW + w + (i > 1 and TOKEN_GAP or 0)
 	end
 	for i = numTokens + 1, #tokenButtons do tokenButtons[i]:Hide() end
-	local want = FOOT_BASE + rows * TOKEN_ROW_H
+
+	local want
+	if numTokens == 0 then
+		money:ClearAllPoints()
+		money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
+		want = FOOT_BASE + off
+	elseif leftW + 16 + totalTokenW + TOKEN_GAP + moneyW <= avail then
+		-- Single line: currencies sit inline to the left of gold on the same row.
+		money:ClearAllPoints()
+		money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
+		local x = moneyW + TOKEN_GAP
+		for i = 1, numTokens do
+			local b = tokenButtons[i]
+			b:SetWidth(b.w)
+			b:ClearAllPoints()
+			b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(PAD + 4 + x), 16 + off)
+			b:Show()
+			x = x + b.w + TOKEN_GAP
+		end
+		want = FOOT_BASE + off
+	else
+		-- Stacked: gold aligns with the bottom fill bar, and the first currency row
+		-- aligns with the bag capacity text above it.
+		money:ClearAllPoints()
+		money:SetPoint("BOTTOMRIGHT", -PAD - 4, 13 + off)
+		local row, used = 0, 0
+		local row0Avail = max(60, avail - leftW - 14)
+		for i = 1, numTokens do
+			local b = tokenButtons[i]
+			local w = b.w
+			local limit = (row == 0) and row0Avail or avail
+			if used > 0 and used + w > limit then row, used = row + 1, 0 end
+			b.row, b.x = row, used
+			used = used + w + TOKEN_GAP
+		end
+		local rows = row + 1
+		for i = 1, numTokens do
+			local b = tokenButtons[i]
+			b:SetWidth(b.w)
+			b:ClearAllPoints()
+			b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(PAD + 4 + b.x), TOKEN_ROW_Y + off + (rows - 1 - b.row) * TOKEN_ROW_H)
+			b:Show()
+		end
+		want = FOOT_BASE + 4 + off + (rows - 1) * TOKEN_ROW_H
+	end
+
 	if want ~= FOOT_H then
 		FOOT_H = want
 		PlaceFooterLine()
@@ -1121,18 +1296,57 @@ function ns.RefitCurrencies()
 	refitting = false
 end
 
--- Reads the watched currencies from the game (on open, currency changes,
--- and when you tick/untick "Show on Backpack").
+function ns.RefreshAuctionFooter()
+	if not frame then return end
+	UpdateAuctionFooter()
+	if frame:IsShown() then
+		ns.RefitCurrencies()
+		if ns.MinColumns() > ns.db.columns then
+			Layout()
+		end
+	end
+	if ns.RefreshOptions then ns.RefreshOptions() end
+end
+
+-- Reads watched backpack currencies plus any discovered currencies you hold
+-- (such as WoW: Forever's supply-crate Trader currency), even if "Show on Backpack"
+-- hasn't been manually ticked in the Currency tab yet.
+local seenCurrencies = {}
 function ns.RefreshCurrencies()
 	numTokens = 0
-	if GetBackpackToken and ns.db.showCurrencies ~= false then
-		for i = 1, 30 do
-			local icon, count, id = GetBackpackToken(i)
-			if not icon then break end                          -- the watched list has no gaps
-			numTokens = numTokens + 1
-			local t = tokens[numTokens] or {}
-			t[1], t[2], t[3], t[4] = i, icon, count or 0, id
-			tokens[numTokens] = t
+	wipe(seenCurrencies)
+	local C = C_CurrencyInfo
+	if C and ns.db.showCurrencies ~= false then
+		if GetBackpackToken then
+			for i = 1, 30 do
+				local icon, count, id = GetBackpackToken(i)
+				if not icon then break end                          -- the watched list has no gaps
+				numTokens = numTokens + 1
+				local t = tokens[numTokens] or {}
+				t[1], t[2], t[3], t[4], t[5] = i, icon, count or 0, id, nil
+				tokens[numTokens] = t
+				if id then seenCurrencies[id] = true end
+			end
+		end
+		if C.GetCurrencyListSize and C.GetCurrencyListInfo then
+			local n = C.GetCurrencyListSize() or 0
+			for idx = 1, n do
+				local info = C.GetCurrencyListInfo(idx)
+				if info and not info.isHeader and not info.isTypeUnused and (info.quantity or 0) > 0 and info.iconFileID then
+					local id = info.currencyID
+					if not id and C.GetCurrencyListLink and C.GetCurrencyIDFromLink then
+						local link = C.GetCurrencyListLink(idx)
+						if link then id = C.GetCurrencyIDFromLink(link) end
+					end
+					if not (id and seenCurrencies[id]) then
+						if id then seenCurrencies[id] = true end
+						numTokens = numTokens + 1
+						local t = tokens[numTokens] or {}
+						t[1], t[2], t[3], t[4], t[5] = nil, info.iconFileID, info.quantity, id, idx
+						tokens[numTokens] = t
+					end
+				end
+			end
 		end
 	end
 	ns.RefitCurrencies()
@@ -1742,14 +1956,16 @@ local function Build()
 		thumb:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
 	end
 
-	-- Footer: divider, slot usage, gold.
+	-- Footer: divider, slot usage, gold, and bottom Auction House cache status.
+	FOOT_H = FOOT_BASE + AhRowOffset()
 	footLine = Rule(frame, "ARTWORK", 0, LINE)
 	PlaceFooterLine()
 
+	local ahOff = AhRowOffset()
 	slotsText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24)
+	slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24 + ahOff)
 	barBg = Tex(frame, "ARTWORK", 0, LINE)
-	barBg:SetSize(BAR_W, 4); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14)
+	barBg:SetSize(BAR_W, 4); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14 + ahOff)
 	barFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
 	barFill:SetHeight(4); barFill:SetPoint("LEFT", barBg, "LEFT")
 	-- The reagent bag's counter sits to the right of the bag counter.
@@ -1762,7 +1978,58 @@ local function Build()
 	reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
 
 	money = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17)
+	money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + ahOff)
+
+	ahRow = CreateFrame("Button", nil, frame)
+	ahRow:SetHeight(14)
+	ahRow:SetPoint("BOTTOMLEFT", PAD + 4, 15)
+	ahRow:SetPoint("BOTTOMRIGHT", -PAD - 4, 15)
+	ahRow:SetFrameLevel(frame:GetFrameLevel() + 6)
+	ahValueText = ahRow:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+	ahValueText:SetPoint("LEFT", ahRow, "LEFT", 0, 0)
+	ahTimeText = ahRow:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+	ahTimeText:SetPoint("RIGHT", ahRow, "RIGHT", 0, 0)
+	ahScanBarBg = Tex(ahRow, "ARTWORK", 0, LINE)
+	ahScanBarBg:SetHeight(3)
+	ahScanBarBg:SetPoint("BOTTOMLEFT", ahRow, "BOTTOMLEFT", 0, -4)
+	ahScanBarBg:SetPoint("BOTTOMRIGHT", ahRow, "BOTTOMRIGHT", 0, -4)
+	ahScanBarFill = Tex(ahRow, "ARTWORK", 1, { 0.85, 0.68, 0.25, 1 })
+	ahScanBarFill:SetHeight(3)
+	ahScanBarFill:SetPoint("LEFT", ahScanBarBg, "LEFT")
+	ahScanBarBg:Hide(); ahScanBarFill:Hide()
+	ahRow:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+	ahRow:SetScript("OnMouseUp", function(_, btn) if btn == "LeftButton" then ns.StoreCursorItem() end end)
+	ahRow:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Auction House Price Cache")
+		local cached = ns.ahCachedCount or 0
+		if (ns.db and ns.db.ahUpdated) or cached > 0 then
+			GameTooltip:AddDoubleLine("Tradeable Bag AH Value", MoneyString(ahBagValue), 1, 0.82, 0, 1, 1, 1)
+			GameTooltip:AddDoubleLine("Priced Bag Stacks", format("%d / %d", ahPricedStacks, ahTradeableStacks), 1, 0.82, 0, 1, 1, 1)
+			GameTooltip:AddDoubleLine("Cached Items", Group(cached), 1, 0.82, 0, 1, 1, 1)
+			if ns.db and ns.db.ahUpdated then
+				local age = (ns.FormatAge and ns.FormatAge(ns.db.ahUpdated)) or ""
+				local stamp = date and date("%b %d, %H:%M", ns.db.ahUpdated) or nil
+				GameTooltip:AddDoubleLine("Last Updated", stamp and (age .. " (" .. stamp .. ")") or age, 1, 0.82, 0, 1, 1, 1)
+			end
+		else
+			GameTooltip:AddLine("No Auction House prices cached yet.", 0.7, 0.7, 0.7, true)
+		end
+		GameTooltip:AddLine(" ")
+		GameTooltip:AddLine("Prices update automatically when you open or browse the Auction House.", 0.65, 0.65, 0.65, true)
+		GameTooltip:Show()
+	end)
+	ahRow:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	local ahTick = 0
+	ahRow:SetScript("OnUpdate", function(_, elapsed)
+		ahTick = ahTick + (elapsed or 0)
+		if ahTick < 15 then return end
+		ahTick = 0
+		if not ns.ahScanning and ns.db and ns.db.ahUpdated and ns.FormatAge then
+			local age = ns.FormatAge(ns.db.ahUpdated)
+			ahTimeText:SetText(age and ("Updated " .. age) or "")
+		end
+	end)
 
 	-- Resize grips in the bottom corners (the top corners hold the gear and
 	-- close buttons). Width snaps to whole columns; height is free and sticks.
