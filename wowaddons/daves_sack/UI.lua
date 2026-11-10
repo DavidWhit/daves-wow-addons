@@ -19,7 +19,7 @@ local _, ns = ...
 local M = ns.MEDIA
 local GetNumSlots, ReadSlot, Categorize = ns.GetNumSlots, ns.ReadSlot, ns.Categorize
 local floor, ceil, max, min, abs, sort, find, format = math.floor, math.ceil, math.max, math.min, math.abs, table.sort, string.find, string.format
-local ipairs, pairs, wipe = ipairs, pairs, wipe
+local ipairs, pairs, wipe, select = ipairs, pairs, wipe, select
 
 ---------------------------------------------------------------------------
 -- Look
@@ -36,7 +36,11 @@ local SUB_H, SUB_GAP = 14, 6           -- profession groups inside Reagents
 local PLUS, MINUS = "Interface\\Buttons\\UI-PlusButton-Up", "Interface\\Buttons\\UI-MinusButton-Up"
 local GROUP_NAMES = ns.GROUP_NAMES
 -- Sections that can be split into sub-categories, and the setting for each.
-local SPLIT_SETTING = { [ns.CAT_REAGENT] = "splitReagents", [ns.CAT_CONSUME] = "splitConsumables" }
+local SPLIT_SETTING = {
+	[ns.CAT_EQUIP] = "splitEquipment",
+	[ns.CAT_REAGENT] = "splitReagents",
+	[ns.CAT_CONSUME] = "splitConsumables",
+}
 local TOP_H, FOOT_H = 76, 44
 
 local FREE_CAT = ns.NUM_CATEGORIES + 1
@@ -44,7 +48,7 @@ local SECTION_NAMES = {}
 for i, n in ipairs(ns.CATEGORY_NAMES) do SECTION_NAMES[i] = n end
 SECTION_NAMES[FREE_CAT] = "Free Space"
 
-ns.TIPS = "Drag the window to move it. Drag a bottom corner to resize it. Click a section name to collapse it. Scroll with the mouse wheel or the bar on the right. Drag an item onto the delete button beside Settings to destroy it. Click the gavel button beside the trash can to open Market Analysis & Insights."
+ns.TIPS = "Drag the window to move it. Drag a bottom corner to resize it. Click a section name to collapse it. Scroll with the mouse wheel or the bar on the right. Drag an item onto the delete button to the left of the search bar to destroy it. Click the gavel button beside Settings to open Market Analysis & Insights."
 -- 8 is the narrowest width where Sort, Settings, the delete button and a usable
 -- search box all fit, with the scrollbar gutter reserved.
 local MIN_COLS, MAX_COLS = 8, 36
@@ -99,18 +103,21 @@ end
 -- Gold / silver / copper with the real coin icons. Built by hand from the coin
 -- art every client has shipped since 2004, so it never depends on which
 -- version-specific money API exists (Retail moved its helper in 11.0).
-local COIN = "|TInterface\\MoneyFrame\\UI-%sIcon:14:14:2:0|t"
-local GOLD_ICON, SILVER_ICON, COPPER_ICON = format(COIN, "Gold"), format(COIN, "Silver"), format(COIN, "Copper")
 local Group = BreakUpLargeNumbers or tostring
+local MoneyString
+do
+	local COIN = "|TInterface\\MoneyFrame\\UI-%sIcon:14:14:2:0|t"
+	local GOLD_ICON, SILVER_ICON, COPPER_ICON = format(COIN, "Gold"), format(COIN, "Silver"), format(COIN, "Copper")
 
-local function MoneyString(m)
-	m = m or 0
-	local g, s, c = floor(m / 10000), floor(m / 100) % 100, m % 100
-	local out = ""
-	if g > 0 then out = Group(g) .. GOLD_ICON end
-	if s > 0 then out = out .. (out ~= "" and "  " or "") .. s .. SILVER_ICON end
-	if c > 0 or out == "" then out = out .. (out ~= "" and "  " or "") .. c .. COPPER_ICON end
-	return out
+	MoneyString = function(m)
+		m = m or 0
+		local g, s, c = floor(m / 10000), floor(m / 100) % 100, m % 100
+		local out = ""
+		if g > 0 then out = Group(g) .. GOLD_ICON end
+		if s > 0 then out = out .. (out ~= "" and "  " or "") .. s .. SILVER_ICON end
+		if c > 0 or out == "" then out = out .. (out ~= "" and "  " or "") .. c .. COPPER_ICON end
+		return out
+	end
 end
 ns.MoneyString = MoneyString
 
@@ -143,70 +150,73 @@ for i = 1, FREE_CAT do sections[i] = {} end
 local dirty, dirtyAll, layoutDirty = {}, true, true
 local freeButton, freeCount, totalSlots = nil, 0, 0
 local freeReagentButton, reagentFree, reagentTotal = nil, 0, 0   -- the reagent bag, counted apart
-local counter = 0
 local BAR_W, BAR_GAP = 120, 16
 
 ---------------------------------------------------------------------------
 -- Item buttons
 ---------------------------------------------------------------------------
-local HIDE_KEYS = { "IconBorder", "IconOverlay", "IconOverlay2", "NewItemTexture", "BattlepayItemTexture",
-	"flash", "JunkIcon", "UpgradeIcon", "ItemContextOverlay", "IconQuestTexture", "ExtendedSlot" }
+local NewButton
+do
+	local counter = 0
+	local HIDE_KEYS = { "IconBorder", "IconOverlay", "IconOverlay2", "NewItemTexture", "BattlepayItemTexture",
+		"flash", "JunkIcon", "UpgradeIcon", "ItemContextOverlay", "IconQuestTexture", "ExtendedSlot" }
 
-local function Skin(b)
-	b.emptyBackgroundAtlas = nil      -- Retail would paint its own empty-slot art into the icon
-	local name = b:GetName()
-	b.fbIcon = b.icon or b.Icon or _G[name .. "IconTexture"]
-	b.fbCount = b.Count or _G[name .. "Count"]
-	b.fbCooldown = b.Cooldown or _G[name .. "Cooldown"]
+	local function Skin(b)
+		b.emptyBackgroundAtlas = nil      -- Retail would paint its own empty-slot art into the icon
+		local name = b:GetName()
+		b.fbIcon = b.icon or b.Icon or _G[name .. "IconTexture"]
+		b.fbCount = b.Count or _G[name .. "Count"]
+		b.fbCooldown = b.Cooldown or _G[name .. "Cooldown"]
 
-	local nt = b:GetNormalTexture(); if nt then nt:SetAlpha(0) end
-	for _, k in ipairs(HIDE_KEYS) do local r = b[k]; if r and r.SetAlpha then r:SetAlpha(0) end end
-	local q = _G[name .. "IconQuestTexture"]; if q then q:SetAlpha(0) end
+		local nt = b:GetNormalTexture(); if nt then nt:SetAlpha(0) end
+		for _, k in ipairs(HIDE_KEYS) do local r = b[k]; if r and r.SetAlpha then r:SetAlpha(0) end end
+		local q = _G[name .. "IconQuestTexture"]; if q then q:SetAlpha(0) end
 
-	local bg = b:CreateTexture(nil, "BACKGROUND", nil, -7)
-	bg:SetTexture(M .. "slot"); bg:SetVertexColor(SLOTBG[1], SLOTBG[2], SLOTBG[3]); bg:SetAllPoints()
+		local bg = b:CreateTexture(nil, "BACKGROUND", nil, -7)
+		bg:SetTexture(M .. "slot"); bg:SetVertexColor(SLOTBG[1], SLOTBG[2], SLOTBG[3]); bg:SetAllPoints()
 
-	local icon = b.fbIcon
-	icon:ClearAllPoints(); icon:SetPoint("TOPLEFT", 2, -2); icon:SetPoint("BOTTOMRIGHT", -2, 2)
-	icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-	if b.CreateMaskTexture and icon.AddMaskTexture then
-		local mask = b:CreateMaskTexture()
-		mask:SetTexture(M .. "slot", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-		mask:SetAllPoints(icon)
-		icon:AddMaskTexture(mask)
+		local icon = b.fbIcon
+		icon:ClearAllPoints(); icon:SetPoint("TOPLEFT", 2, -2); icon:SetPoint("BOTTOMRIGHT", -2, 2)
+		icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		if b.CreateMaskTexture and icon.AddMaskTexture then
+			local mask = b:CreateMaskTexture()
+			mask:SetTexture(M .. "slot", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+			mask:SetAllPoints(icon)
+			icon:AddMaskTexture(mask)
+		end
+
+		b.fbGlow = b:CreateTexture(nil, "OVERLAY", nil, 1)
+		b.fbGlow:SetTexture(M .. "slotglow"); b.fbGlow:SetAllPoints(); b.fbGlow:SetBlendMode("ADD"); b.fbGlow:Hide()
+		b.fbEdge = b:CreateTexture(nil, "OVERLAY", nil, 2)
+		b.fbEdge:SetTexture(M .. "slotedge"); b.fbEdge:SetAllPoints()
+
+		local hl = b:GetHighlightTexture()
+		if hl then hl:SetTexture(M .. "slot"); hl:SetAllPoints(); hl:SetVertexColor(1, 1, 1, 0.12) end
+		local pt = b:GetPushedTexture()
+		if pt then pt:SetTexture(M .. "slot"); pt:SetAllPoints(); pt:SetVertexColor(1, 1, 1, 0.2) end
+
+		if b.fbCount then b.fbCount:ClearAllPoints(); b.fbCount:SetPoint("BOTTOMRIGHT", -3, 3) end
+		if b.fbCooldown then b.fbCooldown:ClearAllPoints(); b.fbCooldown:SetAllPoints(icon) end
 	end
 
-	b.fbGlow = b:CreateTexture(nil, "OVERLAY", nil, 1)
-	b.fbGlow:SetTexture(M .. "slotglow"); b.fbGlow:SetAllPoints(); b.fbGlow:SetBlendMode("ADD"); b.fbGlow:Hide()
-	b.fbEdge = b:CreateTexture(nil, "OVERLAY", nil, 2)
-	b.fbEdge:SetTexture(M .. "slotedge"); b.fbEdge:SetAllPoints()
+	NewButton = function(bag, slot)
+		counter = counter + 1
+		local name, parent = "DavesSackItem" .. counter, holders[bag]
+		local ok, b = pcall(CreateFrame, "ItemButton", name, parent, "ContainerFrameItemButtonTemplate")
+		if not ok then b = CreateFrame("Button", name, parent, "ContainerFrameItemButtonTemplate") end
+		b:SetID(slot)              -- bag comes from the parent holder's ID (Blizzard's own fallback)
+		b:SetSize(SLOT, SLOT)
+		-- Blizzard's template pins item buttons to frame level 10; put them above
+		-- our window so they, not the window, receive the mouse (tooltips, clicks).
+		b:SetFrameLevel(frame:GetFrameLevel() + 5)   -- window +0, scroll +1, content +2, holder +3
+		Skin(b)
 
-	local hl = b:GetHighlightTexture()
-	if hl then hl:SetTexture(M .. "slot"); hl:SetAllPoints(); hl:SetVertexColor(1, 1, 1, 0.12) end
-	local pt = b:GetPushedTexture()
-	if pt then pt:SetTexture(M .. "slot"); pt:SetAllPoints(); pt:SetVertexColor(1, 1, 1, 0.2) end
-
-	if b.fbCount then b.fbCount:ClearAllPoints(); b.fbCount:SetPoint("BOTTOMRIGHT", -3, 3) end
-	if b.fbCooldown then b.fbCooldown:ClearAllPoints(); b.fbCooldown:SetAllPoints(icon) end
-end
-
-local function NewButton(bag, slot)
-	counter = counter + 1
-	local name, parent = "DavesSackItem" .. counter, holders[bag]
-	local ok, b = pcall(CreateFrame, "ItemButton", name, parent, "ContainerFrameItemButtonTemplate")
-	if not ok then b = CreateFrame("Button", name, parent, "ContainerFrameItemButtonTemplate") end
-	b:SetID(slot)              -- bag comes from the parent holder's ID (Blizzard's own fallback)
-	b:SetSize(SLOT, SLOT)
-	-- Blizzard's template pins item buttons to frame level 10; put them above
-	-- our window so they, not the window, receive the mouse (tooltips, clicks).
-	b:SetFrameLevel(frame:GetFrameLevel() + 5)   -- window +0, scroll +1, content +2, holder +3
-	Skin(b)
-
-	-- Tooltips/clicks stay entirely Blizzard's own handlers (no wrapping), so
-	-- hovering and using items never runs through addon code (no taint).
-	b.fbRec, b.fbKey, b.fbReagent = {}, bag * 100 + slot, ns.IsReagentBag(bag)
-	b.pTex = false             -- forces the first paint
-	return b
+		-- Tooltips/clicks stay entirely Blizzard's own handlers (no wrapping), so
+		-- hovering and using items never runs through addon code (no taint).
+		b.fbRec, b.fbKey, b.fbReagent = {}, bag * 100 + slot, ns.IsReagentBag(bag)
+		b.pTex = false             -- forces the first paint
+		return b
+	end
 end
 
 -- Only touches the cooldown widget when there is (or was) a cooldown to show.
@@ -364,34 +374,242 @@ local function SortReagent(a, b)
 	return SortCompare(a, b)
 end
 
-local Layout
+local Layout, Update, GetSubHeader
 local subHeaders, usedSub = {}, {}
 
-local function GetSubHeader(g)
-	local h = subHeaders[g]
-	if h then return h end
-	h = CreateFrame("Button", nil, content)
-	h:SetHeight(SUB_H)
-	h.toggle = h:CreateTexture(nil, "ARTWORK")
-	h.toggle:SetSize(11, 11); h.toggle:SetPoint("LEFT", 8, 0)
-	h.label = h:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	h.label:SetPoint("LEFT", h.toggle, "RIGHT", 4, 0)
-	h.label:SetText(GROUP_NAMES[g] or "Other")
-	h.count = h:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	h.count:SetPoint("LEFT", h.label, "RIGHT", 5, 0)
-	local hl = h:CreateTexture(nil, "HIGHLIGHT")
-	hl:SetTexture("Interface\\Buttons\\UI-PlusButton-Hilight"); hl:SetBlendMode("ADD"); hl:SetAllPoints(h.toggle)
-	local key = "r" .. g
-	h:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
-	h:SetScript("OnClick", function()
-		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
-		ns.db.collapsed[key] = (not ns.db.collapsed[key]) or nil
+do
+	local addonLocked = {}
+	local sortingLocksHold = false
+	local sortingLocksSeq = 0
+	local lockLoc = ItemLocation and ItemLocation.CreateEmpty and ItemLocation:CreateEmpty() or nil
+	local DoesItemExist = C_Item and C_Item.DoesItemExist
+	local LockItem = C_Item and C_Item.LockItem
+	local UnlockItem = C_Item and C_Item.UnlockItem
+	local GetItemInfoInstant = C_Item and C_Item.GetItemInfoInstant
+
+	function ns.IsItemInSet(itemID, bag, slot)
+		if not (itemID and ns.db) then return false end
+		if ns.db.oneBag or ns.db.splitEquipment == false then return false end
+		if ns.db.offGroups and ns.db.offGroups[ns.G_ITEM_SETS] then return false end
+		if bag and slot then
+			local list = buttons[bag]
+			local b = list and slot <= list.n and list[slot]
+			if b and b.fbRec.id == itemID then
+				return b.fbCat == ns.CAT_EQUIP and EffGroup(b) == ns.G_ITEM_SETS
+			end
+		end
+		local custom = ns.db.customSetItems and ns.db.customSetItems[itemID]
+		if custom == true then return true end
+		if custom == false then return false end
+		return (ns.IsNaturalSetItem and ns.IsNaturalSetItem(itemID, bag, slot)) and true or false
+	end
+
+	function ns.SyncItemSetLocks()
+		if not ns.db then return end
+		if CursorHasItem and CursorHasItem() then return end
+		local lockOn = not sortingLocksHold and ns.db.lockItemSets and not ns.db.oneBag and ns.db.splitEquipment ~= false
+			and not (ns.db.offGroups and ns.db.offGroups[ns.G_ITEM_SETS])
+
+		for key in pairs(addonLocked) do
+			local bag, slot = floor(key / 100), key % 100
+			local list = buttons[bag]
+			local b = list and slot <= list.n and list[slot]
+			local keep = lockOn and b and b.fbRec.id and b.fbCat == ns.CAT_EQUIP and EffGroup(b) == ns.G_ITEM_SETS
+			if not keep then
+				addonLocked[key] = nil
+				if lockLoc and UnlockItem then
+					lockLoc:SetBagAndSlot(bag, slot)
+					if not DoesItemExist or DoesItemExist(lockLoc) then
+						pcall(UnlockItem, lockLoc)
+					end
+					if b then
+						ReadSlot(bag, slot, b.fbRec)
+						Paint(b)
+					end
+				end
+			end
+		end
+
+		if lockOn and lockLoc and LockItem and DoesItemExist then
+			for _, bag in ipairs(bagList) do
+				if bag ~= KEYRING_CONTAINER then
+					local list = buttons[bag]
+					if list then
+						for slot = 1, list.n do
+							local b = list[slot]
+							if b and b.fbRec.id and b.fbCat == ns.CAT_EQUIP and EffGroup(b) == ns.G_ITEM_SETS then
+								addonLocked[b.fbKey] = true
+								if not b.fbRec.locked then
+									lockLoc:SetBagAndSlot(bag, slot)
+									if DoesItemExist(lockLoc) then
+										pcall(LockItem, lockLoc)
+										ReadSlot(bag, slot, b.fbRec)
+										Paint(b)
+									end
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+
+		local sh = subHeaders[ns.G_ITEM_SETS]
+		if sh and sh.UpdateLockBtn then sh:UpdateLockBtn() end
+	end
+
+	function ns.SetItemSetsLocked(on)
+		if not ns.db then return end
+		ns.db.lockItemSets = on and true or false
+		if dirtyAll then dirtyAll = false; SyncBagList() end
+		for bag in pairs(dirty) do
+			if inList[bag] then ScanBag(bag) end
+			dirty[bag] = nil
+		end
+		ns.SyncItemSetLocks()
+		if ns.RefreshOptions then ns.RefreshOptions() end
+	end
+
+	function ns.HoldSetLocksForSort()
+		if not next(addonLocked) then return end
+		sortingLocksHold = true
+		sortingLocksSeq = sortingLocksSeq + 1
+		local seq = sortingLocksSeq
+		ns.SyncItemSetLocks()
+		C_Timer.After(1.5, function()
+			if sortingLocksHold and sortingLocksSeq == seq then
+				sortingLocksHold = false
+				ns.SyncItemSetLocks()
+			end
+		end)
+	end
+
+	function ns.SettleSetLocksAfterSort()
+		if not sortingLocksHold then return end
+		sortingLocksSeq = sortingLocksSeq + 1
+		local seq = sortingLocksSeq
+		C_Timer.After(0.35, function()
+			if sortingLocksHold and sortingLocksSeq == seq then
+				sortingLocksHold = false
+				ns.SyncItemSetLocks()
+			end
+		end)
+	end
+
+	local function HandleEquipSubHeaderDrop(g)
+		if g ~= ns.G_ITEM_SETS and g ~= ns.G_EQUIP_OTHER then return false end
+		if not (CursorHasItem and CursorHasItem() and GetCursorInfo) then return false end
+		local kind, itemID = GetCursorInfo()
+		if kind ~= "item" or not itemID then return false end
+		local classID = GetItemInfoInstant and select(6, GetItemInfoInstant(itemID))
+		if classID ~= 2 and classID ~= 4 then return false end
+		ns.db.customSetItems = ns.db.customSetItems or {}
+		local bag, slot
+		if C_Cursor and C_Cursor.GetCursorItem then
+			local loc = C_Cursor.GetCursorItem()
+			if loc and loc.IsBagAndSlot and loc:IsBagAndSlot() then
+				bag, slot = loc:GetBagAndSlot()
+			end
+		end
+		local natural = ns.IsNaturalSetItem and ns.IsNaturalSetItem(itemID, bag, slot)
+		local wantSet
+		if g == ns.G_ITEM_SETS then
+			local curInSet = (ns.db.customSetItems[itemID] == true) or (ns.db.customSetItems[itemID] ~= false and natural)
+			wantSet = not curInSet
+		else
+			wantSet = false
+		end
+		if wantSet then
+			ns.db.customSetItems[itemID] = not natural and true or nil
+		else
+			ns.db.customSetItems[itemID] = natural and false or nil
+		end
+		if ClearCursor then ClearCursor() end
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		refitHeight = true                         -- you asked for it: re-fit
-		Layout()
-	end)
-	subHeaders[g] = h
-	return h
+		for bBag, list in pairs(buttons) do
+			for bSlot = 1, list.n do
+				local rec = list[bSlot].fbRec
+				if rec.id == itemID then rec.recat = true; dirty[bBag] = true end
+			end
+		end
+		refitHeight = true
+		Update(true)
+		return true
+	end
+
+	GetSubHeader = function(g)
+		local h = subHeaders[g]
+		if h then return h end
+		h = CreateFrame("Button", nil, content)
+		h:SetHeight(SUB_H)
+		h.toggle = h:CreateTexture(nil, "ARTWORK")
+		h.toggle:SetSize(11, 11); h.toggle:SetPoint("LEFT", 8, 0)
+		h.label = h:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+		h.label:SetPoint("LEFT", h.toggle, "RIGHT", 4, 0)
+		h.label:SetText(GROUP_NAMES[g] or "Other")
+		h.count = h:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+		h.count:SetPoint("LEFT", h.label, "RIGHT", 5, 0)
+		local hl = h:CreateTexture(nil, "HIGHLIGHT")
+		hl:SetTexture("Interface\\Buttons\\UI-PlusButton-Hilight"); hl:SetBlendMode("ADD"); hl:SetAllPoints(h.toggle)
+		local key = "r" .. g
+		h:SetScript("OnReceiveDrag", function()
+			if not HandleEquipSubHeaderDrop(g) then ns.StoreCursorItem() end
+		end)
+		h:SetScript("OnClick", function()
+			if CursorHasItem and CursorHasItem() then
+				if not HandleEquipSubHeaderDrop(g) then ns.StoreCursorItem() end
+				return
+			end
+			ns.db.collapsed[key] = (not ns.db.collapsed[key]) or nil
+			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+			refitHeight = true                         -- you asked for it: re-fit
+			Layout()
+		end)
+		if g == ns.G_ITEM_SETS then
+			local lockBtn = CreateFrame("Button", nil, h)
+			lockBtn:SetHeight(SUB_H)
+			lockBtn:SetPoint("LEFT", h.count, "RIGHT", 8, 0)
+			lockBtn:SetFrameLevel(h:GetFrameLevel() + 2)
+			lockBtn:RegisterForClicks("LeftButtonUp")
+			local lockText = lockBtn:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+			lockText:SetPoint("LEFT", 0, 0)
+			lockBtn.text = lockText
+			h.lockBtn = lockBtn
+			function h:UpdateLockBtn()
+				local locked = ns.db and ns.db.lockItemSets
+				lockText:SetText(locked and "|cffffd100[Locked]|r" or "|cff8c8c8c[Unlocked]|r")
+				lockBtn:SetWidth(max(54, (lockText:GetStringWidth() or 54) + 4))
+			end
+			lockBtn:SetScript("OnReceiveDrag", function()
+				if not HandleEquipSubHeaderDrop(g) then ns.StoreCursorItem() end
+			end)
+			lockBtn:SetScript("OnClick", function()
+				if CursorHasItem and CursorHasItem() then
+					if not HandleEquipSubHeaderDrop(g) then ns.StoreCursorItem() end
+					return
+				end
+				Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+				ns.SetItemSetsLocked(not (ns.db and ns.db.lockItemSets))
+			end)
+			local function ShowSetTooltip(owner)
+				GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+				GameTooltip:SetText(ns.db and ns.db.lockItemSets and "Item Sets (Locked)" or "Item Sets (Unlocked)")
+				GameTooltip:AddLine("Click [Locked] / [Unlocked] to lock or unlock all gear in Item Sets.", 1, 1, 1, true)
+				GameTooltip:AddLine("When locked, items in Item Sets are locked in your bags so they cannot be sold to vendors, traded, mailed, auctioned, or deleted.", 0.75, 0.75, 0.75, true)
+				GameTooltip:AddLine("Unlock Item Sets when you want to equip, move, or sell set gear.", 0.75, 0.75, 0.75, true)
+				GameTooltip:AddLine(" ")
+				GameTooltip:AddLine("Tip: Drag any weapon or armor onto the Item Sets header to add or remove it from Item Sets.", 0.25, 0.9, 0.45, true)
+				GameTooltip:Show()
+			end
+			lockBtn:SetScript("OnEnter", ShowSetTooltip)
+			lockBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+			h:SetScript("OnEnter", ShowSetTooltip)
+			h:SetScript("OnLeave", function() GameTooltip:Hide() end)
+			h:UpdateLockBtn()
+		end
+		subHeaders[g] = h
+		return h
+	end
 end
 
 -- Lays out s[first..last] as a grid starting at y; returns the y below it.
@@ -438,199 +656,214 @@ local function GetHeader(cat)
 	return h
 end
 
-local function FillBar(fill, used, total, width)
-	local f = total > 0 and used / total or 0
-	fill:SetWidth(max(px, width * f))
-	if f >= 1 then fill:SetColorTexture(0.9, 0.25, 0.2, 1)
-	elseif f >= 0.9 then fill:SetColorTexture(1, 0.55, 0.1, 1)
-	else fill:SetColorTexture(0.85, 0.85, 0.85, 1) end
-end
-
 -- Unique tradeable itemKeys currently in the player's bags (for a fast AH browse query on AUCTION_HOUSE_SHOW).
-local seenTradeable = {}
-function ns.BuildTradeableItemKeys(makeKey)
-	if not makeKey then return nil end
-	wipe(seenTradeable)
-	local keys = {}
-	local GetSlotInfo = C_Container and C_Container.GetContainerItemInfo
-	for _, bag in ipairs(bagList) do
-		if bag ~= KEYRING_CONTAINER then
-			local list = buttons[bag]
-			if list and list.n and list.n > 0 then
-				for slot = 1, list.n do
-					local b = list[slot]
-					local r = b and b.fbRec
-					local id = r and r.id
-					if id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST and not seenTradeable[id] then
-						seenTradeable[id] = true
-						keys[#keys + 1] = makeKey(id)
-					end
-				end
-			elseif GetSlotInfo then
-				local num = GetNumSlots(bag) or 0
-				for slot = 1, num do
-					local info = GetSlotInfo(bag, slot)
-					local id = info and info.itemID
-					if id and (info.stackCount or 0) > 0 and not info.isBound and not seenTradeable[id] then
-						local cat = ns.Categorise(id, info.hyperlink, bag, slot)
-						if cat ~= ns.CAT_QUEST then
+local UpdateFooter
+do
+	local function FillBar(fill, used, total, width)
+		local f = total > 0 and used / total or 0
+		fill:SetWidth(max(px, width * f))
+		if f >= 1 then fill:SetColorTexture(0.9, 0.25, 0.2, 1)
+		elseif f >= 0.9 then fill:SetColorTexture(1, 0.55, 0.1, 1)
+		else fill:SetColorTexture(0.85, 0.85, 0.85, 1) end
+	end
+
+	local seenTradeable = {}
+	function ns.BuildTradeableItemKeys(makeKey)
+		if not makeKey then return nil end
+		wipe(seenTradeable)
+		local keys = {}
+		local GetSlotInfo = C_Container and C_Container.GetContainerItemInfo
+		for _, bag in ipairs(bagList) do
+			if bag ~= KEYRING_CONTAINER then
+				local list = buttons[bag]
+				if list and list.n and list.n > 0 then
+					for slot = 1, list.n do
+						local b = list[slot]
+						local r = b and b.fbRec
+						local id = r and r.id
+						if id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST and not seenTradeable[id] then
 							seenTradeable[id] = true
 							keys[#keys + 1] = makeKey(id)
 						end
 					end
-				end
-			end
-		end
-	end
-	return keys
-end
-
-function ns.CollectBagHoldings(out)
-	wipe(out)
-	for _, bag in ipairs(bagList) do
-		if bag ~= KEYRING_CONTAINER then
-			local list = buttons[bag]
-			if list then
-				for slot = 1, list.n do
-					local b = list[slot]
-					local r = b and b.fbRec
-					local id = r and r.id
-					if id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST then
-						local e = out[id]
-						if not e then
-							e = {
-								id = id,
-								count = 0,
-								link = r.link,
-								quality = r.quality,
-								icon = r.texture,
-								classID = r.classID,
-							}
-							out[id] = e
-						end
-						e.count = e.count + r.count
-					end
-				end
-			end
-		end
-	end
-	return out
-end
-
-function ns.GetBagAhSummary()
-	return ahBagValue, ahPricedStacks, ahTradeableStacks
-end
-
-local lastAhShow
-local function UpdateAuctionFooter()
-	if not ahRow then return end
-	local show = ns.db and ns.db.showAuctionPrices ~= false
-	if show ~= lastAhShow then
-		lastAhShow = show
-		local off = show and AH_ROW_H or 0
-		slotsText:ClearAllPoints(); slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24 + off)
-		barBg:ClearAllPoints(); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14 + off)
-		money:ClearAllPoints(); money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
-		ahRow:SetShown(show)
-	end
-	if not show then return end
-
-	local prices = ns.db and ns.db.ahPrices
-	local total, priced, tradeable = 0, 0, 0
-	for _, bag in ipairs(bagList) do
-		if bag ~= KEYRING_CONTAINER then
-			local list = buttons[bag]
-			if list then
-				for slot = 1, list.n do
-					local b = list[slot]
-					local r = b.fbRec
-					if r.id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST then
-						tradeable = tradeable + 1
-						local p = prices and prices[r.id]
-						if p and p > 0 then
-							total = total + p * r.count
-							priced = priced + 1
+				elseif GetSlotInfo then
+					local num = GetNumSlots(bag) or 0
+					for slot = 1, num do
+						local info = GetSlotInfo(bag, slot)
+						local id = info and info.itemID
+						if id and (info.stackCount or 0) > 0 and not info.isBound and not seenTradeable[id] then
+							local cat = ns.Categorise(id, info.hyperlink, bag, slot)
+							if cat ~= ns.CAT_QUEST then
+								seenTradeable[id] = true
+								keys[#keys + 1] = makeKey(id)
+							end
 						end
 					end
 				end
 			end
 		end
+		return keys
 	end
-	ahBagValue, ahPricedStacks, ahTradeableStacks = total, priced, tradeable
 
-	local hasCache = (ns.db and ns.db.ahUpdated) or (ns.ahCachedCount or 0) > 0
-	local doneFlash = not ns.ahScanning and ns.ahScanDoneUntil and GetTime and GetTime() < ns.ahScanDoneUntil
-	local scanText
-	if ns.ahScanning then
-		scanText = ns.ahScanProgress and format("|cffd4a94eCaching AH %d%%…|r", ns.ahScanProgress) or "|cffd4a94eCaching AH…|r"
-	elseif doneFlash then
-		scanText = "|cff5cd65cAH Cache Complete|r"
-	end
-	if hasCache then
-		ahValueText:SetText(format("|cffd4a94eAH:|r %s", MoneyString(total)))
-		if scanText then
-			ahTimeText:SetText(scanText)
-		else
-			local age = ns.FormatAge and ns.FormatAge(ns.db.ahUpdated)
-			ahTimeText:SetText(age and ("Updated " .. age) or "")
+	function ns.CollectBagHoldings(out)
+		wipe(out)
+		for _, bag in ipairs(bagList) do
+			if bag ~= KEYRING_CONTAINER then
+				local list = buttons[bag]
+				if list then
+					for slot = 1, list.n do
+						local b = list[slot]
+						local r = b and b.fbRec
+						local id = r and r.id
+						if id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST then
+							local e = out[id]
+							if not e then
+								e = {
+									id = id,
+									count = 0,
+									link = r.link,
+									quality = r.quality,
+									icon = r.texture,
+									classID = r.classID,
+								}
+								out[id] = e
+							end
+							e.count = e.count + r.count
+						end
+					end
+				end
+			end
 		end
-	else
-		ahValueText:SetText("|cff8c8c8cAH: Visit Auction House to cache prices|r")
-		ahTimeText:SetText(scanText or "")
+		return out
 	end
 
-	if ahScanBarBg and ahScanBarFill then
-		if ns.ahScanning or doneFlash then
-			local pct = doneFlash and 100 or max(5, min(100, ns.ahScanProgress or 15))
-			local barW = max(40, (frame:GetWidth() or 300) - (PAD + 4) * 2)
-			if doneFlash then
-				ahScanBarFill:SetColorTexture(0.35, 0.82, 0.42, 1)
+	function ns.GetBagAhSummary()
+		return ahBagValue, ahPricedStacks, ahTradeableStacks
+	end
+
+	local lastAhShow
+	local function UpdateAuctionFooter()
+		if not ahRow then return end
+		local show = ns.db and ns.db.showAuctionPrices ~= false
+		if show ~= lastAhShow then
+			lastAhShow = show
+			local off = show and AH_ROW_H or 0
+			slotsText:ClearAllPoints(); slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24 + off)
+			barBg:ClearAllPoints(); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14 + off)
+			money:ClearAllPoints(); money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
+			ahRow:SetShown(show)
+		end
+		if not show then return end
+
+		local prices = ns.db and ns.db.ahPrices
+		local total, priced, tradeable = 0, 0, 0
+		for _, bag in ipairs(bagList) do
+			if bag ~= KEYRING_CONTAINER then
+				local list = buttons[bag]
+				if list then
+					for slot = 1, list.n do
+						local b = list[slot]
+						local r = b.fbRec
+						if r.id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST then
+							tradeable = tradeable + 1
+							local p = prices and prices[r.id]
+							if p and p > 0 then
+								total = total + p * r.count
+								priced = priced + 1
+							end
+						end
+					end
+				end
+			end
+		end
+		ahBagValue, ahPricedStacks, ahTradeableStacks = total, priced, tradeable
+
+		local hasCache = (ns.db and ns.db.ahUpdated) or (ns.ahCachedCount or 0) > 0
+		local doneFlash = not ns.ahScanning and ns.ahScanDoneUntil and GetTime and GetTime() < ns.ahScanDoneUntil
+		local scanText
+		if ns.ahScanning then
+			scanText = ns.ahScanProgress and format("|cffd4a94eCaching AH %d%%…|r", ns.ahScanProgress) or "|cffd4a94eCaching AH…|r"
+		elseif doneFlash then
+			scanText = "|cff5cd65cAH Cache Complete|r"
+		end
+		if hasCache then
+			ahValueText:SetText(format("|cffd4a94eAH:|r %s", MoneyString(total)))
+			if scanText then
+				ahTimeText:SetText(scanText)
 			else
-				ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
+				local age = ns.FormatAge and ns.FormatAge(ns.db.ahUpdated)
+				ahTimeText:SetText(age and ("Updated " .. age) or "")
 			end
-			ahScanBarFill:SetWidth(max(2, barW * pct / 100))
-			ahScanBarBg:Show(); ahScanBarFill:Show()
 		else
-			ahScanBarBg:Hide(); ahScanBarFill:Hide()
+			ahValueText:SetText("|cff8c8c8cAH: Visit Auction House to cache prices|r")
+			ahTimeText:SetText(scanText or "")
 		end
-	end
-end
 
--- Lightweight O(1) progress update called on background scan ticks so we never
--- rescan bags, refit currencies, or rebuild the Market window mid-slice.
-function ns.UpdateAhScanProgressOnly()
-	if ahRow and ahRow:IsShown() and ns.ahScanning then
-		local pct = max(5, min(100, ns.ahScanProgress or 15))
-		ahTimeText:SetText(format("|cffd4a94eCaching AH %d%%…|r", pct))
 		if ahScanBarBg and ahScanBarFill then
-			local barW = max(40, (frame and frame:GetWidth() or 300) - (PAD + 4) * 2)
-			ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
-			ahScanBarFill:SetWidth(max(2, barW * pct / 100))
-			ahScanBarBg:Show(); ahScanBarFill:Show()
+			if ns.ahScanning or doneFlash then
+				local pct = doneFlash and 100 or max(5, min(100, ns.ahScanProgress or 15))
+				local barW = max(40, (frame:GetWidth() or 300) - (PAD + 4) * 2)
+				if doneFlash then
+					ahScanBarFill:SetColorTexture(0.35, 0.82, 0.42, 1)
+				else
+					ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
+				end
+				ahScanBarFill:SetWidth(max(2, barW * pct / 100))
+				ahScanBarBg:Show(); ahScanBarFill:Show()
+			else
+				ahScanBarBg:Hide(); ahScanBarFill:Hide()
+			end
 		end
 	end
-	if ns.UpdateMarketScanProgressOnly then
-		ns.UpdateMarketScanProgressOnly()
-	end
-end
 
--- Two counters side by side: your bags, then the reagent bag (only while one
--- is equipped). Nothing shrinks or overlaps: the window's minimum width is
--- measured from these strings and the gold (ns.MinColumns, below).
-local lastUsed, lastTotal, lastRUsed, lastRTotal
-local function UpdateFooter()
-	UpdateAuctionFooter()
-	local used, rUsed = totalSlots - freeCount, reagentTotal - reagentFree
-	if used == lastUsed and totalSlots == lastTotal and rUsed == lastRUsed and reagentTotal == lastRTotal then return end
-	lastUsed, lastTotal, lastRUsed, lastRTotal = used, totalSlots, rUsed, reagentTotal
-	slotsText:SetText(format("%d |cff8c8c8c/|r %d", used, totalSlots))
-	FillBar(barFill, used, totalSlots, BAR_W)
-	if reagentTotal > 0 then
-		reagentText:SetText(format("%d |cff8c8c8c/|r %d |cff8c8c8creagents|r", rUsed, reagentTotal))
-		FillBar(reagentBarFill, rUsed, reagentTotal, BAR_W)
-		reagentText:Show(); reagentBarBg:Show(); reagentBarFill:Show()
-	else
-		reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
+	-- Lightweight O(1) progress update called on background scan ticks so we never
+	-- rescan bags, refit currencies, or rebuild the Market window mid-slice.
+	function ns.UpdateAhScanProgressOnly()
+		if ahRow and ahRow:IsShown() and ns.ahScanning then
+			local pct = max(5, min(100, ns.ahScanProgress or 15))
+			ahTimeText:SetText(format("|cffd4a94eCaching AH %d%%…|r", pct))
+			if ahScanBarBg and ahScanBarFill then
+				local barW = max(40, (frame and frame:GetWidth() or 300) - (PAD + 4) * 2)
+				ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
+				ahScanBarFill:SetWidth(max(2, barW * pct / 100))
+				ahScanBarBg:Show(); ahScanBarFill:Show()
+			end
+		end
+		if ns.UpdateMarketScanProgressOnly then
+			ns.UpdateMarketScanProgressOnly()
+		end
+	end
+
+	-- Two counters side by side: your bags, then the reagent bag (only while one
+	-- is equipped). Nothing shrinks or overlaps: the window's minimum width is
+	-- measured from these strings and the gold (ns.MinColumns, below).
+	local lastUsed, lastTotal, lastRUsed, lastRTotal
+	UpdateFooter = function()
+		UpdateAuctionFooter()
+		local used, rUsed = totalSlots - freeCount, reagentTotal - reagentFree
+		if used == lastUsed and totalSlots == lastTotal and rUsed == lastRUsed and reagentTotal == lastRTotal then return end
+		lastUsed, lastTotal, lastRUsed, lastRTotal = used, totalSlots, rUsed, reagentTotal
+		slotsText:SetText(format("%d |cff8c8c8c/|r %d", used, totalSlots))
+		FillBar(barFill, used, totalSlots, BAR_W)
+		if reagentTotal > 0 then
+			reagentText:SetText(format("%d |cff8c8c8c/|r %d |cff8c8c8creagents|r", rUsed, reagentTotal))
+			FillBar(reagentBarFill, rUsed, reagentTotal, BAR_W)
+			reagentText:Show(); reagentBarBg:Show(); reagentBarFill:Show()
+		else
+			reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
+		end
+	end
+
+	function ns.RefreshAuctionFooter()
+		if not frame then return end
+		UpdateAuctionFooter()
+		if frame:IsShown() then
+			ns.RefitCurrencies()
+			if ns.MinColumns() > ns.db.columns then
+				Layout()
+			end
+		end
+		if ns.RefreshOptions then ns.RefreshOptions() end
 	end
 end
 
@@ -813,6 +1046,15 @@ Layout = function()
 				elseif SPLIT_SETTING[cat] and ns.db[SPLIT_SETTING[cat]] ~= false then
 					h.toggle:SetTexture(MINUS)
 					if #s > 1 then sort(s, SortReagent) end
+					if cat == ns.CAT_EQUIP and EffGroup(s[1]) ~= ns.G_ITEM_SETS and not (ns.db.offGroups and ns.db.offGroups[ns.G_ITEM_SETS]) then
+						local sh = GetSubHeader(ns.G_ITEM_SETS)
+						sh:ClearAllPoints(); sh:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y); sh:SetWidth(width)
+						sh.count:SetText(0)
+						sh.toggle:SetTexture(collapsed["r" .. ns.G_ITEM_SETS] and PLUS or MINUS)
+						if sh.UpdateLockBtn then sh:UpdateLockBtn() end
+						sh:Show(); usedSub[ns.G_ITEM_SETS] = true
+						y = y + SUB_H + 3 + SUB_GAP
+					end
 					local i, n = 1, #s
 					while i <= n do
 						local g = EffGroup(s[i])
@@ -821,6 +1063,7 @@ Layout = function()
 						local sh = GetSubHeader(g)
 						sh:ClearAllPoints(); sh:SetPoint("TOPLEFT", content, "TOPLEFT", 0, -y); sh:SetWidth(width)
 						sh.count:SetText(j - i + 1)
+						if sh.UpdateLockBtn then sh:UpdateLockBtn() end
 						sh:Show(); usedSub[g] = true
 						y = y + SUB_H + 3
 						if collapsed["r" .. g] then
@@ -847,6 +1090,7 @@ Layout = function()
 
 	for g, sh in pairs(subHeaders) do if not usedSub[g] then sh:Hide() end end
 	ShowFreeCount()
+	ns.SyncItemSetLocks()
 
 	content:SetSize(width, max(y, 1))
 	contentW, contentH = width, max(y, 1)
@@ -876,58 +1120,60 @@ local function UpdateMoney()
 	if frame:IsShown() and ns.MinColumns() > ns.db.columns then Layout() end   -- more digits: widen
 end
 
--- Windows you click items away into (sell, mail, trade, bank, auction).
-local INTERACTION_WINDOWS = { "MerchantFrame", "MailFrame", "TradeFrame", "BankFrame", "GuildBankFrame",
-	"AuctionHouseFrame", "AuctionFrame", "AccountBankPanel", "VoidStorageFrame" }
-local function InteractionWindowOpen()
-	for i = 1, #INTERACTION_WINDOWS do
-		local f = _G[INTERACTION_WINDOWS[i]]
-		if f and f.IsShown and f:IsShown() then return true end
-	end
-	return false
-end
-ns.InteractionWindowOpen = InteractionWindowOpen
-
--- Only while one of those windows is open AND the cursor is over the bags do
--- emptied slots stay as gaps, so the next item never slides under a
--- right-click (no accidental vendor sales). Everywhere else — merging stacks,
--- using items — the grid tidies up immediately.
-local function HoldGaps()
-	return frame:IsMouseOver() and InteractionWindowOpen()
-end
-
-local reflowWaiting = false
-local function ReflowLater()
-	reflowWaiting = false
-	if frame:IsShown() and layoutDirty then
-		if HoldGaps() then reflowWaiting = true; C_Timer.After(0.3, ReflowLater)
-		else Layout(); if ns.searchText then ApplySearch() end end
-	end
-end
-
-local function Update(force)
-	if dirtyAll then dirtyAll = false; SyncBagList() end
-	for bag in pairs(dirty) do
-		if inList[bag] then ScanBag(bag) end
-		dirty[bag] = nil
-	end
-	if layoutDirty then
-		-- Re-sort right away unless gaps are being held (see HoldGaps), and
-		-- always just after Sort or when the Free Space tile itself got filled.
-		if force or ns.db.oneBag or GetTime() < (ns.sortingUntil or 0) or not HoldGaps()
-			or (freeButton and freeButton.fbRec.id) or (freeReagentButton and freeReagentButton.fbRec.id) then Layout()
-		else
-			freeCount, reagentFree = 0, 0
-			for bag in pairs(generalBag) do if generalBag[bag] then freeCount = freeCount + (GetFreeSlots(bag) or 0) end end
-			for bag in pairs(reagentBag) do if reagentBag[bag] then reagentFree = reagentFree + (GetFreeSlots(bag) or 0) end end
-			ShowFreeCount(); UpdateFooter()
-			if not reflowWaiting then reflowWaiting = true; C_Timer.After(0.3, ReflowLater) end
+do
+	-- Windows you click items away into (sell, mail, trade, bank, auction).
+	local INTERACTION_WINDOWS = { "MerchantFrame", "MailFrame", "TradeFrame", "BankFrame", "GuildBankFrame",
+		"AuctionHouseFrame", "AuctionFrame", "AccountBankPanel", "VoidStorageFrame" }
+	local function InteractionWindowOpen()
+		for i = 1, #INTERACTION_WINDOWS do
+			local f = _G[INTERACTION_WINDOWS[i]]
+			if f and f.IsShown and f:IsShown() then return true end
 		end
-	else
-		ShowFreeCount(); UpdateFooter()
+		return false
 	end
-	if ns.searchText then ApplySearch() end
-	if ns.RefreshMarket and ns.IsMarketOpen and ns.IsMarketOpen() then ns.RefreshMarket() end
+	ns.InteractionWindowOpen = InteractionWindowOpen
+
+	-- Only while one of those windows is open AND the cursor is over the bags do
+	-- emptied slots stay as gaps, so the next item never slides under a
+	-- right-click (no accidental vendor sales). Everywhere else — merging stacks,
+	-- using items — the grid tidies up immediately.
+	local function HoldGaps()
+		return frame:IsMouseOver() and InteractionWindowOpen()
+	end
+
+	local reflowWaiting = false
+	local function ReflowLater()
+		reflowWaiting = false
+		if frame:IsShown() and layoutDirty then
+			if HoldGaps() then reflowWaiting = true; C_Timer.After(0.3, ReflowLater)
+			else Layout(); if ns.searchText then ApplySearch() end end
+		end
+	end
+
+	Update = function(force)
+		if dirtyAll then dirtyAll = false; SyncBagList() end
+		for bag in pairs(dirty) do
+			if inList[bag] then ScanBag(bag) end
+			dirty[bag] = nil
+		end
+		if layoutDirty then
+			-- Re-sort right away unless gaps are being held (see HoldGaps), and
+			-- always just after Sort or when the Free Space tile itself got filled.
+			if force or ns.db.oneBag or GetTime() < (ns.sortingUntil or 0) or not HoldGaps()
+				or (freeButton and freeButton.fbRec.id) or (freeReagentButton and freeReagentButton.fbRec.id) then Layout()
+			else
+				freeCount, reagentFree = 0, 0
+				for bag in pairs(generalBag) do if generalBag[bag] then freeCount = freeCount + (GetFreeSlots(bag) or 0) end end
+				for bag in pairs(reagentBag) do if reagentBag[bag] then reagentFree = reagentFree + (GetFreeSlots(bag) or 0) end end
+				ShowFreeCount(); UpdateFooter(); ns.SyncItemSetLocks()
+				if not reflowWaiting then reflowWaiting = true; C_Timer.After(0.3, ReflowLater) end
+			end
+		else
+			ShowFreeCount(); UpdateFooter(); ns.SyncItemSetLocks()
+		end
+		if ns.searchText then ApplySearch() end
+		if ns.RefreshMarket and ns.IsMarketOpen and ns.IsMarketOpen() then ns.RefreshMarket() end
+	end
 end
 
 local pending, cdDirty, currencyDirty = false, false, false
@@ -1018,51 +1264,68 @@ function ns.BackgroundStyle(key)
 	return ns.BACKGROUND_STYLES[1]
 end
 
-local function HasAtlas(name)
-	return name and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(name) ~= nil
-end
-
-local function SetBackground(border, a, style)
-	if not border then return end
-	local bg = border.Bg
-	if bg then   -- the dialog template's background texture: swap what it shows, keep the alpha on top
-		if style.atlas and HasAtlas(style.atlas) then
-			bg:SetHorizTile(false); bg:SetVertTile(false)
-			bg:SetAtlas(style.atlas, false)
-			bg:SetVertexColor(1, 1, 1, a)
-		elseif style.file then
-			local wrap = style.tile and "REPEAT" or "CLAMP"
-			bg:SetTexture(style.file, wrap, wrap)
-			bg:SetTexCoord(0, 1, 0, 1)
-			bg:SetHorizTile(style.tile or false); bg:SetVertTile(style.tile or false)
-			bg:SetVertexColor(1, 1, 1, a)
-		else
-			bg:SetHorizTile(false); bg:SetVertTile(false)
-			bg:SetColorTexture(0, 0, 0, a)
-		end
-	elseif border.SetBackdrop then   -- the classic backdrop fallback: files only (a backdrop can't show an atlas)
-		local file = style.file
-		border:SetBackdrop({
-			bgFile = file or "Interface\\Buttons\\WHITE8X8", tile = style.tile or false, tileSize = 256,
-			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 32,
-			insets = { left = 11, right = 12, top = 12, bottom = 11 },
-		})
-		if file then border:SetBackdropColor(1, 1, 1, a) else border:SetBackdropColor(0, 0, 0, a) end
+do
+	local function HasAtlas(name)
+		return name and C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(name) ~= nil
 	end
-end
 
-function ns.ApplyBackground()
-	local a = max(0.2, min(1, ns.db.background or 0.8))
-	local style = ns.BackgroundStyle(ns.db.backgroundStyle)
-	SetBackground(bagBorder, a, style)
-	SetBackground(ns.optionsBorder, a, style)
-	SetBackground(ns.confirmBorder, a, style)
-	SetBackground(ns.marketBorder, a, style)
+	local function SetBackground(border, a, style)
+		if not border then return end
+		local bg = border.Bg
+		if bg then   -- the dialog template's background texture: swap what it shows, keep the alpha on top
+			if style.atlas and HasAtlas(style.atlas) then
+				bg:SetHorizTile(false); bg:SetVertTile(false)
+				bg:SetAtlas(style.atlas, false)
+				bg:SetVertexColor(1, 1, 1, a)
+			elseif style.file then
+				local wrap = style.tile and "REPEAT" or "CLAMP"
+				bg:SetTexture(style.file, wrap, wrap)
+				bg:SetTexCoord(0, 1, 0, 1)
+				bg:SetHorizTile(style.tile or false); bg:SetVertTile(style.tile or false)
+				bg:SetVertexColor(1, 1, 1, a)
+			else
+				bg:SetHorizTile(false); bg:SetVertTile(false)
+				bg:SetColorTexture(0, 0, 0, a)
+			end
+		elseif border.SetBackdrop then   -- the classic backdrop fallback: files only (a backdrop can't show an atlas)
+			local file = style.file
+			border:SetBackdrop({
+				bgFile = file or "Interface\\Buttons\\WHITE8X8", tile = style.tile or false, tileSize = 256,
+				edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 32,
+				insets = { left = 11, right = 12, top = 12, bottom = 11 },
+			})
+			if file then border:SetBackdropColor(1, 1, 1, a) else border:SetBackdropColor(0, 0, 0, a) end
+		end
+	end
+
+	function ns.ApplyBackground()
+		local a = max(0.2, min(1, ns.db.background or 0.8))
+		local style = ns.BackgroundStyle(ns.db.backgroundStyle)
+		SetBackground(bagBorder, a, style)
+		SetBackground(ns.optionsBorder, a, style)
+		SetBackground(ns.confirmBorder, a, style)
+		SetBackground(ns.marketBorder, a, style)
+	end
 end
 
 function ns.Relayout()
 	layoutDirty, refitHeight = true, true
 	if frame:IsShown() then Layout() end
+end
+
+function ns.RecategorizeEquipment()
+	for bag, list in pairs(buttons) do
+		for slot = 1, list.n do
+			local b = list[slot]
+			local c = b.fbRec and b.fbRec.classID
+			if b.fbCat == ns.CAT_EQUIP or c == 2 or c == 4 then
+				b.fbRec.recat = true
+				dirty[bag] = true
+			end
+		end
+	end
+	layoutDirty, refitHeight = true, true
+	if frame:IsShown() then Update(true) else ns.SyncItemSetLocks() end
 end
 
 -- Height of the item area. If you've sized the window (corner grips or the
@@ -1124,297 +1387,288 @@ end
 -- into the first free slot of a normal bag. Checked live, so a slot changed
 -- this instant is never hit.
 ---------------------------------------------------------------------------
-local PickupContainerItem = C_Container.PickupContainerItem
-local GetContainerItemID = C_Container.GetContainerItemID
-
-local function DropIntoBag(bag, needFit)
-	local free, family = GetFreeSlots(bag)                -- live: catches bag swaps too
-	if (free or 0) == 0 then return false end
-	if needFit then
-		local kind, itemID = GetCursorInfo()
-		if (family or 0) == 0 or kind ~= "item" or not ns.FitsBagFamily(itemID, family) then return false end
-	elseif (family or 0) ~= 0 then
-		return false
-	end
-	for slot = 1, (GetNumSlots(bag) or 0) do
-		if not GetContainerItemID(bag, slot) then
-			PickupContainerItem(bag, slot)
-			return true
-		end
-	end
-	return false
-end
-
-function ns.StoreCursorItem()
-	if not (CursorHasItem and CursorHasItem() and PickupContainerItem) then return end
-	if ns.REAGENT_BAG and ns.db.preferReagentBag ~= false and GetCursorInfo then
-		if DropIntoBag(ns.REAGENT_BAG, true) then return end
-	end
-	for bag = 0, (NUM_BAG_SLOTS or 4) do
-		if DropIntoBag(bag) then return end
-	end
-	if UIErrorsFrame and ERR_INV_FULL then UIErrorsFrame:AddMessage(ERR_INV_FULL, 1, 0.1, 0.1) end
-end
-
----------------------------------------------------------------------------
--- Backpack currencies: whatever you ticked "Show on Backpack" in the Currency
--- tab, shown in the footer with Blizzard's own tooltips. WoW: Forever and
--- Retail use C_CurrencyInfo (checked in Blizzard's Forever 1.60.1 source);
--- older Classic clients the global; Classic Era has no currencies (row stays hidden).
----------------------------------------------------------------------------
-local function GetBackpackToken(i)
-	local t = C_CurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo(i)
-	if t then return t.iconFileID, t.quantity, t.currencyTypesID end
-end
-
-local FOOT_BASE, TOKEN_ROW_Y, TOKEN_ROW_H, TOKEN_GAP = 44, 26, 20, 10
-ns.HasCurrencyAPI = GetBackpackToken ~= nil
-
-local function FormatCount(n)
-	local s = BreakUpLargeNumbers and BreakUpLargeNumbers(n) or tostring(n)
-	if #s > 6 and AbbreviateNumbers then s = AbbreviateNumbers(n) end
-	return s
-end
-
-local function TokenTooltip(owner, token)
-	if not token then return end
-	GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
-	if token.index and GameTooltip.SetBackpackToken then
-		GameTooltip:SetBackpackToken(token.index)
-		if TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION then
-			GameTooltip:AddLine(" ")
-			GameTooltip:AddLine(TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION, 0.1, 1, 0.1, true)
-		end
-	elseif token.listIndex and GameTooltip.SetCurrencyToken then
-		GameTooltip:SetCurrencyToken(token.listIndex)
-	elseif token.currencyID and GameTooltip.SetCurrencyByID then
-		GameTooltip:SetCurrencyByID(token.currencyID, token.quantity)
-	end
-	GameTooltip:Show()
-end
-
--- Item on the cursor, link, untrack: same as Blizzard's backpack tokens. A plain click opens the Character
--- window, but never from here (below).
-local function TokenClick(b)
-	if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
-	local C = C_CurrencyInfo
-	if IsModifiedClick and C then
-		if IsModifiedClick("CHATLINK") and HandleModifiedItemClick then
-			local link = (b.currencyID and C.GetCurrencyLink and C.GetCurrencyLink(b.currencyID, b.quantity))
-				or (b.listIndex and C.GetCurrencyListLink and C.GetCurrencyListLink(b.listIndex))
-			if link and HandleModifiedItemClick(link) then return end
-		end
-		if IsModifiedClick("TOKENWATCHTOGGLE") and b.index and b.currencyID and C.SetCurrencyBackpackByID then
-			C.SetCurrencyBackpackByID(b.currencyID, false)   -- our hook refreshes the row
-		end
-	end
-end
-
--- Opening the Character window from addon code (ToggleCharacter, CharacterFrame:ToggleTokenFrame; 1.0-1.7.13 did)
--- runs Blizzard's panel code tainted and leaves its state ours. So a plain click goes through one secure button:
--- a SecureActionButtonTemplate "click" on Blizzard's CharacterMicroButton, which opens the Character window as
--- Blizzard code, on the paper doll (the Currency tab is one click further). A protected button makes the window
--- protected too (see the X below), so it covers the hovered currency only outside combat and is parked on
--- PLAYER_REGEN_DISABLED. In combat a plain click does nothing, as before; links and untracking still work.
-local currencyOpen
-local currencyPark = CreateFrame("Frame"); currencyPark:Hide()
-function ns.ParkCurrencyOpen()
-	if currencyOpen and not InCombatLockdown() then
-		currencyOpen:ClearAllPoints(); currencyOpen:SetParent(currencyPark); currencyOpen.token = nil
-	end
-end
-
-local function MakeCurrencyOpen()
-	local b = CreateFrame("Button", nil, currencyPark, "SecureActionButtonTemplate")
-	b:RegisterForClicks("LeftButtonUp")
-	b:SetAttribute("useOnKeyDown", false)
-	b:SetAttribute("clickbutton", CharacterMicroButton)
-	b:SetScript("PreClick", function(self)
-		if InCombatLockdown() then return end   -- attributes are locked in combat (it is parked then anyway)
-		local held = CursorHasItem and CursorHasItem()
-		local modified = IsModifiedClick and (IsModifiedClick("CHATLINK") or IsModifiedClick("TOKENWATCHTOGGLE"))
-		self:SetAttribute("type", not (held or modified) and "click" or nil)
-	end)
-	b:SetScript("PostClick", function(self)
-		if self.token and not self:GetAttribute("type") then TokenClick(self.token) end
-	end)
-	b:SetScript("OnEnter", function(self) if self.token then TokenTooltip(self, self.token) end end)
-	b:SetScript("OnLeave", function() GameTooltip:Hide(); ns.ParkCurrencyOpen() end)
-	b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
-	currencyOpen = b
-end
-
-local function CoverToken(token)
-	if InCombatLockdown() or not CharacterMicroButton then return end
-	if not currencyOpen then MakeCurrencyOpen() end
-	currencyOpen.token = token
-	currencyOpen:SetParent(frame); currencyOpen:ClearAllPoints(); currencyOpen:SetAllPoints(token)
-	currencyOpen:SetFrameLevel(token:GetFrameLevel() + 1)
-end
-
-local function TokenButton(i)
-	local b = tokenButtons[i]
-	if b then return b end
-	b = CreateFrame("Button", nil, frame)
-	b:SetHeight(16)
-	b:SetFrameLevel(frame:GetFrameLevel() + 6)
-	b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(14, 14); b.icon:SetPoint("RIGHT")
-	b.count = b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	b.count:SetPoint("RIGHT", b.icon, "LEFT", -3, 0)
-	b:SetScript("OnEnter", function(self) TokenTooltip(self, self); CoverToken(self) end)
-	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
-	b:SetScript("OnClick", TokenClick)
-	tokenButtons[i] = b
-	return b
-end
-
+local FOOT_BASE = 44
 local function PlaceFooterLine()
 	footLine:ClearAllPoints()
 	footLine:SetPoint("BOTTOMLEFT", PAD, FOOT_H - 4)
 	footLine:SetPoint("BOTTOMRIGHT", -PAD, FOOT_H - 4)
 end
 
--- Lays the currencies out right-to-left: on the same line to the left of your
--- gold when the window width permits it, or stacked with the gold alongside
--- the stacked bag capacity + fill bar when narrower.
-function ns.RefitCurrencies()
-	if refitting then return end
-	refitting = true
-	refitWidth = frame:GetWidth()
-	local avail = refitWidth - PAD * 2 - 8
-	local off = AhRowOffset()
-	local leftW = max(BAR_W, slotsText:GetStringWidth() or 0)
-	if reagentTotal > 0 then
-		leftW = leftW + BAR_GAP + max(BAR_W, reagentText:GetStringWidth() or 0)
-	end
-	local moneyW = money:GetStringWidth() or 0
+do
+	local PickupContainerItem = C_Container.PickupContainerItem
+	local GetContainerItemID = C_Container.GetContainerItemID
 
-	local totalTokenW = 0
-	for i = 1, numTokens do
-		local t, b = tokens[i], TokenButton(i)
-		b.index, b.currencyID, b.quantity, b.listIndex = t[1], t[4], t[3], t[5]
-		b.icon:SetTexture(t[2])
-		b.count:SetText(FormatCount(t[3]))
-		local w = (b.count:GetStringWidth() or 0) + 20
-		b.w = w
-		totalTokenW = totalTokenW + w + (i > 1 and TOKEN_GAP or 0)
-	end
-	for i = numTokens + 1, #tokenButtons do tokenButtons[i]:Hide() end
-
-	local want
-	if numTokens == 0 then
-		money:ClearAllPoints()
-		money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
-		want = FOOT_BASE + off
-	elseif leftW + 16 + totalTokenW + TOKEN_GAP + moneyW <= avail then
-		-- Single line: currencies sit inline to the left of gold on the same row.
-		money:ClearAllPoints()
-		money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
-		local x = moneyW + TOKEN_GAP
-		for i = 1, numTokens do
-			local b = tokenButtons[i]
-			b:SetWidth(b.w)
-			b:ClearAllPoints()
-			b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(PAD + 4 + x), 16 + off)
-			b:Show()
-			x = x + b.w + TOKEN_GAP
+	local function DropIntoBag(bag, needFit)
+		local free, family = GetFreeSlots(bag)                -- live: catches bag swaps too
+		if (free or 0) == 0 then return false end
+		if needFit then
+			local kind, itemID = GetCursorInfo()
+			if (family or 0) == 0 or kind ~= "item" or not ns.FitsBagFamily(itemID, family) then return false end
+		elseif (family or 0) ~= 0 then
+			return false
 		end
-		want = FOOT_BASE + off
-	else
-		-- Stacked: gold aligns with the bottom fill bar, and the first currency row
-		-- aligns with the bag capacity text above it.
-		money:ClearAllPoints()
-		money:SetPoint("BOTTOMRIGHT", -PAD - 4, 13 + off)
-		local row, used = 0, 0
-		local row0Avail = max(60, avail - leftW - 14)
-		for i = 1, numTokens do
-			local b = tokenButtons[i]
-			local w = b.w
-			local limit = (row == 0) and row0Avail or avail
-			if used > 0 and used + w > limit then row, used = row + 1, 0 end
-			b.row, b.x = row, used
-			used = used + w + TOKEN_GAP
-		end
-		local rows = row + 1
-		for i = 1, numTokens do
-			local b = tokenButtons[i]
-			b:SetWidth(b.w)
-			b:ClearAllPoints()
-			b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(PAD + 4 + b.x), TOKEN_ROW_Y + off + (rows - 1 - b.row) * TOKEN_ROW_H)
-			b:Show()
-		end
-		want = FOOT_BASE + 4 + off + (rows - 1) * TOKEN_ROW_H
-	end
-
-	if want ~= FOOT_H then
-		FOOT_H = want
-		PlaceFooterLine()
-		refitHeight = true                     -- footer changed: fit the grid to the new space
-		ns.ApplyView()
-	end
-	refitting = false
-end
-
-function ns.RefreshAuctionFooter()
-	if not frame then return end
-	UpdateAuctionFooter()
-	if frame:IsShown() then
-		ns.RefitCurrencies()
-		if ns.MinColumns() > ns.db.columns then
-			Layout()
-		end
-	end
-	if ns.RefreshOptions then ns.RefreshOptions() end
-end
-
--- Reads watched backpack currencies plus any discovered currencies you hold
--- (such as WoW: Forever's supply-crate Trader currency), even if "Show on Backpack"
--- hasn't been manually ticked in the Currency tab yet.
-local seenCurrencies = {}
-function ns.RefreshCurrencies()
-	numTokens = 0
-	wipe(seenCurrencies)
-	local C = C_CurrencyInfo
-	if C and ns.db.showCurrencies ~= false then
-		if GetBackpackToken then
-			for i = 1, 30 do
-				local icon, count, id = GetBackpackToken(i)
-				if not icon then break end                          -- the watched list has no gaps
-				numTokens = numTokens + 1
-				local t = tokens[numTokens] or {}
-				t[1], t[2], t[3], t[4], t[5] = i, icon, count or 0, id, nil
-				tokens[numTokens] = t
-				if id then seenCurrencies[id] = true end
+		for slot = 1, (GetNumSlots(bag) or 0) do
+			if not GetContainerItemID(bag, slot) then
+				PickupContainerItem(bag, slot)
+				return true
 			end
 		end
-		if C.GetCurrencyListSize and C.GetCurrencyListInfo then
-			local n = C.GetCurrencyListSize() or 0
-			for idx = 1, n do
-				local info = C.GetCurrencyListInfo(idx)
-				if info and not info.isHeader and not info.isTypeUnused and (info.quantity or 0) > 0 and info.iconFileID then
-					local id = info.currencyID
-					if not id and C.GetCurrencyListLink and C.GetCurrencyIDFromLink then
-						local link = C.GetCurrencyListLink(idx)
-						if link then id = C.GetCurrencyIDFromLink(link) end
-					end
-					if not (id and seenCurrencies[id]) then
-						if id then seenCurrencies[id] = true end
-						numTokens = numTokens + 1
-						local t = tokens[numTokens] or {}
-						t[1], t[2], t[3], t[4], t[5] = nil, info.iconFileID, info.quantity, id, idx
-						tokens[numTokens] = t
+		return false
+	end
+
+	function ns.StoreCursorItem()
+		if not (CursorHasItem and CursorHasItem() and PickupContainerItem) then return end
+		if ns.REAGENT_BAG and ns.db.preferReagentBag ~= false and GetCursorInfo then
+			if DropIntoBag(ns.REAGENT_BAG, true) then return end
+		end
+		for bag = 0, (NUM_BAG_SLOTS or 4) do
+			if DropIntoBag(bag) then return end
+		end
+		if UIErrorsFrame and ERR_INV_FULL then UIErrorsFrame:AddMessage(ERR_INV_FULL, 1, 0.1, 0.1) end
+	end
+
+	---------------------------------------------------------------------------
+	-- Backpack currencies: whatever you ticked "Show on Backpack" in the Currency
+	-- tab, shown in the footer with Blizzard's own tooltips. WoW: Forever and
+	-- Retail use C_CurrencyInfo (checked in Blizzard's Forever 1.60.1 source);
+	-- older Classic clients the global; Classic Era has no currencies (row stays hidden).
+	---------------------------------------------------------------------------
+	local function GetBackpackToken(i)
+		local t = C_CurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo and C_CurrencyInfo.GetBackpackCurrencyInfo(i)
+		if t then return t.iconFileID, t.quantity, t.currencyTypesID end
+	end
+
+	local TOKEN_ROW_Y, TOKEN_ROW_H, TOKEN_GAP = 26, 20, 10
+	ns.HasCurrencyAPI = GetBackpackToken ~= nil
+
+	local function FormatCount(n)
+		local s = BreakUpLargeNumbers and BreakUpLargeNumbers(n) or tostring(n)
+		if #s > 6 and AbbreviateNumbers then s = AbbreviateNumbers(n) end
+		return s
+	end
+
+	local function TokenTooltip(owner, token)
+		if not token then return end
+		GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+		if token.index and GameTooltip.SetBackpackToken then
+			GameTooltip:SetBackpackToken(token.index)
+			if TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION then
+				GameTooltip:AddLine(" ")
+				GameTooltip:AddLine(TOKEN_REMOVE_FROM_BACKPACK_INSTRUCTION, 0.1, 1, 0.1, true)
+			end
+		elseif token.listIndex and GameTooltip.SetCurrencyToken then
+			GameTooltip:SetCurrencyToken(token.listIndex)
+		elseif token.currencyID and GameTooltip.SetCurrencyByID then
+			GameTooltip:SetCurrencyByID(token.currencyID, token.quantity)
+		end
+		GameTooltip:Show()
+	end
+
+	-- Item on the cursor, link, untrack: same as Blizzard's backpack tokens. A plain click opens the Character
+	-- window, but never from here (below).
+	local function TokenClick(b)
+		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
+		local C = C_CurrencyInfo
+		if IsModifiedClick and C then
+			if IsModifiedClick("CHATLINK") and HandleModifiedItemClick then
+				local link = (b.currencyID and C.GetCurrencyLink and C.GetCurrencyLink(b.currencyID, b.quantity))
+					or (b.listIndex and C.GetCurrencyListLink and C.GetCurrencyListLink(b.listIndex))
+				if link and HandleModifiedItemClick(link) then return end
+			end
+			if IsModifiedClick("TOKENWATCHTOGGLE") and b.index and b.currencyID and C.SetCurrencyBackpackByID then
+				C.SetCurrencyBackpackByID(b.currencyID, false)   -- our hook refreshes the row
+			end
+		end
+	end
+
+	-- Opening the Character window from addon code (ToggleCharacter, CharacterFrame:ToggleTokenFrame; 1.0-1.7.13 did)
+	-- runs Blizzard's panel code tainted and leaves its state ours. So a plain click goes through one secure button:
+	-- a SecureActionButtonTemplate "click" on Blizzard's CharacterMicroButton, which opens the Character window as
+	-- Blizzard code, on the paper doll (the Currency tab is one click further). A protected button makes the window
+	-- protected too (see the X below), so it covers the hovered currency only outside combat and is parked on
+	-- PLAYER_REGEN_DISABLED. In combat a plain click does nothing, as before; links and untracking still work.
+	local currencyOpen
+	local currencyPark = CreateFrame("Frame"); currencyPark:Hide()
+	function ns.ParkCurrencyOpen()
+		if currencyOpen and not InCombatLockdown() then
+			currencyOpen:ClearAllPoints(); currencyOpen:SetParent(currencyPark); currencyOpen.token = nil
+		end
+	end
+
+	local function MakeCurrencyOpen()
+		local b = CreateFrame("Button", nil, currencyPark, "SecureActionButtonTemplate")
+		b:RegisterForClicks("LeftButtonUp")
+		b:SetAttribute("useOnKeyDown", false)
+		b:SetAttribute("clickbutton", CharacterMicroButton)
+		b:SetScript("PreClick", function(self)
+			if InCombatLockdown() then return end   -- attributes are locked in combat (it is parked then anyway)
+			local held = CursorHasItem and CursorHasItem()
+			local modified = IsModifiedClick and (IsModifiedClick("CHATLINK") or IsModifiedClick("TOKENWATCHTOGGLE"))
+			self:SetAttribute("type", not (held or modified) and "click" or nil)
+		end)
+		b:SetScript("PostClick", function(self)
+			if self.token and not self:GetAttribute("type") then TokenClick(self.token) end
+		end)
+		b:SetScript("OnEnter", function(self) if self.token then TokenTooltip(self, self.token) end end)
+		b:SetScript("OnLeave", function() GameTooltip:Hide(); ns.ParkCurrencyOpen() end)
+		b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+		currencyOpen = b
+	end
+
+	local function CoverToken(token)
+		if InCombatLockdown() or not CharacterMicroButton then return end
+		if not currencyOpen then MakeCurrencyOpen() end
+		currencyOpen.token = token
+		currencyOpen:SetParent(frame); currencyOpen:ClearAllPoints(); currencyOpen:SetAllPoints(token)
+		currencyOpen:SetFrameLevel(token:GetFrameLevel() + 1)
+	end
+
+	local function TokenButton(i)
+		local b = tokenButtons[i]
+		if b then return b end
+		b = CreateFrame("Button", nil, frame)
+		b:SetHeight(16)
+		b:SetFrameLevel(frame:GetFrameLevel() + 6)
+		b.icon = b:CreateTexture(nil, "ARTWORK"); b.icon:SetSize(14, 14); b.icon:SetPoint("RIGHT")
+		b.count = b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+		b.count:SetPoint("RIGHT", b.icon, "LEFT", -3, 0)
+		b:SetScript("OnEnter", function(self) TokenTooltip(self, self); CoverToken(self) end)
+		b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		b:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+		b:SetScript("OnClick", TokenClick)
+		tokenButtons[i] = b
+		return b
+	end
+
+	-- Lays the currencies out right-to-left: on the same line to the left of your
+	-- gold when the window width permits it, or stacked with the gold alongside
+	-- the stacked bag capacity + fill bar when narrower.
+	function ns.RefitCurrencies()
+		if refitting then return end
+		refitting = true
+		refitWidth = frame:GetWidth()
+		local avail = refitWidth - PAD * 2 - 8
+		local off = AhRowOffset()
+		local leftW = max(BAR_W, slotsText:GetStringWidth() or 0)
+		if reagentTotal > 0 then
+			leftW = leftW + BAR_GAP + max(BAR_W, reagentText:GetStringWidth() or 0)
+		end
+		local moneyW = money:GetStringWidth() or 0
+
+		local totalTokenW = 0
+		for i = 1, numTokens do
+			local t, b = tokens[i], TokenButton(i)
+			b.index, b.currencyID, b.quantity, b.listIndex = t[1], t[4], t[3], t[5]
+			b.icon:SetTexture(t[2])
+			b.count:SetText(FormatCount(t[3]))
+			local w = (b.count:GetStringWidth() or 0) + 20
+			b.w = w
+			totalTokenW = totalTokenW + w + (i > 1 and TOKEN_GAP or 0)
+		end
+		for i = numTokens + 1, #tokenButtons do tokenButtons[i]:Hide() end
+
+		local want
+		if numTokens == 0 then
+			money:ClearAllPoints()
+			money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
+			want = FOOT_BASE + off
+		elseif leftW + 16 + totalTokenW + TOKEN_GAP + moneyW <= avail then
+			-- Single line: currencies sit inline to the left of gold on the same row.
+			money:ClearAllPoints()
+			money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
+			local x = moneyW + TOKEN_GAP
+			for i = 1, numTokens do
+				local b = tokenButtons[i]
+				b:SetWidth(b.w)
+				b:ClearAllPoints()
+				b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(PAD + 4 + x), 16 + off)
+				b:Show()
+				x = x + b.w + TOKEN_GAP
+			end
+			want = FOOT_BASE + off
+		else
+			-- Stacked: gold aligns with the bottom fill bar, and the first currency row
+			-- aligns with the bag capacity text above it.
+			money:ClearAllPoints()
+			money:SetPoint("BOTTOMRIGHT", -PAD - 4, 13 + off)
+			local row, used = 0, 0
+			local row0Avail = max(60, avail - leftW - 14)
+			for i = 1, numTokens do
+				local b = tokenButtons[i]
+				local w = b.w
+				local limit = (row == 0) and row0Avail or avail
+				if used > 0 and used + w > limit then row, used = row + 1, 0 end
+				b.row, b.x = row, used
+				used = used + w + TOKEN_GAP
+			end
+			local rows = row + 1
+			for i = 1, numTokens do
+				local b = tokenButtons[i]
+				b:SetWidth(b.w)
+				b:ClearAllPoints()
+				b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -(PAD + 4 + b.x), TOKEN_ROW_Y + off + (rows - 1 - b.row) * TOKEN_ROW_H)
+				b:Show()
+			end
+			want = FOOT_BASE + 4 + off + (rows - 1) * TOKEN_ROW_H
+		end
+
+		if want ~= FOOT_H then
+			FOOT_H = want
+			PlaceFooterLine()
+			refitHeight = true                     -- footer changed: fit the grid to the new space
+			ns.ApplyView()
+		end
+		refitting = false
+	end
+
+	-- Reads watched backpack currencies plus any discovered currencies you hold
+	-- (such as WoW: Forever's supply-crate Trader currency), even if "Show on Backpack"
+	-- hasn't been manually ticked in the Currency tab yet.
+	local seenCurrencies = {}
+	function ns.RefreshCurrencies()
+		numTokens = 0
+		wipe(seenCurrencies)
+		local C = C_CurrencyInfo
+		if C and ns.db.showCurrencies ~= false then
+			if GetBackpackToken then
+				for i = 1, 30 do
+					local icon, count, id = GetBackpackToken(i)
+					if not icon then break end                          -- the watched list has no gaps
+					numTokens = numTokens + 1
+					local t = tokens[numTokens] or {}
+					t[1], t[2], t[3], t[4], t[5] = i, icon, count or 0, id, nil
+					tokens[numTokens] = t
+					if id then seenCurrencies[id] = true end
+				end
+			end
+			if C.GetCurrencyListSize and C.GetCurrencyListInfo then
+				local n = C.GetCurrencyListSize() or 0
+				for idx = 1, n do
+					local info = C.GetCurrencyListInfo(idx)
+					if info and not info.isHeader and not info.isTypeUnused and (info.quantity or 0) > 0 and info.iconFileID then
+						local id = info.currencyID
+						if not id and C.GetCurrencyListLink and C.GetCurrencyIDFromLink then
+							local link = C.GetCurrencyListLink(idx)
+							if link then id = C.GetCurrencyIDFromLink(link) end
+						end
+						if not (id and seenCurrencies[id]) then
+							if id then seenCurrencies[id] = true end
+							numTokens = numTokens + 1
+							local t = tokens[numTokens] or {}
+							t[1], t[2], t[3], t[4], t[5] = nil, info.iconFileID, info.quantity, id, idx
+							tokens[numTokens] = t
+						end
 					end
 				end
 			end
 		end
+		ns.RefitCurrencies()
 	end
-	ns.RefitCurrencies()
-end
 
-function ns.MarkCurrencies()
-	currencyDirty = true
-	Schedule()
+	function ns.MarkCurrencies()
+		currencyDirty = true
+		Schedule()
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -1834,50 +2088,82 @@ local function Build()
 		if close and not InCombatLockdown() then close:SetButtonState("NORMAL") end
 	end
 
-	-- Sort (Blizzard's standard red panel button), then the search box.
+	-- Sort button (sort icon), rightmost in the toolbar.
 	local searchRight = -PAD
 	if ns.SortBags then
-		local sortBtn = TryTemplate("Button", nil, frame, "UIPanelButtonTemplate") or CreateFrame("Button", nil, frame)
-		sortBtn:SetSize(64, 22)
+		local SORT_W = 22
+		local sortBtn = CreateFrame("Button", "DavesSackSortButton", frame)
+		sortBtn:SetSize(SORT_W, 22)
 		sortBtn:SetPoint("TOPRIGHT", -PAD, -42)
-		if sortBtn.SetText then sortBtn:SetText("Sort") end
+		sortBtn:SetFrameLevel(frame:GetFrameLevel() + 5)
+		sortBtn:RegisterForClicks("LeftButtonUp")
+		local sortIcon = sortBtn:CreateTexture(nil, "ARTWORK")
+		sortIcon:SetPoint("CENTER")
+		sortIcon:SetSize(18, 18)
+		sortIcon:SetTexture(M .. "sort")
+		sortIcon:SetAlpha(0.78)
+		local sortHL = sortBtn:CreateTexture(nil, "HIGHLIGHT")
+		sortHL:SetPoint("CENTER")
+		sortHL:SetSize(18, 18)
+		sortHL:SetTexture(M .. "sort")
+		sortHL:SetBlendMode("ADD")
+		sortHL:SetAlpha(0.45)
 		sortBtn:SetScript("OnClick", function()
+			if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
 			Sound("UI_BAG_SORTING_01")
+			if ns.HoldSetLocksForSort then ns.HoldSetLocksForSort() end
 			ns.sortingUntil = GetTime() + 5          -- show sorted results even while hovering
 			ns.SortBags()
 		end)
-		searchRight = -PAD - 64 - 8
+		sortBtn:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+		sortBtn:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText("Sort Bags")
+			GameTooltip:AddLine("Sort and stack items in your bags.", 1, 1, 1, true)
+			GameTooltip:Show()
+		end)
+		sortBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		searchRight = -PAD - SORT_W - 6
 	end
 
-	-- Settings: Blizzard's panel button with our gear icon centred beside the label.
-	local settings = TryTemplate("Button", "DavesSackSettingsButton", frame, "UIPanelButtonTemplate")
-	if not settings then
-		settings = CreateFrame("Button", "DavesSackSettingsButton", frame)
-		local bg = settings:CreateTexture(nil, "BACKGROUND")
-		bg:SetColorTexture(0.45, 0.08, 0.06, 1); bg:SetAllPoints()
-		settings:SetNormalFontObject("GameFontNormal")
-		local hl = settings:CreateTexture(nil, "HIGHLIGHT")
-		hl:SetColorTexture(1, 1, 1, 0.08); hl:SetAllPoints()
-	end
-	settings:SetText("Settings")
-	settings:SetSize(96, 22)                  -- after SetText: some clients auto-fit the width
+	-- Settings button (gear icon), immediately left of Sort.
+	local SETTINGS_W = 22
+	local settings = CreateFrame("Button", "DavesSackSettingsButton", frame)
+	settings:SetSize(SETTINGS_W, 22)
 	settings:SetPoint("TOPRIGHT", searchRight, -42)
-	local gearIcon = settings:CreateTexture(nil, "OVERLAY")
-	gearIcon:SetTexture(M .. "gear"); gearIcon:SetSize(14, 14)
-	local label = settings.GetFontString and settings:GetFontString()
-	if label then
-		label:ClearAllPoints(); label:SetPoint("CENTER", 9, 0)   -- icon + text centred as a pair
-		gearIcon:SetPoint("RIGHT", label, "LEFT", -4, 0)
-	else
-		gearIcon:SetPoint("LEFT", 10, 0)
+	settings:SetFrameLevel(frame:GetFrameLevel() + 5)
+	settings:RegisterForClicks("LeftButtonUp")
+	local gearIcon = settings:CreateTexture(nil, "ARTWORK")
+	gearIcon:SetPoint("CENTER")
+	gearIcon:SetSize(18, 18)
+	gearIcon:SetTexture(M .. "gear")
+	gearIcon:SetAlpha(0.78)
+	local gearHL = settings:CreateTexture(nil, "HIGHLIGHT")
+	gearHL:SetPoint("CENTER")
+	gearHL:SetSize(18, 18)
+	gearHL:SetTexture(M .. "gear")
+	gearHL:SetBlendMode("ADD")
+	gearHL:SetAlpha(0.45)
+	function ns.SyncSettingsButton()
+		local open = ns.IsOptionsOpen and ns.IsOptionsOpen()
+		gearIcon:SetAlpha(open and 1 or 0.78)
 	end
 	settings:SetScript("OnClick", function()
+		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		if ns.ToggleOptions then ns.ToggleOptions() end
 	end)
-	searchRight = searchRight - 96 - 8
+	settings:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+	settings:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Bag Settings")
+		GameTooltip:AddLine("Open Dave's Sack layout, look, and category settings.", 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	settings:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	searchRight = searchRight - SETTINGS_W - 6
 
-	-- Delete, immediately left of Settings so it sits beside the gear. Drop a held item on it,
+	-- Delete (trash icon), anchored at the left of the search bar. Drop a held item on it,
 	-- or click it while holding one. DeleteCursorItem requires a hardware event and destroys the
 	-- cursor item immediately (it does NOT raise DELETE_ITEM_CONFIRM — Blizzard's confirmation
 	-- popup calls DeleteCursorItem after you click Yes). When "Confirm delete (trash)" is ticked in
@@ -1886,7 +2172,7 @@ local function Build()
 	local DELETE_W = 22
 	local deleteBtn = CreateFrame("Button", "DavesSackDeleteButton", frame)
 	deleteBtn:SetSize(DELETE_W, 22)
-	deleteBtn:SetPoint("TOPRIGHT", searchRight, -42)
+	deleteBtn:SetPoint("TOPLEFT", PAD, -42)
 	deleteBtn:SetFrameLevel(frame:GetFrameLevel() + 5)
 	deleteBtn:RegisterForClicks("LeftButtonUp")
 	local deleteIcon = deleteBtn:CreateTexture(nil, "ARTWORK")
@@ -1903,6 +2189,7 @@ local function Build()
 	local function DropReady()
 		local held = CursorHasItem and CursorHasItem()
 		deleteIcon:SetAlpha(held and 1 or 0.65)
+		if not held then ns.SyncItemSetLocks() end
 	end
 	deleteBtn:SetScript("OnEvent", DropReady)
 	deleteBtn:SetScript("OnShow", function(self)
@@ -1920,6 +2207,21 @@ local function Build()
 		if kind ~= "item" or not itemID then return end
 		destroyPending = true
 		C_Timer.After(0, function() destroyPending = false end)
+		if ns.db and ns.db.lockItemSets then
+			local bag, slot
+			if C_Cursor and C_Cursor.GetCursorItem then
+				local loc = C_Cursor.GetCursorItem()
+				if loc and loc.IsBagAndSlot and loc:IsBagAndSlot() then
+					bag, slot = loc:GetBagAndSlot()
+				end
+			end
+			if ns.IsItemInSet and ns.IsItemInSet(itemID, bag, slot) then
+				ns.HideDestroyConfirm(false)
+				if ClearCursor then ClearCursor() end
+				print("|cffd4a94eDave's Sack:|r Item Sets are locked. Unlock Item Sets before deleting set gear.")
+				return
+			end
+		end
 		if ns.db.confirmDestroy == false then
 			ns.HideDestroyConfirm(true)
 			DeleteCursorItem()
@@ -1940,9 +2242,8 @@ local function Build()
 		GameTooltip:Show()
 	end)
 	deleteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	searchRight = searchRight - DELETE_W - 6
 
-	-- Market Analysis & Insights button (auction gavel icon), immediately left of the trash button.
+	-- Market Analysis & Insights button (auction gavel icon), immediately left of Settings.
 	local MARKET_W = 22
 	local marketBtn = CreateFrame("Button", "DavesSackMarketButton", frame)
 	marketBtn:SetSize(MARKET_W, 22)
@@ -1973,7 +2274,7 @@ local function Build()
 	marketBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText("Market Analysis & Insights")
-		GameTooltip:AddLine("Open the Auction House market companion window (trends, top 10 hot/sold items, top 20 margins, and bag sell advisor).", 1, 1, 1, true)
+		GameTooltip:AddLine("Open the Auction House market companion window (Margin, Scarce, Professions, and Bag Advisor).", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	marketBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -1987,13 +2288,13 @@ local function Build()
 	search = TryTemplate("EditBox", "DavesSackSearch", frame, "SearchBoxTemplate")
 	if search then
 		search:SetHeight(20)
-		search:SetPoint("TOPLEFT", PAD + 6, -43)       -- template's left cap hangs out ~6px
+		search:SetPoint("TOPLEFT", PAD + DELETE_W + 10, -43)   -- template's left cap hangs out ~6px
 		search:SetPoint("TOPRIGHT", searchRight, -43)
 		search:HookScript("OnTextChanged", OnSearch)
 	else
 		search = CreateFrame("EditBox", "DavesSackSearch", frame, "InputBoxTemplate")
 		search:SetAutoFocus(false); search:SetHeight(20)
-		search:SetPoint("TOPLEFT", PAD + 6, -43); search:SetPoint("TOPRIGHT", searchRight, -43)
+		search:SetPoint("TOPLEFT", PAD + DELETE_W + 8, -43); search:SetPoint("TOPRIGHT", searchRight, -43)
 		search:SetScript("OnTextChanged", OnSearch)
 	end
 	search:SetScript("OnEnterPressed", search.ClearFocus)
@@ -2220,6 +2521,7 @@ local function Build()
 		refitHeight = true                         -- fit to what's in the bags now
 		Update(true); UpdateCooldowns(); UpdateMoney(); ns.RefreshCurrencies()
 		if refitHeight then ns.ApplyView() end     -- nothing changed since last time: fit anyway
+		if ns.SyncSettingsButton then ns.SyncSettingsButton() end
 		if ns.SyncMarketButton then ns.SyncMarketButton() end
 	end)
 	-- Never call Blizzard's bag functions (CloseAllBags, ToggleAllBags…) from
@@ -2243,70 +2545,73 @@ function ns.Close() if frame:IsShown() then frame:Hide() end end
 -- bags may be left out of step until the next key press or button click, which the hooks below follow.
 function ns.Toggle() frame:SetShown(not frame:IsShown()) end
 
--- Whether Blizzard considers any of the bags we show open: read only (IsBagOpen looks at its frames' IsShown),
--- so nothing of Blizzard's is written from addon code.
-local BACKPACK = Enum and Enum.BagIndex and Enum.BagIndex.Backpack or 0
-function ns.BlizzardBagsOpen()
-	if not IsBagOpen then return false end
-	if IsBagOpen(BACKPACK) then return true end
-	for id in pairs(inList) do if IsBagOpen(id) then return true end end
-	return false
-end
-
 -- The bag open/close sounds: our window always plays its own. Blizzard's container frames play theirs from
 -- OnShow/OnHide, which never run while a frame is parked on the hidden parent (below): it never becomes visible.
 -- 1.7.10-1.7.13 hooked their OnShow/OnHide (HookScript) to tell; those hooks ran inside Blizzard's bag opening
 -- and are gone. The bank taint itself came from the event muting below.
 function ns.BagSound(kit) Sound(kit) end
 
-local hidden = CreateFrame("Frame"); hidden:Hide()
-
--- While one of Blizzard's container frames is showing *your* bags we park it on a hidden parent, so only our
--- window is seen. On Classic clients bank bags reuse the same frames, so they get their parent back (Forever's
--- bank has no container frames). A parked frame never runs its OnShow, where Blizzard registers its bag-update
--- events, so it only keeps the few it registers at load (bag opened/closed, quest log, bag slots changed).
--- Never switch those off from here (1.1-1.7.13 did): together with our
--- window following Blizzard's bag calls (Follow, below), that tainted every window that opens the bags - the
--- bank and the mailbox - for the rest of the session. The bank's free first tab was blocked
--- ("PurchaseBankTab()"), and so was every item used from the bags in combat afterwards: Blizzard's item click
--- reads BankPanel.bankType even with the bank closed ("UseContainerItem()"). Found by switching each piece off
--- in game, 1.7.14.
-local origParent = {}
-
-local function Park(f)
-	if f:GetParent() ~= hidden then origParent[f] = f:GetParent() end
-	f:SetParent(hidden)
-end
-
-local function Unpark(f)
-	if f:GetParent() == hidden then f:SetParent(origParent[f] or UIParent) end
-end
-
-local function Claim(f)
-	if not (f and f.GetID) then return end
-	if inList[f:GetID()] then Park(f) else Unpark(f) end
-end
-
-local function TakeOverBlizzardBags()
-	-- Park every container frame now, before Blizzard first shows one: shown under UIParent first and parked
-	-- after, a frame would play its open sound and then its close sound in the same instant. Bank bags get
-	-- theirs back through Claim, after ContainerFrame_GenerateFrame (which shows every container frame).
-	for i = 1, 20 do local f = _G["ContainerFrame" .. i]; if f then Park(f) end end
-	if ContainerFrame_GenerateFrame then hooksecurefunc("ContainerFrame_GenerateFrame", Claim) end
-	if ContainerFrameCombinedBags then Park(ContainerFrameCombinedBags) end
-
-	-- After any of Blizzard's bag calls, our window follows Blizzard's own open/closed state (read only) instead
-	-- of toggling by itself: the two can't drift apart (a drift made Blizzard's frames, and their sounds, run
-	-- the opposite way to ours), and Blizzard's rules - bags opened by the mailbox or vendor close with it, bags
-	-- you opened yourself stay open - apply to us for free. Several of these call each other; following the state
-	-- is idempotent, so that doesn't matter.
-	local function Follow()
-		local open = ns.BlizzardBagsOpen()
-		if open ~= frame:IsShown() then frame:SetShown(open) end
+local TakeOverBlizzardBags
+do
+	-- Whether Blizzard considers any of the bags we show open: read only (IsBagOpen looks at its frames' IsShown),
+	-- so nothing of Blizzard's is written from addon code.
+	local BACKPACK = Enum and Enum.BagIndex and Enum.BagIndex.Backpack or 0
+	function ns.BlizzardBagsOpen()
+		if not IsBagOpen then return false end
+		if IsBagOpen(BACKPACK) then return true end
+		for id in pairs(inList) do if IsBagOpen(id) then return true end end
+		return false
 	end
-	for _, name in ipairs({ "ToggleAllBags", "ToggleBackpack", "ToggleKeyRing", "OpenAllBags", "OpenBackpack",
-		"CloseAllBags", "CloseBackpack", "ToggleBag", "OpenBag", "CloseBag" }) do
-		if _G[name] then hooksecurefunc(name, Follow) end
+
+	local hidden = CreateFrame("Frame"); hidden:Hide()
+
+	-- While one of Blizzard's container frames is showing *your* bags we park it on a hidden parent, so only our
+	-- window is seen. On Classic clients bank bags reuse the same frames, so they get their parent back (Forever's
+	-- bank has no container frames). A parked frame never runs its OnShow, where Blizzard registers its bag-update
+	-- events, so it only keeps the few it registers at load (bag opened/closed, quest log, bag slots changed).
+	-- Never switch those off from here (1.1-1.7.13 did): together with our
+	-- window following Blizzard's bag calls (Follow, below), that tainted every window that opens the bags - the
+	-- bank and the mailbox - for the rest of the session. The bank's free first tab was blocked
+	-- ("PurchaseBankTab()"), and so was every item used from the bags in combat afterwards: Blizzard's item click
+	-- reads BankPanel.bankType even with the bank closed ("UseContainerItem()"). Found by switching each piece off
+	-- in game, 1.7.14.
+	local origParent = {}
+
+	local function Park(f)
+		if f:GetParent() ~= hidden then origParent[f] = f:GetParent() end
+		f:SetParent(hidden)
+	end
+
+	local function Unpark(f)
+		if f:GetParent() == hidden then f:SetParent(origParent[f] or UIParent) end
+	end
+
+	local function Claim(f)
+		if not (f and f.GetID) then return end
+		if inList[f:GetID()] then Park(f) else Unpark(f) end
+	end
+
+	TakeOverBlizzardBags = function()
+		-- Park every container frame now, before Blizzard first shows one: shown under UIParent first and parked
+		-- after, a frame would play its open sound and then its close sound in the same instant. Bank bags get
+		-- theirs back through Claim, after ContainerFrame_GenerateFrame (which shows every container frame).
+		for i = 1, 20 do local f = _G["ContainerFrame" .. i]; if f then Park(f) end end
+		if ContainerFrame_GenerateFrame then hooksecurefunc("ContainerFrame_GenerateFrame", Claim) end
+		if ContainerFrameCombinedBags then Park(ContainerFrameCombinedBags) end
+
+		-- After any of Blizzard's bag calls, our window follows Blizzard's own open/closed state (read only) instead
+		-- of toggling by itself: the two can't drift apart (a drift made Blizzard's frames, and their sounds, run
+		-- the opposite way to ours), and Blizzard's rules - bags opened by the mailbox or vendor close with it, bags
+		-- you opened yourself stay open - apply to us for free. Several of these call each other; following the state
+		-- is idempotent, so that doesn't matter.
+		local function Follow()
+			local open = ns.BlizzardBagsOpen()
+			if open ~= frame:IsShown() then frame:SetShown(open) end
+		end
+		for _, name in ipairs({ "ToggleAllBags", "ToggleBackpack", "ToggleKeyRing", "OpenAllBags", "OpenBackpack",
+			"CloseAllBags", "CloseBackpack", "ToggleBag", "OpenBag", "CloseBag" }) do
+			if _G[name] then hooksecurefunc(name, Follow) end
+		end
 	end
 end
 
@@ -2318,7 +2623,10 @@ local function TryRegister(e) pcall(events.RegisterEvent, events, e) end
 
 local handlers = {
 	BAG_UPDATE = function(bag) if bag then dirty[bag] = true end; Schedule() end,
-	BAG_UPDATE_DELAYED = Schedule,
+	BAG_UPDATE_DELAYED = function()
+		if ns.SettleSetLocksAfterSort then ns.SettleSetLocksAfterSort() end
+		Schedule()
+	end,
 	-- Picking up / dropping an item: just repaint that one slot.
 	ITEM_LOCK_CHANGED = function(bag, slot)
 		if not (slot and bag) then return end
@@ -2348,6 +2656,20 @@ handlers.GET_ITEM_INFO_RECEIVED = function(itemID)
 	Schedule()
 end
 
+handlers.EQUIPMENT_SETS_CHANGED = function()
+	for bag, list in pairs(buttons) do
+		for slot = 1, list.n do
+			local b = list[slot]
+			local c = b.fbRec and b.fbRec.classID
+			if b.fbCat == ns.CAT_EQUIP or c == 2 or c == 4 then
+				b.fbRec.recat = true
+				dirty[bag] = true
+			end
+		end
+	end
+	Schedule()
+end
+
 local function RescaleSoon()
 	C_Timer.After(0, function()
 		UpdatePixels(); ns.ResetPosition()
@@ -2371,7 +2693,17 @@ local function PrepareButtons(resync)
 end
 handlers.BAG_CONTAINER_UPDATE = function() dirtyAll = true; PrepareButtons(true); Schedule() end
 handlers.BAG_SLOT_FLAGS_UPDATED = handlers.BAG_CONTAINER_UPDATE
-handlers.PLAYER_ENTERING_WORLD = handlers.BAG_CONTAINER_UPDATE   -- bag sizes are known by now
+handlers.PLAYER_ENTERING_WORLD = function()
+	handlers.BAG_CONTAINER_UPDATE()
+	if ns.db and ns.db.lockItemSets then
+		C_Timer.After(0.25, function()
+			if not frame:IsShown() then
+				for bag in pairs(inList) do ScanBag(bag) end
+				ns.SyncItemSetLocks()
+			end
+		end)
+	end
+end
 
 -- Combat: the secure close button leaves the window, so the window can still be shown and hidden (see Build), and
 -- every item button is made beforehand (PLAYER_REGEN_DISABLED comes just before lockdown).

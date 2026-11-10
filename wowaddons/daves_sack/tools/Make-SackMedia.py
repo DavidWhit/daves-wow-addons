@@ -5,6 +5,9 @@ Writes uncompressed 32-bit top-left-origin BGRA TGA textures into Media/:
     with three vertical ribs) matching the palette and outline of gear.tga.
   - gavel.tga (64x64): Gold/brass auctioneer's gavel and sound block icon for
     the Market Analysis & Insights toolbar button.
+  - sort.tga (64x64): Gold/brass sort icon (downward arrow on the left with
+    three graduated horizontal bars on the right) for the Sort Bags toolbar
+    button.
 """
 
 from __future__ import annotations
@@ -53,6 +56,29 @@ def _sd_trapezoid(px: float, py: float, y0: float, y1: float, top_hw: float, bot
     ox = max(dx, 0.0)
     oy = max(dy, 0.0)
     return math.hypot(ox, oy) + min(max(dx, dy), 0.0) - r
+
+
+def _sd_segment(px: float, py: float, ax: float, ay: float, bx: float, by: float) -> float:
+    pax, pay = px - ax, py - ay
+    bax, bay = bx - ax, by - ay
+    h = max(0.0, min(1.0, (pax * bax + pay * bay) / (bax * bax + bay * bay)))
+    return math.hypot(pax - bax * h, pay - bay * h)
+
+
+def _sd_triangle_isoceles_down(px: float, py: float, cx: float, y_top: float, y_tip: float, top_hw: float, r: float) -> float:
+    """Signed distance to a downward-pointing symmetric triangle with top at y_top, tip at (cx, y_tip), rounded by r."""
+    ax, ay = cx - top_hw, y_top
+    bx, by = cx + top_hw, y_top
+    tx, ty = cx, y_tip
+    d1 = _sd_segment(px, py, ax, ay, bx, by)
+    d2 = _sd_segment(px, py, bx, by, tx, ty)
+    d3 = _sd_segment(px, py, tx, ty, ax, ay)
+    d = min(d1, d2, d3)
+    if y_top <= py <= y_tip:
+        span = top_hw * (y_tip - py) / max(1e-5, y_tip - y_top)
+        if abs(px - cx) <= span:
+            d = -d
+    return d - r
 
 
 def write_tga(path: str, width: int, height: int, bgra: bytearray) -> None:
@@ -247,10 +273,86 @@ def build_gavel_icon(size: int = 64) -> bytearray:
     return bgra
 
 
+def build_sort_icon(size: int = 64) -> bytearray:
+    bgra = bytearray(size * size * 4)
+    outline_r, outline_g, outline_b = 20.0, 12.0, 2.0
+
+    for y in range(size):
+        py = y + 0.5
+        for x in range(size):
+            px = x + 0.5
+
+            # 1. Left downward-pointing arrow (shaft + triangular head)
+            d_shaft = _sd_round_box(px, py, 16.0, 23.0, 4.8, 16.5, 2.3)
+            d_head = _sd_triangle_isoceles_down(px, py, 16.0, 37.5, 56.0, 9.6, 2.4)
+            d_arrow = min(d_shaft, d_head)
+
+            # 2. Three horizontal bars on the right (long -> medium -> short), left-aligned at x = 29.0
+            d_bar1 = _sd_round_box(px, py, 44.5, 13.5, 15.5, 5.2, 2.6)
+            d_bar2 = _sd_round_box(px, py, 40.5, 31.5, 11.5, 5.2, 2.6)
+            d_bar3 = _sd_round_box(px, py, 36.5, 49.5, 7.5, 5.2, 2.6)
+            d_bars = min(d_bar1, d_bar2, d_bar3)
+
+            d_union = min(d_arrow, d_bars)
+            if d_union > 0.8:
+                continue
+
+            alpha = 1.0 - _smoothstep(-0.6, 0.7, d_union)
+            if alpha <= 0.0:
+                continue
+
+            d_metal_arrow = d_arrow + 1.85
+            d_metal_bars = min(d_bar1 + 1.85, d_bar2 + 1.85, d_bar3 + 1.85)
+            d_metal = min(d_metal_arrow, d_metal_bars)
+            metal_t = 1.0 - _smoothstep(-0.7, 0.7, d_metal)
+
+            # Directional lighting + bevel sheen matching trash.tga and gavel.tga
+            if d_arrow <= d_bars:
+                diag = (1.0 - (px - 6.0) / 24.0) * 0.45 + (1.0 - (py - 6.0) / 52.0) * 0.55
+                diag = max(0.0, min(1.0, diag))
+                cyl = math.cos(((px - 16.0) / 10.5) * 1.1)
+            else:
+                near_cy = 13.5 if py < 22.5 else (31.5 if py < 40.5 else 49.5)
+                diag = (1.0 - (px - 28.0) / 34.0) * 0.50 + (1.0 - (py - 6.0) / 52.0) * 0.50
+                diag = max(0.0, min(1.0, diag))
+                cyl = math.cos(((py - near_cy) / 5.4) * 1.15)
+            cyl = max(0.0, min(1.0, cyl))
+            shade = 0.27 + 0.52 * diag + 0.21 * cyl
+
+            # Specular highlight along top edges of bars and arrow
+            if -4.0 < d_metal < -1.1 and (
+                (d_arrow < 0.0 and (py < 12.0 or (36.5 < py < 40.5 and abs(px - 16.0) > 4.2)))
+                or (d_bar1 < 0.0 and py < 12.0)
+                or (d_bar2 < 0.0 and py < 30.0)
+                or (d_bar3 < 0.0 and py < 48.0)
+            ):
+                shade = min(1.0, shade + 0.18)
+
+            gold_r = 118.0 + (242.0 - 118.0) * shade
+            gold_g = 86.0 + (200.0 - 86.0) * shade
+            gold_b = 22.0 + (91.0 - 22.0) * shade
+
+            r = outline_r + (gold_r - outline_r) * metal_t
+            g = outline_g + (gold_g - outline_g) * metal_t
+            b = outline_b + (gold_b - outline_b) * metal_t
+
+            idx = (y * size + x) * 4
+            bgra[idx] = _clamp_byte(b)
+            bgra[idx + 1] = _clamp_byte(g)
+            bgra[idx + 2] = _clamp_byte(r)
+            bgra[idx + 3] = _clamp_byte(alpha * 255.0)
+
+    return bgra
+
+
 def main() -> None:
     here = os.path.dirname(os.path.abspath(__file__))
     media_dir = os.path.normpath(os.path.join(here, "..", "Media"))
-    for name, builder in (("trash.tga", build_trash_icon), ("gavel.tga", build_gavel_icon)):
+    for name, builder in (
+        ("trash.tga", build_trash_icon),
+        ("gavel.tga", build_gavel_icon),
+        ("sort.tga", build_sort_icon),
+    ):
         out_path = os.path.join(media_dir, name)
         bgra = builder(64)
         write_tga(out_path, 64, 64, bgra)

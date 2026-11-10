@@ -207,6 +207,9 @@ local function RefreshAll()
 	for _, cb in ipairs(controls.catControls or {}) do
 		cb:SetActive(catsOn)
 	end
+	if controls.lockSets then
+		controls.lockSets:SetActive(catsOn and ns.db.splitEquipment ~= false)
+	end
 	local splitOn = catsOn and ns.db.splitConsumables ~= false
 	for _, cb in ipairs(controls.consGroups or {}) do
 		cb:SetActive(splitOn)
@@ -301,6 +304,22 @@ local function Build()
 		function(on) db.oneBag = on; ns.Relayout(); RefreshAll() end,
 		"Show every slot of your bags (filled and empty) in one continuous grid in bag/slot order instead of sorting items into categories.")
 	y = y - 26
+	controls.catControls[#controls.catControls + 1] = Check(RIGHT_X, y, RIGHT_W, "Equipment item sets",
+		function() return db.splitEquipment ~= false end,
+		function(on)
+			db.splitEquipment = on
+			if ns.RecategorizeEquipment then ns.RecategorizeEquipment() else ns.Relayout() end
+			RefreshAll()
+		end,
+		"Split Equipment into Item Sets and Other Equipment. Drag any weapon or armor onto the Item Sets header to add or remove it from Item Sets.")
+	y = y - 24
+	controls.lockSets = Check(RIGHT_X + 20, y, RIGHT_W - 20, "Lock item sets",
+		function() return db.lockItemSets and true or false end,
+		function(on)
+			if ns.SetItemSetsLocked then ns.SetItemSetsLocked(on) else db.lockItemSets = on end
+		end,
+		"Lock all items in Item Sets so they cannot be sold to vendors, traded, mailed, auctioned, or deleted. Unlock when you want to equip or move set gear.", 22)
+	y = y - 24
 	controls.catControls[#controls.catControls + 1] = Check(RIGHT_X, y, RIGHT_W, "Reagents by profession",
 		function() return db.splitReagents ~= false end,
 		function(on) db.splitReagents = on; ns.Relayout() end,
@@ -399,9 +418,11 @@ local function Build()
 	defaults:SetPoint("TOPRIGHT", -24, resetY - 22)
 	defaults:SetScript("OnClick", function()
 		db.columns, db.scale, db.viewHeight, db.pos, db.background, db.backgroundStyle = ns.ClampColumns(10), 1, nil, nil, 0.8, "dark"
-		db.oneBag, db.splitReagents, db.splitConsumables = false, true, true
+		db.oneBag, db.splitEquipment, db.splitReagents, db.splitConsumables = false, true, true, true
+		if ns.SetItemSetsLocked then ns.SetItemSetsLocked(false) else db.lockItemSets = false end
 		db.showCurrencies, db.showAuctionPrices, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag, db.confirmDestroy = true, true, true, true, true, true
 		wipe(db.collapsed); wipe(db.startFolded); wipe(db.offGroups)
+		if db.customSetItems then wipe(db.customSetItems) end
 		ns.ApplyScale(); ns.ApplyBackground(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies()
 		if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
 		RefreshAll()
@@ -415,9 +436,17 @@ local function Build()
 
 	opt:SetScript("OnShow", function()
 		Sound("IG_MAINMENU_OPEN")
+		if ns.SyncSettingsButton then ns.SyncSettingsButton() end
 		RefreshAll()
 	end)
-	opt:SetScript("OnHide", function() Sound("IG_MAINMENU_CLOSE") end)
+	opt:SetScript("OnHide", function()
+		if ns.SyncSettingsButton then ns.SyncSettingsButton() end
+		Sound("IG_MAINMENU_CLOSE")
+	end)
+end
+
+function ns.IsOptionsOpen()
+	return opt ~= nil and opt:IsShown()
 end
 
 -- Open next to the bags (on whichever side has room).

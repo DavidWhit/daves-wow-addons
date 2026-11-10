@@ -101,7 +101,7 @@ local FISHING_POLE = 20  -- weapon subclass
 -- Fishing): linen is Tailoring, not First Aid; a fish Alchemy turns into oil is
 -- Alchemy, not Cooking. Secondary groups only get what no primary uses, and
 -- they're listed after every primary group.
-ns.CAT_REAGENT, ns.CAT_CONSUME, ns.CAT_QUEST = REAGENT, CONSUME, QUEST
+ns.CAT_EQUIP, ns.CAT_REAGENT, ns.CAT_CONSUME, ns.CAT_QUEST = EQUIP, REAGENT, CONSUME, QUEST
 
 -- Sub-category ids are global; a section only ever shows its own. Their order
 -- here is the order they're drawn in.
@@ -113,15 +113,23 @@ ns.GROUP_NAMES = {
 	"Cooking", "Other Reagents",
 	-- Consumables
 	"Alchemy", "Food & Drink", "First Aid", "Scrolls", "Enhancements", "Other Consumables",
+	-- Equipment
+	"Item Sets", "Other Equipment",
 }
 local G_TAILOR, G_LEATHER, G_MINING, G_HERB, G_ALCHEMY, G_ENCHANT, G_ENGI, G_JC, G_INSCR, G_ELEM, G_COOK =
 	1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11
 local OTHER_GROUP = 12
 local C_ALCHEMY, C_FOOD, C_FIRSTAID, C_SCROLL, C_ENHANCE, C_OTHER = 13, 14, 15, 16, 17, 18
+local E_SETS, E_OTHER = 19, 20
+ns.G_ITEM_SETS, ns.G_EQUIP_OTHER = E_SETS, E_OTHER
 -- Consumable groups that can be switched off one by one in Settings (their
 -- items then join "Other Consumables").
 ns.CONSUMABLE_GROUPS = { C_ALCHEMY, C_FOOD, C_FIRSTAID, C_SCROLL, C_ENHANCE }
-function ns.OtherGroupFor(g) return g <= OTHER_GROUP and OTHER_GROUP or C_OTHER end
+function ns.OtherGroupFor(g)
+	if g <= OTHER_GROUP then return OTHER_GROUP end
+	if g <= C_OTHER then return C_OTHER end
+	return E_OTHER
+end
 
 local TRADEGOODS_TO_GROUP = {
 	[5] = G_TAILOR,                   -- cloth (also First Aid → Tailoring wins)
@@ -191,6 +199,31 @@ local function ConsumableGroup(rec)
 	return C_OTHER
 end
 
+-- Equipment sub-categories: "Item Sets" (items with a game setID, in a saved
+-- Equipment Manager set, or manually added via the Item Sets header) and
+-- "Other Equipment".
+local GetEquipSetInfo = C_Container.GetContainerItemEquipmentSetInfo
+
+function ns.IsNaturalSetItem(id, bag, slot)
+	if not id then return false end
+	if GetEquipSetInfo and bag and slot then
+		local ok, inSet = pcall(GetEquipSetInfo, bag, slot)
+		if ok and inSet then return true end
+	end
+	local name, _, _, _, _, _, _, _, _, _, _, _, _, _, _, setID = GetItemInfo(id)
+	if not name then ns.waiting[id] = true end
+	return (setID and setID > 0) and true or false
+end
+
+local function EquipmentGroup(bag, slot, rec)
+	local id = rec.id
+	local custom = ns.db and ns.db.customSetItems and ns.db.customSetItems[id]
+	if custom == true then return E_SETS end
+	if custom == false then return E_OTHER end
+	if ns.IsNaturalSetItem(id, bag, slot) then return E_SETS end
+	return E_OTHER
+end
+
 -- WoW: Forever camping. Its item data has no camping item type (checked in
 -- Blizzard's Forever UI source, 1.60.1), so camping gear is recognised by item
 -- ID (campfire materials) and by name: camp objects, blueprints, sleeping bags.
@@ -249,11 +282,16 @@ function ns.Categorize(bag, slot, rec)
 		if q and (q.isQuestItem or q.questID) then return QUEST end
 	end
 	if IsCamping(rec) then return CAMP end
+	local cat = CLASS_TO_CAT[rec.classID or -1]
+	if cat == EQUIP and (not ns.db or (not ns.db.oneBag and ns.db.splitEquipment ~= false)) then
+		local grp = EquipmentGroup(bag, slot, rec)
+		if grp == E_SETS then return EQUIP, E_SETS end
+	end
 	if PROFESSION_TOOLS[id] or (rec.classID == 2 and rec.subclassID == FISHING_POLE) then return PROF end
 	if rec.classID == 5 and (rec.subclassID or 0) ~= 0 then return MISC end   -- keystones, context tokens
 	if IsReagentBag(bag) then return REAGENT, ReagentGroup(rec) end
 
-	local cat = CLASS_TO_CAT[rec.classID or -1]
+	if cat == EQUIP then return EQUIP, E_OTHER end
 	if cat == REAGENT then return REAGENT, ReagentGroup(rec) end
 	if cat == CONSUME then return CONSUME, ConsumableGroup(rec) end
 	if cat then return cat end
@@ -286,7 +324,7 @@ do
 	local Clock = debugprofilestop
 	local issecretvalue = issecretvalue
 	local BATCH_SIZE = 50               -- max ItemKeys per C_AuctionHouse.SearchForItemKeys call
-	local REPLICATE_COOLDOWN = 900      -- 15-minute server throttle on C_AuctionHouse.ReplicateItems
+	local REPLICATE_COOLDOWN = 7200     -- 2-hour cooldown between full AH deep caches (fast bag cache runs every time)
 	local REPLICATE_SLICE = 240         -- max auctions inspected per background tick
 	local REPLICATE_BUDGET_MS = 1.8     -- max CPU milliseconds spent per background tick (prevents frame stutter)
 
@@ -883,6 +921,89 @@ do
 		end
 	end
 
+	local PROF_ENUM_TO_KEY = {
+		[0] = "fa",     -- FirstAid
+		[1] = "bs",     -- Blacksmithing
+		[2] = "lw",     -- Leatherworking
+		[3] = "alch",   -- Alchemy
+		[5] = "cook",   -- Cooking
+		[6] = "mining", -- Mining
+		[7] = "tailor", -- Tailoring
+		[8] = "engi",   -- Engineering
+		[9] = "ench",   -- Enchanting
+	}
+
+	local tradeSkillScanPending = false
+
+	local function ScanOpenProfessionRecipes()
+		tradeSkillScanPending = false
+		local T = C_TradeSkillUI
+		if not (T and T.GetBaseProfessionInfo and T.GetFilteredRecipeIDs and T.GetRecipeSchematic and ns.db) then return end
+		local ok, info = pcall(T.GetBaseProfessionInfo)
+		if not (ok and type(info) == "table") then return end
+		local profEnum = info.profession
+		local profKey = (type(profEnum) == "number" and (not issecretvalue or not issecretvalue(profEnum)) and PROF_ENUM_TO_KEY[profEnum]) or nil
+		if not profKey and type(info.professionName) == "string" and (not issecretvalue or not issecretvalue(info.professionName)) then
+			local nm = lower(info.professionName)
+			if find(nm, "alchem", 1, true) then profKey = "alch"
+			elseif find(nm, "blacksmith", 1, true) then profKey = "bs"
+			elseif find(nm, "enchant", 1, true) then profKey = "ench"
+			elseif find(nm, "engineer", 1, true) then profKey = "engi"
+			elseif find(nm, "leather", 1, true) then profKey = "lw"
+			elseif find(nm, "tailor", 1, true) then profKey = "tailor"
+			elseif find(nm, "cook", 1, true) then profKey = "cook"
+			elseif find(nm, "first aid", 1, true) then profKey = "fa"
+			elseif find(nm, "mining", 1, true) or find(nm, "smelt", 1, true) then profKey = "mining"
+			end
+		end
+		if not profKey then return end
+		local okList, ids = pcall(T.GetFilteredRecipeIDs)
+		if not (okList and type(ids) == "table") then return end
+		local recipes = ns.db.ahRecipes
+		if not recipes then
+			recipes = {}
+			ns.db.ahRecipes = recipes
+		end
+		local reagType = (Enum and Enum.TradeskillSlotDataType and Enum.TradeskillSlotDataType.Reagent) or 1
+		local added = false
+		for i = 1, #ids do
+			local rid = ids[i]
+			if type(rid) == "number" and (not issecretvalue or not issecretvalue(rid)) then
+				local okS, s = pcall(T.GetRecipeSchematic, rid, false)
+				if okS and type(s) == "table" then
+					local outID = s.outputItemID
+					if type(outID) == "number" and (not issecretvalue or not issecretvalue(outID)) and outID > 0 and type(s.reagentSlotSchematics) == "table" then
+						local qMin = (type(s.quantityMin) == "number" and (not issecretvalue or not issecretvalue(s.quantityMin)) and s.quantityMin > 0) and s.quantityMin or 1
+						local cur = recipes[outID]
+						if not (type(cur) == "table" and cur.prof == profKey and cur.qty == qMin and type(cur.reags) == "table" and #cur.reags > 0) then
+							local reags = {}
+							for j = 1, #s.reagentSlotSchematics do
+								local slot = s.reagentSlotSchematics[j]
+								if type(slot) == "table" and (slot.dataSlotType == nil or slot.dataSlotType == reagType) and slot.required ~= false then
+									local reqQty = slot.quantityRequired
+									local firstReag = type(slot.reagents) == "table" and slot.reagents[1]
+									local rItemID = type(firstReag) == "table" and firstReag.itemID
+									if type(rItemID) == "number" and type(reqQty) == "number"
+										and (not issecretvalue or (not issecretvalue(rItemID) and not issecretvalue(reqQty)))
+										and rItemID > 0 and reqQty > 0 then
+										reags[#reags + 1] = { rItemID, reqQty }
+									end
+								end
+							end
+							if #reags > 0 then
+								recipes[outID] = { prof = profKey, qty = qMin, reags = reags }
+								added = true
+							end
+						end
+					end
+				end
+			end
+		end
+		if added and ns.RefreshMarket then
+			ns.RefreshMarket()
+		end
+	end
+
 	function ns.InitAuctionCache()
 		local prices = ns.db.ahPrices
 		local market = ns.db.ahMarket
@@ -912,6 +1033,8 @@ do
 			"COMMODITY_SEARCH_RESULTS_UPDATED",
 			"ITEM_SEARCH_RESULTS_UPDATED",
 			"AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
+			"TRADE_SKILL_SHOW",
+			"TRADE_SKILL_LIST_UPDATE",
 		}) do
 			pcall(ahEvents.RegisterEvent, ahEvents, e)
 		end
@@ -945,6 +1068,11 @@ do
 				RecordItemResults(arg1)
 			elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
 				StartReplicateSlice()
+			elseif event == "TRADE_SKILL_SHOW" or event == "TRADE_SKILL_LIST_UPDATE" then
+				if not tradeSkillScanPending then
+					tradeSkillScanPending = true
+					C_Timer.After(0.15, ScanOpenProfessionRecipes)
+				end
 			end
 		end)
 
@@ -961,11 +1089,14 @@ local CATEGORY_VERSION = 4  -- bump when category numbering changes
 local DEFAULTS = {
 	columns = 10, scale = 1, collapsed = {}, startFolded = {}, offGroups = {},   -- startFolded = "Start collapsed"
 	oneBag = false,                                  -- show all bag slots as one single uncategorised grid
-	splitReagents = true, splitConsumables = true,
+	splitEquipment = true, splitReagents = true, splitConsumables = true,
+	lockItemSets = false,                            -- lock items in Item Sets so they can't be sold, traded, mailed, or deleted
+	customSetItems = {},                             -- [itemID] = true (added to Item Sets) or false (removed from Item Sets)
 	showCurrencies = true, showFreeSpace = true,     -- Free Space: drop target for split stacks
 	showAuctionPrices = true,                        -- AH price tooltips + bag footer summary & cache timestamp
 	ahPrices = {},                                   -- [itemID] = lowest unit price in copper from Auction House
 	ahMarket = {},                                   -- [itemID] = market stats, spreads, supply & multi-scan history
+	ahRecipes = {},                                  -- [outputItemID] = learned recipe { prof, qty, reags }
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot
 	preferReagentBag = true,                         -- reagents dropped on the window go into the reagent bag first
 	confirmDestroy = true,                           -- ask before destroying an item dropped on the delete button
@@ -1012,6 +1143,8 @@ SlashCmdList.DAVESSACK = function(msg)
 	elseif cmd == "market" or cmd == "ah" or cmd == "trends" then
 		if ns.Open then ns.Open() end
 		if ns.ToggleMarket then ns.ToggleMarket() end
+	elseif cmd == "lock" or cmd == "unlock" then
+		if ns.SetItemSetsLocked then ns.SetItemSetsLocked(cmd == "lock") end
 	else
 		ns.Toggle()
 	end
