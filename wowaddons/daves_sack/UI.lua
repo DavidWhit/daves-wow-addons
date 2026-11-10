@@ -44,7 +44,7 @@ local SECTION_NAMES = {}
 for i, n in ipairs(ns.CATEGORY_NAMES) do SECTION_NAMES[i] = n end
 SECTION_NAMES[FREE_CAT] = "Free Space"
 
-ns.TIPS = "Drag the window to move it. Drag a bottom corner to resize it. Click a section name to collapse it. Scroll with the mouse wheel or the bar on the right. Drag an item onto the delete button beside Settings to destroy it."
+ns.TIPS = "Drag the window to move it. Drag a bottom corner to resize it. Click a section name to collapse it. Scroll with the mouse wheel or the bar on the right. Drag an item onto the delete button beside Settings to destroy it. Click the gavel button beside the trash can to open Market Analysis & Insights."
 -- 8 is the narrowest width where Sort, Settings, the delete button and a usable
 -- search box all fit, with the scrollbar gutter reserved.
 local MIN_COLS, MAX_COLS = 8, 36
@@ -485,6 +485,42 @@ function ns.BuildTradeableItemKeys(makeKey)
 	return keys
 end
 
+function ns.CollectBagHoldings(out)
+	wipe(out)
+	for _, bag in ipairs(bagList) do
+		if bag ~= KEYRING_CONTAINER then
+			local list = buttons[bag]
+			if list then
+				for slot = 1, list.n do
+					local b = list[slot]
+					local r = b and b.fbRec
+					local id = r and r.id
+					if id and (r.count or 0) > 0 and not r.bound and b.fbCat ~= ns.CAT_QUEST then
+						local e = out[id]
+						if not e then
+							e = {
+								id = id,
+								count = 0,
+								link = r.link,
+								quality = r.quality,
+								icon = r.texture,
+								classID = r.classID,
+							}
+							out[id] = e
+						end
+						e.count = e.count + r.count
+					end
+				end
+			end
+		end
+	end
+	return out
+end
+
+function ns.GetBagAhSummary()
+	return ahBagValue, ahPricedStacks, ahTradeableStacks
+end
+
 local lastAhShow
 local function UpdateAuctionFooter()
 	if not ahRow then return end
@@ -557,6 +593,24 @@ local function UpdateAuctionFooter()
 		else
 			ahScanBarBg:Hide(); ahScanBarFill:Hide()
 		end
+	end
+end
+
+-- Lightweight O(1) progress update called on background scan ticks so we never
+-- rescan bags, refit currencies, or rebuild the Market window mid-slice.
+function ns.UpdateAhScanProgressOnly()
+	if ahRow and ahRow:IsShown() and ns.ahScanning then
+		local pct = max(5, min(100, ns.ahScanProgress or 15))
+		ahTimeText:SetText(format("|cffd4a94eCaching AH %d%%…|r", pct))
+		if ahScanBarBg and ahScanBarFill then
+			local barW = max(40, (frame and frame:GetWidth() or 300) - (PAD + 4) * 2)
+			ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
+			ahScanBarFill:SetWidth(max(2, barW * pct / 100))
+			ahScanBarBg:Show(); ahScanBarFill:Show()
+		end
+	end
+	if ns.UpdateMarketScanProgressOnly then
+		ns.UpdateMarketScanProgressOnly()
 	end
 end
 
@@ -873,6 +927,7 @@ local function Update(force)
 		ShowFreeCount(); UpdateFooter()
 	end
 	if ns.searchText then ApplySearch() end
+	if ns.RefreshMarket and ns.IsMarketOpen and ns.IsMarketOpen() then ns.RefreshMarket() end
 end
 
 local pending, cdDirty, currencyDirty = false, false, false
@@ -913,6 +968,7 @@ local function SavePosition()
 	ns.db.pos = { right * sc - UIParent:GetRight() * us, bottom * sc - UIParent:GetBottom() * us }
 	ns.db.point = nil
 	ns.ResetPosition()
+	if ns.SyncMarketAnchor then ns.SyncMarketAnchor() end
 end
 
 local function UpdatePixels()
@@ -927,10 +983,12 @@ ns.UpdatePixels = UpdatePixels
 function ns.ApplyScale()
 	refitHeight = true
 	frame:SetScale(ns.db.scale)
+	if ns.marketFrame then ns.marketFrame:SetScale(ns.db.scale) end
 	UpdatePixels()
 	ns.ResetPosition()
 	-- A bigger scale can push the columns past the screen: the limits win.
 	if frame:IsShown() and ns.ClampColumns(ns.db.columns) ~= ns.db.columns then Layout() else ns.ApplyView() end
+	if ns.SyncMarketAnchor then ns.SyncMarketAnchor() end
 end
 
 -- Background behind the items: a standard Blizzard background (the Background
@@ -999,6 +1057,7 @@ function ns.ApplyBackground()
 	SetBackground(bagBorder, a, style)
 	SetBackground(ns.optionsBorder, a, style)
 	SetBackground(ns.confirmBorder, a, style)
+	SetBackground(ns.marketBorder, a, style)
 end
 
 function ns.Relayout()
@@ -1034,6 +1093,7 @@ function ns.ApplyView()
 	frame:SetSize(Snap(contentW + PAD * 2 + gutter), Snap(TOP_H + viewH + FOOT_H))
 	if numTokens > 0 and frame:GetWidth() ~= refitWidth then ns.RefitCurrencies() end
 	ns.ScrollTo(scroll:GetVerticalScroll())
+	if ns.SyncMarketAnchor then ns.SyncMarketAnchor() end
 end
 
 function ns.ScrollTo(v)
@@ -1880,7 +1940,44 @@ local function Build()
 		GameTooltip:Show()
 	end)
 	deleteBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	searchRight = searchRight - DELETE_W - 8
+	searchRight = searchRight - DELETE_W - 6
+
+	-- Market Analysis & Insights button (auction gavel icon), immediately left of the trash button.
+	local MARKET_W = 22
+	local marketBtn = CreateFrame("Button", "DavesSackMarketButton", frame)
+	marketBtn:SetSize(MARKET_W, 22)
+	marketBtn:SetPoint("TOPRIGHT", searchRight, -42)
+	marketBtn:SetFrameLevel(frame:GetFrameLevel() + 5)
+	marketBtn:RegisterForClicks("LeftButtonUp")
+	local marketIcon = marketBtn:CreateTexture(nil, "ARTWORK")
+	marketIcon:SetPoint("CENTER")
+	marketIcon:SetSize(18, 18)
+	marketIcon:SetTexture(M .. "gavel")
+	marketIcon:SetAlpha(0.78)
+	local marketHL = marketBtn:CreateTexture(nil, "HIGHLIGHT")
+	marketHL:SetPoint("CENTER")
+	marketHL:SetSize(18, 18)
+	marketHL:SetTexture(M .. "gavel")
+	marketHL:SetBlendMode("ADD")
+	marketHL:SetAlpha(0.45)
+	function ns.SyncMarketButton()
+		local open = ns.IsMarketOpen and ns.IsMarketOpen()
+		marketIcon:SetAlpha(open and 1 or 0.78)
+	end
+	marketBtn:SetScript("OnClick", function()
+		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		if ns.ToggleMarket then ns.ToggleMarket() end
+	end)
+	marketBtn:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+	marketBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		GameTooltip:SetText("Market Analysis & Insights")
+		GameTooltip:AddLine("Open the Auction House market companion window (trends, top 10 hot/sold items, top 20 margins, and bag sell advisor).", 1, 1, 1, true)
+		GameTooltip:Show()
+	end)
+	marketBtn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	searchRight = searchRight - MARKET_W - 8
 
 	local function OnSearch(self)
 		local t = self:GetText()
@@ -1900,6 +1997,13 @@ local function Build()
 		search:SetScript("OnTextChanged", OnSearch)
 	end
 	search:SetScript("OnEnterPressed", search.ClearFocus)
+	function ns.SetBagSearch(text)
+		if not search then return end
+		local cur = search:GetText() or ""
+		local nextText = (text and text ~= "" and cur:lower() ~= text:lower()) and text or ""
+		search:SetText(nextText)
+		search:ClearFocus()
+	end
 
 	-- Scrolling grid: Blizzard's standard scroll frame, so the bar looks and
 	-- scrolls like the rest of the UI (wheel, arrows, drag, click the track).
@@ -1997,8 +2101,14 @@ local function Build()
 	ahScanBarFill:SetHeight(3)
 	ahScanBarFill:SetPoint("LEFT", ahScanBarBg, "LEFT")
 	ahScanBarBg:Hide(); ahScanBarFill:Hide()
+	ahRow:RegisterForClicks("LeftButtonUp")
+	ahRow:SetScript("OnClick", function()
+		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		if ns.ToggleMarket then ns.ToggleMarket() end
+	end)
 	ahRow:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
-	ahRow:SetScript("OnMouseUp", function(_, btn) if btn == "LeftButton" then ns.StoreCursorItem() end end)
+	ahRow:SetScript("OnMouseUp", function(_, btn) if btn == "LeftButton" and CursorHasItem and CursorHasItem() then ns.StoreCursorItem() end end)
 	ahRow:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText("Auction House Price Cache")
@@ -2017,6 +2127,7 @@ local function Build()
 		end
 		GameTooltip:AddLine(" ")
 		GameTooltip:AddLine("Prices update automatically when you open or browse the Auction House.", 0.65, 0.65, 0.65, true)
+		GameTooltip:AddLine("Click to open Market Analysis & Insights.", 0.25, 0.9, 0.45, true)
 		GameTooltip:Show()
 	end)
 	ahRow:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -2109,6 +2220,7 @@ local function Build()
 		refitHeight = true                         -- fit to what's in the bags now
 		Update(true); UpdateCooldowns(); UpdateMoney(); ns.RefreshCurrencies()
 		if refitHeight then ns.ApplyView() end     -- nothing changed since last time: fit anyway
+		if ns.SyncMarketButton then ns.SyncMarketButton() end
 	end)
 	-- Never call Blizzard's bag functions (CloseAllBags, ToggleAllBags…) from
 	-- here: they'd run tainted and taint Blizzard's bag state. The merchant
@@ -2117,6 +2229,7 @@ local function Build()
 	frame:SetScript("OnHide", function()
 		search:ClearFocus()
 		ns.ParkCurrencyOpen()
+		if ns.HideMarket then ns.HideMarket() end
 		ns.BagSound("IG_BACKPACK_CLOSE")
 	end)
 end

@@ -281,12 +281,14 @@ end
 -- Auction House local price cache & item tooltips
 ---------------------------------------------------------------------------
 do
-	local floor, max, min, format = math.floor, math.max, math.min, string.format
+	local floor, max, min, abs, format = math.floor, math.max, math.min, math.abs, string.format
 	local Now = GetServerTime or time
+	local Clock = debugprofilestop
 	local issecretvalue = issecretvalue
-	local BATCH_SIZE = 50           -- max ItemKeys per C_AuctionHouse.SearchForItemKeys call
-	local REPLICATE_COOLDOWN = 900  -- 15-minute server throttle on C_AuctionHouse.ReplicateItems
-	local REPLICATE_SLICE = 500     -- auctions processed per 0.03s background tick
+	local BATCH_SIZE = 50               -- max ItemKeys per C_AuctionHouse.SearchForItemKeys call
+	local REPLICATE_COOLDOWN = 900      -- 15-minute server throttle on C_AuctionHouse.ReplicateItems
+	local REPLICATE_SLICE = 240         -- max auctions inspected per background tick
+	local REPLICATE_BUDGET_MS = 1.8     -- max CPU milliseconds spent per background tick (prevents frame stutter)
 
 	function ns.FormatAge(ts)
 		if not (ts and Now) then return nil end
@@ -301,13 +303,22 @@ do
 	local ahOpen, wantReplicate = false, false
 	local pendingBatches, batchIndex = nil, 0
 	local replicateTicker = nil
-	local batchMin, repBuyMin, repBidMin = {}, {}, {}
+	local batchMin, batchQty = {}, {}
+	local repBuyMin, repBuyMin2, repMinQty, repBidMin = {}, {}, {}, {}
+	local repQty, repListings, repBids, repBidQty, repName, repQual = {}, {}, {}, {}, {}, {}
+
+	local function WipeReplicateScratch()
+		wipe(repBuyMin); wipe(repBuyMin2); wipe(repMinQty); wipe(repBidMin)
+		wipe(repQty); wipe(repListings); wipe(repBids); wipe(repBidQty)
+		wipe(repName); wipe(repQual)
+	end
 
 	local function NotifyUpdated(changed)
 		if changed and Now then
 			ns.db.ahUpdated = Now()
 		end
 		if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
+		if ns.RefreshMarket then ns.RefreshMarket() end
 	end
 
 	local function FinishScan(changed, showComplete)
@@ -321,6 +332,7 @@ do
 					ns.ahScanDoneUntil = nil
 					ns.ahScanProgress = nil
 					if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
+					if ns.RefreshMarket then ns.RefreshMarket() end
 				end
 			end)
 		else
@@ -339,28 +351,143 @@ do
 		return true
 	end
 
-	local function CommitBatch(prices, minTbl, fallbackTbl)
+	local function UpdateMarketEntry(id, price, p2, minQty, bidMin, qty, listings, bids, bidQty, name, qualityID, stamp, isFullScan, hasDetail)
+		if not (ns.db and ns.db.ahMarket and id and id > 0 and price and price > 0) then return end
+		local market = ns.db.ahMarket
+		local m = market[id]
+		local ts = stamp or (Now and Now()) or 0
+		local prevP = m and m.p
+		local elapsed = m and (ts - (m.t or 0)) or 0
+		if not m then
+			m = {
+				p = price,
+				avg = price,
+				low = price,
+				high = price,
+				s = 1,
+				t = ts,
+			}
+			market[id] = m
+		else
+			if prevP and prevP > 0 and (isFullScan or elapsed >= 60 or prevP ~= price) then
+				if prevP ~= price or isFullScan or elapsed >= 300 then
+					m.prev = prevP
+				end
+				if isFullScan or elapsed >= 60 then
+					local s = (m.s or 1) + 1
+					m.s = s
+					local w = min(s - 1, 10)
+					local oldAvg = m.avg or prevP
+					-- Guard rolling average against lone thin-supply price walls (>3x jump with <=2 posts)
+					local sampleP = (oldAvg > 0 and price > oldAvg * 3 and (listings or m.n or 1) <= 2)
+						and (oldAvg * 2)
+						or price
+					m.avg = floor((oldAvg * w + sampleP) / (w + 1) + 0.5)
+				end
+			end
+			m.p = price
+			if not m.low or price < m.low then m.low = price end
+			if not m.high or (price > m.high and (not m.avg or price <= m.avg * 5 or (listings or 1) >= 4)) then
+				m.high = price
+			end
+			m.t = ts
+		end
+		if hasDetail then
+			m.p2 = (p2 and p2 > price and p2 <= price * 5) and p2 or nil
+			m.mq = (minQty and minQty > 0) and minQty or nil
+			m.bid = (bidMin and bidMin > 0) and bidMin or nil
+		elseif prevP and prevP ~= price then
+			m.p2, m.mq, m.bid = nil, nil, nil
+		end
+		if qty and qty > 0 then
+			local baseQ = (elapsed < 60 and m.pq) or m.q
+			if baseQ and baseQ > 0 and (isFullScan or elapsed >= 60 or baseQ ~= qty) then
+				m.pq = baseQ
+				if baseQ > qty then
+					m.turn = (baseQ - qty) + (bidQty or m.bq or 0)
+				elseif isFullScan and elapsed >= 60 then
+					m.turn = bidQty or 0
+				end
+			end
+			m.q = qty
+		end
+		if listings and listings > 0 then m.n = listings end
+		if bids ~= nil then m.b = bids end
+		if bidQty ~= nil then
+			m.bq = bidQty
+			if not m.turn or bidQty > m.turn then m.turn = bidQty end
+		end
+		if name and name ~= "" then m.nm = name end
+		if qualityID and qualityID >= 0 then m.qu = qualityID end
+	end
+
+	local function CommitBatch(prices, minTbl, fallbackTbl, qtyTbl)
 		local any = false
+		local ts = Now and Now() or 0
 		for id, price in pairs(minTbl) do
-			if SetCachedPrice(prices, id, price) then any = true end
+			if SetCachedPrice(prices, id, price) then
+				any = true
+				UpdateMarketEntry(id, price, nil, nil, nil, qtyTbl and qtyTbl[id] or nil, nil, nil, nil, nil, nil, ts, false, false)
+			end
 		end
 		if fallbackTbl then
 			for id, price in pairs(fallbackTbl) do
-				if not minTbl[id] and SetCachedPrice(prices, id, price) then any = true end
+				if not minTbl[id] and SetCachedPrice(prices, id, price) then
+					any = true
+					UpdateMarketEntry(id, price, nil, nil, price, qtyTbl and qtyTbl[id] or nil, nil, nil, nil, nil, nil, ts, false, false)
+				end
 			end
+		end
+		return any
+	end
+
+	local function CommitReplicateBatch(prices)
+		local any = false
+		local ts = Now and Now() or 0
+		for id, qty in pairs(repQty) do
+			local price = repBuyMin[id] or repBidMin[id]
+			if price and price > 0 and SetCachedPrice(prices, id, price) then
+				any = true
+				UpdateMarketEntry(
+					id,
+					price,
+					repBuyMin2[id],
+					repMinQty[id] or qty,
+					repBidMin[id],
+					qty,
+					repListings[id] or 1,
+					repBids[id] or 0,
+					repBidQty[id] or 0,
+					repName[id],
+					repQual[id],
+					ts,
+					true,
+					true
+				)
+			end
+		end
+		if any then
+			ns.db.ahScanCount = (ns.db.ahScanCount or 0) + 1
 		end
 		return any
 	end
 
 	local function CommitPartialBatch(prices, minTbl, fallbackTbl)
 		local any = false
+		local ts = Now and Now() or 0
 		for id, price in pairs(minTbl) do
 			local cur = prices[id]
-			if (not cur or price < cur) and SetCachedPrice(prices, id, price) then any = true end
+			if (not cur or price < cur) and SetCachedPrice(prices, id, price) then
+				any = true
+				UpdateMarketEntry(id, price, repBuyMin2[id], repMinQty[id], repBidMin[id], repQty[id], repListings[id], repBids[id], repBidQty[id], repName[id], repQual[id], ts, false, false)
+			end
 		end
 		if fallbackTbl then
 			for id, price in pairs(fallbackTbl) do
-				if not minTbl[id] and not prices[id] and SetCachedPrice(prices, id, price) then any = true end
+				if not minTbl[id] and not prices[id] and SetCachedPrice(prices, id, price) then
+					any = true
+					UpdateMarketEntry(id, price, nil, nil, price, repQty[id], repListings[id], repBids[id], repBidQty[id], repName[id], repQual[id], ts, false, false)
+				end
 			end
 		end
 		return any
@@ -383,12 +510,12 @@ do
 			replicateTicker = nil
 			if commitPartial and ns.db and ns.db.ahPrices then
 				local changed = CommitPartialBatch(ns.db.ahPrices, repBuyMin, repBidMin)
-				wipe(repBuyMin); wipe(repBidMin)
+				WipeReplicateScratch()
 				FinishScan(changed, false)
 				return
 			end
 		end
-		wipe(repBuyMin); wipe(repBidMin)
+		WipeReplicateScratch()
 		ns.ahScanProgress = nil
 		ns.ahScanDoneUntil = nil
 	end
@@ -408,18 +535,21 @@ do
 
 	local function RecordBrowseList(list)
 		if not (list and ns.db and ns.db.ahPrices) then return end
-		wipe(batchMin)
+		wipe(batchMin); wipe(batchQty)
 		for i = 1, #list do
 			local r = list[i]
 			local key = r and r.itemKey
 			local id = key and key.itemID
 			local p = r and r.minPrice
-			if id and id > 0 and p and p > 0 and (r.totalQuantity or 0) > 0 then
+			local q = r and r.totalQuantity or 0
+			if id and id > 0 and p and p > 0 and q > 0 then
 				local cur = batchMin[id]
 				if not cur or p < cur then batchMin[id] = p end
+				batchQty[id] = (batchQty[id] or 0) + q
 			end
 		end
-		local changed = CommitBatch(ns.db.ahPrices, batchMin)
+		local changed = CommitBatch(ns.db.ahPrices, batchMin, nil, batchQty)
+		wipe(batchQty)
 		if not HasPendingBatches() and not wantReplicate and not replicateTicker then
 			if ns.ahScanning then
 				FinishScan(changed, true)
@@ -437,15 +567,29 @@ do
 		local A = C_AuctionHouse
 		if not (A and itemID and itemID > 0 and ns.db and ns.db.ahPrices) then return end
 		local n = A.GetNumCommoditySearchResults and A.GetNumCommoditySearchResults(itemID) or 0
-		local best
+		local best, second, minQty, totalQty = nil, nil, 0, 0
 		for i = 1, n do
 			local r = A.GetCommoditySearchResultInfo(itemID, i)
 			local p = r and r.unitPrice
-			if p and p > 0 and (r.quantity or 0) > 0 and (not best or p < best) then
-				best = p
+			local q = r and r.quantity or 0
+			if p and p > 0 and q > 0 then
+				totalQty = totalQty + q
+				if not best then
+					best = p
+					minQty = q
+				elseif p < best then
+					second = best
+					best = p
+					minQty = q
+				elseif p == best then
+					minQty = minQty + q
+				elseif not second or p < second then
+					second = p
+				end
 			end
 		end
 		if best and SetCachedPrice(ns.db.ahPrices, itemID, best) then
+			UpdateMarketEntry(itemID, best, second, minQty, nil, totalQty, n, nil, nil, nil, nil, Now and Now() or 0, false, true)
 			NotifyUpdated(true)
 		end
 	end
@@ -455,32 +599,53 @@ do
 		local id = itemKey and itemKey.itemID
 		if not (A and id and id > 0 and ns.db and ns.db.ahPrices) then return end
 		local n = A.GetNumItemSearchResults and A.GetNumItemSearchResults(itemKey) or 0
-		local bestBuyout, bestBid
+		local bestBuyout, secondBuyout, minQty, bestBid = nil, nil, 0, nil
+		local totalQty, bids, bidQty = 0, 0, 0
 		for i = 1, n do
 			local r = A.GetItemSearchResultInfo(itemKey, i)
 			local qty = r and r.quantity or 0
 			if qty > 0 then
+				totalQty = totalQty + qty
+				if r.bidAmount and r.bidAmount > 0 then
+					bids = bids + 1
+					bidQty = bidQty + qty
+				end
+				local bid = (r.bidAmount and r.bidAmount > 0) and r.bidAmount or r.minBid
+				if bid and bid > 0 then
+					local bUnit = floor(bid / qty + 0.5)
+					if bUnit > 0 and (not bestBid or bUnit < bestBid) then bestBid = bUnit end
+				end
 				local buyout = r.buyoutAmount
 				if buyout and buyout > 0 then
 					local unit = floor(buyout / qty + 0.5)
-					if unit > 0 and (not bestBuyout or unit < bestBuyout) then bestBuyout = unit end
-				else
-					local bid = (r.bidAmount and r.bidAmount > 0) and r.bidAmount or r.minBid
-					if bid and bid > 0 then
-						local unit = floor(bid / qty + 0.5)
-						if unit > 0 and (not bestBid or unit < bestBid) then bestBid = unit end
+					if unit > 0 then
+						if not bestBuyout then
+							bestBuyout = unit
+							minQty = qty
+						elseif unit < bestBuyout then
+							secondBuyout = bestBuyout
+							bestBuyout = unit
+							minQty = qty
+						elseif unit == bestBuyout then
+							minQty = minQty + qty
+						elseif not secondBuyout or unit < secondBuyout then
+							secondBuyout = unit
+						end
 					end
 				end
 			end
 		end
 		local best = bestBuyout or bestBid
 		if best and SetCachedPrice(ns.db.ahPrices, id, best) then
+			UpdateMarketEntry(id, best, secondBuyout, minQty, bestBid, totalQty, n, bids, bidQty, nil, nil, Now and Now() or 0, false, true)
 			NotifyUpdated(true)
 		end
 	end
 
 	-- Slices GetReplicateItemInfo across background ticks after unregistering
 	-- REPLICATE_ITEM_LIST_UPDATE so uncached-item callbacks never re-trigger the scan.
+	-- Uses a per-tick millisecond budget (REPLICATE_BUDGET_MS) and lightweight progress-only
+	-- widget updates so even 160,000+ active auctions scan with zero frame stutter.
 	local function StartReplicateSlice()
 		if ahEvents then
 			pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
@@ -500,58 +665,93 @@ do
 			return
 		end
 		if replicateTicker then replicateTicker:Cancel() end
-		wipe(repBuyMin); wipe(repBidMin)
+		WipeReplicateScratch()
 		local idx = 1
 		ns.ahScanning = true
 		ns.ahScanDoneUntil = nil
 		ns.ahScanProgress = 25
-		NotifyUpdated(false)
+		if ns.UpdateAhScanProgressOnly then ns.UpdateAhScanProgressOnly() else NotifyUpdated(false) end
 
-		replicateTicker = C_Timer.NewTicker(0.03, function()
+		local GetRepInfo = A.GetReplicateItemInfo
+		local GetNumRep = A.GetNumReplicateItems
+		replicateTicker = C_Timer.NewTicker(0.04, function()
 			if not (ahOpen and A and ns.db and ns.db.ahPrices and ns.db.showAuctionPrices ~= false)
 				or (AuctionHouseFrame and not AuctionHouseFrame:IsShown()) then
 				StopReplicateTicker(true)
 				return
 			end
-			local n = A.GetNumReplicateItems() or 0
+			local n = GetNumRep() or 0
 			if n <= 0 then
 				StopReplicateTicker(true)
 				return
 			end
+			local t0 = Clock and Clock() or nil
 			local stop = min(n, idx + REPLICATE_SLICE - 1)
+			local done = idx - 1
 			for i = idx, stop do
-				local _, _, count, _, _, _, _, minBid, _, buyoutPrice, bidAmount, _, _, _, _, saleStatus, itemID = A.GetReplicateItemInfo(i)
+				local name, _, count, qualityID, _, _, _, minBid, _, buyoutPrice, bidAmount, _, _, _, _, saleStatus, itemID = GetRepInfo(i)
 				if (not saleStatus or saleStatus == 0) and itemID and itemID > 0 and count and count > 0 then
+					repQty[itemID] = (repQty[itemID] or 0) + count
+					repListings[itemID] = (repListings[itemID] or 0) + 1
+					if name and name ~= "" and not repName[itemID] then
+						repName[itemID] = name
+					end
+					if qualityID and qualityID >= 0 and not repQual[itemID] then
+						repQual[itemID] = qualityID
+					end
+					if bidAmount and bidAmount > 0 then
+						repBids[itemID] = (repBids[itemID] or 0) + 1
+						repBidQty[itemID] = (repBidQty[itemID] or 0) + count
+					end
+					local bid = (bidAmount and bidAmount > 0) and bidAmount or minBid
+					if bid and bid > 0 then
+						local bUnit = floor(bid / count + 0.5)
+						if bUnit > 0 then
+							local curBid = repBidMin[itemID]
+							if not curBid or bUnit < curBid then repBidMin[itemID] = bUnit end
+						end
+					end
 					if buyoutPrice and buyoutPrice > 0 then
 						local unit = floor(buyoutPrice / count + 0.5)
 						if unit > 0 then
 							local cur = repBuyMin[itemID]
-							if not cur or unit < cur then repBuyMin[itemID] = unit end
-						end
-					else
-						local bid = (bidAmount and bidAmount > 0) and bidAmount or minBid
-						if bid and bid > 0 then
-							local unit = floor(bid / count + 0.5)
-							if unit > 0 then
-								local cur = repBidMin[itemID]
-								if not cur or unit < cur then repBidMin[itemID] = unit end
+							if not cur then
+								repBuyMin[itemID] = unit
+								repMinQty[itemID] = count
+							elseif unit < cur then
+								repBuyMin2[itemID] = cur
+								repBuyMin[itemID] = unit
+								repMinQty[itemID] = count
+							elseif unit == cur then
+								repMinQty[itemID] = (repMinQty[itemID] or 0) + count
+							else
+								local cur2 = repBuyMin2[itemID]
+								if not cur2 or unit < cur2 then
+									repBuyMin2[itemID] = unit
+								end
 							end
 						end
 					end
 				end
+				done = i
+				if t0 and (i - idx) % 32 == 31 and (Clock() - t0) >= REPLICATE_BUDGET_MS then
+					break
+				end
 			end
-			idx = stop + 1
+			idx = done + 1
 			if idx > n then
 				if replicateTicker then replicateTicker:Cancel(); replicateTicker = nil end
-				local changed = CommitBatch(ns.db.ahPrices, repBuyMin, repBidMin)
-				wipe(repBuyMin); wipe(repBidMin)
+				local changed = CommitReplicateBatch(ns.db.ahPrices)
+				WipeReplicateScratch()
 				if Now then ns.db.ahLastReplicate = Now() end
 				FinishScan(changed, true)
 			else
-				local pct = 25 + floor((stop / max(1, n)) * 75 + 0.5)
-				if pct ~= ns.ahScanProgress then
+				local pct = 25 + floor((done / max(1, n)) * 75 + 0.5)
+				if abs(pct - (ns.ahScanProgress or 0)) >= 2 then
 					ns.ahScanProgress = pct
-					if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
+					if ns.UpdateAhScanProgressOnly then
+						ns.UpdateAhScanProgressOnly()
+					end
 				end
 			end
 		end)
@@ -685,8 +885,22 @@ do
 
 	function ns.InitAuctionCache()
 		local prices = ns.db.ahPrices
+		local market = ns.db.ahMarket
+		local ts = ns.db.ahUpdated or 0
 		local cnt = 0
-		for _ in pairs(prices) do cnt = cnt + 1 end
+		for id, price in pairs(prices) do
+			cnt = cnt + 1
+			if market and not market[id] and type(price) == "number" and price > 0 then
+				market[id] = {
+					p = price,
+					avg = price,
+					low = price,
+					high = price,
+					s = 1,
+					t = ts,
+				}
+			end
+		end
 		ns.ahCachedCount = cnt
 
 		ahEvents = CreateFrame("Frame")
@@ -751,6 +965,7 @@ local DEFAULTS = {
 	showCurrencies = true, showFreeSpace = true,     -- Free Space: drop target for split stacks
 	showAuctionPrices = true,                        -- AH price tooltips + bag footer summary & cache timestamp
 	ahPrices = {},                                   -- [itemID] = lowest unit price in copper from Auction House
+	ahMarket = {},                                   -- [itemID] = market stats, spreads, supply & multi-scan history
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot
 	preferReagentBag = true,                         -- reagents dropped on the window go into the reagent bag first
 	confirmDestroy = true,                           -- ask before destroying an item dropped on the delete button
@@ -786,13 +1001,17 @@ loader:SetScript("OnEvent", function(self, event, name)
 end)
 
 ---------------------------------------------------------------------------
--- /sack opens your bags; /sack options opens the Options window.
+-- /sack opens your bags; /sack options opens the Options window;
+-- /sack market opens the Market Analysis & Insights window.
 ---------------------------------------------------------------------------
 SLASH_DAVESSACK1, SLASH_DAVESSACK2 = "/sack", "/davessack"
 SlashCmdList.DAVESSACK = function(msg)
 	local cmd = match(lower(msg or ""), "^(%S*)")
 	if cmd == "options" or cmd == "config" or cmd == "settings" then
 		if ns.ToggleOptions then ns.ToggleOptions() end
+	elseif cmd == "market" or cmd == "ah" or cmd == "trends" then
+		if ns.Open then ns.Open() end
+		if ns.ToggleMarket then ns.ToggleMarket() end
 	else
 		ns.Toggle()
 	end

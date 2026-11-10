@@ -3,6 +3,8 @@
 Writes uncompressed 32-bit top-left-origin BGRA TGA textures into Media/:
   - trash.tga (64x64): Gold/brass trash can icon (lid, top handle, tapered body
     with three vertical ribs) matching the palette and outline of gear.tga.
+  - gavel.tga (64x64): Gold/brass auctioneer's gavel and sound block icon for
+    the Market Analysis & Insights toolbar button.
 """
 
 from __future__ import annotations
@@ -146,13 +148,113 @@ def build_trash_icon(size: int = 64) -> bytearray:
     return bgra
 
 
+def build_gavel_icon(size: int = 64) -> bytearray:
+    bgra = bytearray(size * size * 4)
+    outline_r, outline_g, outline_b = 20.0, 12.0, 2.0
+    inv_sqrt2 = 0.7071067811865475
+
+    for y in range(size):
+        py = y + 0.5
+        for x in range(size):
+            px = x + 0.5
+
+            # Local coordinates centered on the gavel head (26.0, 20.5):
+            # u runs down-right (+45 deg) along the handle;
+            # v runs down-left (+135 deg) along the mallet head barrel.
+            dx = px - 26.0
+            dy = py - 20.5
+            u = (dx + dy) * inv_sqrt2
+            v = (dy - dx) * inv_sqrt2
+
+            # 1. Mallet head: central barrel + two flared striking caps at v = +-12.0
+            d_barrel = _sd_round_box(u, v, 0.0, 0.0, 7.2, 10.5, 2.5)
+            d_cap_lo = _sd_round_box(u, v, 0.0, 12.2, 8.8, 3.6, 2.2)
+            d_cap_hi = _sd_round_box(u, v, 0.0, -12.2, 8.8, 3.6, 2.2)
+            d_head = min(d_barrel, d_cap_lo, d_cap_hi)
+
+            # 2. Angled handle extending along +u from u = 6.5 to u = 38.5
+            t_handle = max(0.0, min(1.0, (u - 7.0) / 28.5))
+            hw_handle = 3.5 + 1.4 * t_handle
+            d_shaft = _sd_round_box(u, v, 21.5, 0.0, 15.0, hw_handle, 2.2)
+            d_pommel = _sd_round_box(u, v, 37.0, 0.0, 3.2, 5.8, 2.4)
+            d_handle = min(d_shaft, d_pommel)
+
+            # 3. Horizontal sound block / anvil base at bottom-left
+            d_base_top = _sd_round_box(px, py, 20.0, 49.5, 11.5, 3.3, 2.0)
+            d_base_bot = _sd_round_box(px, py, 20.0, 56.0, 15.8, 4.0, 2.4)
+            d_base = min(d_base_top, d_base_bot)
+
+            d_union = min(d_head, d_handle, d_base)
+            if d_union > 0.8:
+                continue
+
+            alpha = 1.0 - _smoothstep(-0.6, 0.7, d_union)
+            if alpha <= 0.0:
+                continue
+
+            # Dark seams between:
+            # - mallet barrel and its two flared end-caps (|v| near 8.6)
+            # - mallet head and handle collar (u near 7.0)
+            # - sound block top pad and bottom base (py near 52.5)
+            d_groove_caps = abs(abs(v) - 8.6) - 0.8 if abs(u) < 7.5 else 10.0
+            d_head_metal = max(d_head + 1.9, -d_groove_caps)
+
+            d_groove_pommel = abs(u - 34.0) - 0.75 if abs(v) < 5.4 else 10.0
+            d_handle_metal = max(d_handle + 1.85, -d_groove_pommel)
+
+            d_base_metal = min(d_base_top + 1.75, d_base_bot + 1.85)
+            seam_base = max(d_base_top, d_base_bot)
+            if seam_base < 1.1 and 51.5 < py < 53.8:
+                d_base_metal = max(d_base_metal, 1.1 - seam_base)
+
+            seam_neck = max(d_head, d_handle)
+            d_metal = min(d_head_metal, d_handle_metal, d_base_metal)
+            if seam_neck < 1.2 and 5.6 < u < 8.8 and abs(v) < 5.6:
+                d_metal = max(d_metal, 1.2 - seam_neck)
+
+            metal_t = 1.0 - _smoothstep(-0.7, 0.7, d_metal)
+
+            # Directional gold lighting + cylindrical sheen across barrel/handle
+            diag = (1.0 - (px - 8.0) / 48.0) * 0.55 + (1.0 - (py - 4.0) / 56.0) * 0.45
+            diag = max(0.0, min(1.0, diag))
+            if d_base <= min(d_head, d_handle):
+                cyl = math.cos(((px - 19.5) / 16.0) * 1.0)
+            elif d_head <= d_handle:
+                cyl = math.cos((u / 7.5) * 1.15)
+            else:
+                cyl = math.cos((v / 4.5) * 1.15)
+            cyl = max(0.0, min(1.0, cyl))
+            shade = 0.24 + 0.54 * diag + 0.22 * cyl
+
+            # Specular highlight on upper-left bevels
+            if -4.0 < d_metal < -1.1 and (u < -1.5 or (d_base < 0.0 and py < 50.5)):
+                shade = min(1.0, shade + 0.18)
+
+            gold_r = 118.0 + (242.0 - 118.0) * shade
+            gold_g = 86.0 + (200.0 - 86.0) * shade
+            gold_b = 22.0 + (91.0 - 22.0) * shade
+
+            r = outline_r + (gold_r - outline_r) * metal_t
+            g = outline_g + (gold_g - outline_g) * metal_t
+            b = outline_b + (gold_b - outline_b) * metal_t
+
+            idx = (y * size + x) * 4
+            bgra[idx] = _clamp_byte(b)
+            bgra[idx + 1] = _clamp_byte(g)
+            bgra[idx + 2] = _clamp_byte(r)
+            bgra[idx + 3] = _clamp_byte(alpha * 255.0)
+
+    return bgra
+
+
 def main() -> None:
     here = os.path.dirname(os.path.abspath(__file__))
     media_dir = os.path.normpath(os.path.join(here, "..", "Media"))
-    out_path = os.path.join(media_dir, "trash.tga")
-    bgra = build_trash_icon(64)
-    write_tga(out_path, 64, 64, bgra)
-    print(f"Wrote {out_path} ({len(bgra) + 18} bytes)")
+    for name, builder in (("trash.tga", build_trash_icon), ("gavel.tga", build_gavel_icon)):
+        out_path = os.path.join(media_dir, name)
+        bgra = builder(64)
+        write_tga(out_path, 64, 64, bgra)
+        print(f"Wrote {out_path} ({len(bgra) + 18} bytes)")
 
 
 if __name__ == "__main__":
