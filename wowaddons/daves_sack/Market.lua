@@ -578,50 +578,33 @@ local function ComputeTrendPct(m)
 	return 0, m.avg or m.p
 end
 
--- Computes Market Flip opportunities (instant 2nd-lowest listing flip or below multi-scan rolling average).
+-- Computes Market Flip opportunities by comparing the lowest buyout offer (m.p)
+-- directly against the next highest offer of the same item currently on the AH (m.p2).
 local function ComputeMarketFlip(m, quality, vendorPrice, classID)
 	if not (m and m.p and m.p > 0) then return nil end
 	if IsNoiseItem(m, quality, vendorPrice, classID) then return nil end
 	local buy = m.p
+	local target = m.p2
+	if not (target and target > buy) then return nil end
 	local posts = m.n or 1
 	local totalQty = m.q or 1
 	local floorQty = m.mq or totalQty
 	local isGear = (classID == 2 or classID == 4)
-	local bestProfit, bestPct, bestTarget, bestKind, bestQty = 0, 0, 0, nil, floorQty
 
-	-- 1. Instant Market Flip (p vs p2 on non-gear commodities with liquid depth):
-	if not isGear and m.p2 and m.p2 > buy and posts >= 6 and totalQty >= 8 and floorQty <= 40 and floorQty <= totalQty * 0.35 then
-		local target = m.p2
-		if (m.s or 1) >= 2 and m.avg and m.avg > 0 then
-			target = min(target, floor(m.avg * 1.35 + 0.5))
-		end
-		if target > buy and target <= buy * 3.5 then
-			local netTarget = floor(target * AH_CUT)
-			local prof = netTarget - buy
-			if prof >= 100 then
-				local pct = (prof / buy) * 100
-				if pct >= 12 and pct <= 250 then
-					bestProfit, bestPct, bestTarget, bestKind = prof, pct, target, "flip"
-				end
-			end
-		end
-	end
-
-	-- 2. Historical Flip (current buyout below multi-scan rolling average):
-	local minHistPosts = isGear and 8 or 5
-	if (m.s or 1) >= 2 and m.avg and m.avg > buy and m.avg <= buy * 3.5 and posts >= minHistPosts then
-		local netTarget = floor(m.avg * AH_CUT)
+	-- Compare suggested buy price (p) against the next highest offer of the same item (p2)
+	-- on non-gear commodities with liquid depth:
+	if not isGear and target <= buy * 3.5 and posts >= 5 and totalQty >= 6 and floorQty <= 40 and floorQty <= totalQty * 0.35 then
+		local netTarget = floor(target * AH_CUT)
 		local prof = netTarget - buy
 		if prof >= 100 then
 			local pct = (prof / buy) * 100
-			if pct >= 12 and prof > bestProfit then
-				bestProfit, bestPct, bestTarget, bestKind = prof, pct, m.avg, "hist"
+			if pct >= 12 and pct <= 250 then
+				return prof, pct, target, "flip", floorQty
 			end
 		end
 	end
 
-	if not bestKind then return nil end
-	return bestProfit, bestPct, bestTarget, bestKind, bestQty
+	return nil
 end
 
 local function MatchesSearch(name, id)
@@ -940,7 +923,11 @@ local function ShowRowTooltip(row)
 			GameTooltip:AddDoubleLine("Units at Lowest Price", Group(m.mq), 0.75, 0.75, 0.75, 1, 1, 1)
 		end
 		if m and m.p2 and m.p2 > e.price then
-			GameTooltip:AddDoubleLine("2nd-Lowest Listing", Money(m.p2), 0.75, 0.75, 0.75, 1, 1, 1)
+			GameTooltip:AddDoubleLine("Next Highest Offer", Money(m.p2), 0.75, 0.75, 0.75, 1, 1, 1)
+		end
+		if e.kind == "flip" and e.target and e.profit and e.profit > 0 then
+			GameTooltip:AddDoubleLine("Next Offer Net (After 5% Cut)", Money(floor(e.target * AH_CUT)), 0.75, 0.75, 0.75, 0.9, 0.9, 0.9)
+			GameTooltip:AddDoubleLine("Real Flip Margin (each)", "+" .. Money(e.profit) .. format(" (+%.0f%%)", e.pct or 0), 0.36, 0.84, 0.36, 0.36, 0.84, 0.36)
 		end
 		if m and m.avg and m.avg > 0 then
 			local scans = m.s or 1
@@ -1171,13 +1158,9 @@ local function PaintRow(r, idx, e, rowW, yOffset)
 	r.nameFS:SetText(qHex .. dispName .. "|r" .. qtyTag .. bagTag)
 
 	if activeTab == 1 then
-		-- Margin (Market Flips default)
+		-- Margin (lowest buyout offer vs. next highest offer of the same item)
 		local tradeTag = (e.turn and e.turn > 0) and format(" • %s trades", Group(e.turn)) or ""
-		if e.kind == "flip" then
-			r.subFS:SetText(format("|cff5cd65c[Flip x%d]|r Buy %s -> Next %s%s", e.buyQty or 1, CompactMoney(e.price), CompactMoney(e.target), tradeTag))
-		else
-			r.subFS:SetText(format("|cff66ccff[Below Avg]|r Buy %s -> Avg %s%s", CompactMoney(e.price), CompactMoney(e.target), tradeTag))
-		end
+		r.subFS:SetText(format("|cff5cd65c[Flip x%d]|r Buy %s -> Next %s%s", e.buyQty or 1, CompactMoney(e.price), CompactMoney(e.target), tradeTag))
 		r.rightTop:SetText("|cff5cd65c+" .. CompactMoney(e.profit) .. "|r")
 		r.rightBot:SetText(format("|cff5cd65c+%.0f%% net|r", min(999, e.pct or 0)))
 
@@ -1512,7 +1495,7 @@ function ns.RefreshMarket()
 	end
 
 	if activeTab == 1 then
-		mkt.footHint:SetText("Market Flips deduct 5% AH cut & filter out BoE suffix noise. Click row to find in bags.")
+		mkt.footHint:SetText("Compares lowest buyout vs. next highest offer (minus 5% AH cut). Click to find in bags.")
 	elseif activeTab == 2 then
 		mkt.footHint:SetText("Shows commodities with only 1–5 total units left on the Auction House.")
 	elseif activeTab == 3 then
