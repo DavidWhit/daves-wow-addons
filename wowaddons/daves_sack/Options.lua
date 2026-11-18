@@ -261,8 +261,9 @@ local function Build()
 	close:SetScript("OnClick", function() opt:Hide() end)
 
 	local db = ns.db
+	controls.catControls = {}
 
-	-- Left column: Size ------------------------------------------------------
+	-- Left column: Size + Look ------------------------------------------------
 	Header("Size", LEFT_X, -50, LEFT_W)
 	Slider(LEFT_X, -72, LEFT_W, "Columns", ns.MinColumns, ns.MaxColumns, 1,
 		function(v) return format("%d", v) end,
@@ -284,7 +285,6 @@ local function Build()
 		function() return db.viewHeight or floor(ns.CurrentViewHeight() + 0.5) end,
 		function(v) db.viewHeight = ns.ClampViewHeight(v); ns.ApplyView() end)
 
-	-- Left column: Look -------------------------------------------------------
 	Header("Look", LEFT_X, -246, LEFT_W)
 	Slider(LEFT_X, -268, LEFT_W, "Background", 0.2, 1, 0.05,
 		function(v) return format("%d%%", floor(v * 100 + 0.5)) end,
@@ -294,10 +294,32 @@ local function Build()
 		function() return db.backgroundStyle or "dark" end,
 		function(key) db.backgroundStyle = key; ns.ApplyBackground() end,
 		"Which of Blizzard's standard backgrounds shows behind your items, at the darkness set above. The Settings window follows it too.")
+	local leftY = -368
+	controls.catControls[#controls.catControls + 1] = Check(LEFT_X, leftY, LEFT_W, "Free Space tile",
+		function() return db.showFreeSpace ~= false end,
+		function(on) db.showFreeSpace = on; ns.Relayout() end,
+		"An empty slot to drop items on. You can also drop items anywhere on the bag window.")
+	leftY = leftY - 25
+	local cur = Check(LEFT_X, leftY, LEFT_W, "Backpack currencies",
+		function() return db.showCurrencies ~= false end,
+		function(on) db.showCurrencies = on; ns.RefreshCurrencies() end,
+		ns.HasCurrencyAPI and "Currencies you ticked \"Show on Backpack\" in the Currency tab appear in the footer."
+			or "This version of the game has no currencies.")
+	if not ns.HasCurrencyAPI then
+		cur:SetActive(false)
+	end
+	leftY = leftY - 25
+	Check(LEFT_X, leftY, LEFT_W, "Auction House prices",
+		function() return db.showAuctionPrices ~= false end,
+		function(on)
+			db.showAuctionPrices = on
+			if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
+		end,
+		"Cache item prices when you visit or browse the Auction House, show unit and stack prices on item tooltips, and show your bags' tradeable AH value and last update time at the bottom of the window.")
+	leftY = leftY - 26
 
 	-- Right column: Categories + Extras ---------------------------------------
 	local y = -50
-	controls.catControls = {}
 	Header("Categories", RIGHT_X, y, RIGHT_W); y = y - 20
 	Check(RIGHT_X, y, RIGHT_W, "One big bag",
 		function() return db.oneBag and true or false end,
@@ -341,7 +363,7 @@ local function Build()
 		y = y - 22
 	end
 
-	y = y - 16
+	y = y - 14
 	Header("Extras", RIGHT_X, y, RIGHT_W); y = y - 20
 	Check(RIGHT_X, y, RIGHT_W, "Confirm delete (trash)",
 		function() return db.confirmDestroy ~= false end,
@@ -350,46 +372,29 @@ local function Build()
 			if not on and ns.HideDestroyConfirm then ns.HideDestroyConfirm() end
 		end,
 		"Ask before destroying an item dropped on the delete / trash button (rare and better items ask you to type DELETE). Untick to destroy items immediately.")
-	y = y - 26
-	local cur = Check(RIGHT_X, y, RIGHT_W, "Backpack currencies",
-		function() return db.showCurrencies ~= false end,
-		function(on) db.showCurrencies = on; ns.RefreshCurrencies() end,
-		ns.HasCurrencyAPI and "Currencies you ticked \"Show on Backpack\" in the Currency tab appear in the footer."
-			or "This version of the game has no currencies.")
-	if not ns.HasCurrencyAPI then
-		cur:SetActive(false)
-	end
-	y = y - 26
-	Check(RIGHT_X, y, RIGHT_W, "Auction House prices",
-		function() return db.showAuctionPrices ~= false end,
-		function(on)
-			db.showAuctionPrices = on
-			if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
-		end,
-		"Cache item prices when you visit or browse the Auction House, show unit and stack prices on item tooltips, and show your bags' tradeable AH value and last update time at the bottom of the window.")
-	y = y - 26
-	controls.catControls[#controls.catControls + 1] = Check(RIGHT_X, y, RIGHT_W, "Free Space tile",
-		function() return db.showFreeSpace ~= false end,
-		function(on) db.showFreeSpace = on; ns.Relayout() end,
-		"An empty slot to drop items on. You can also drop items anywhere on the bag window.")
-	y = y - 26
+	y = y - 25
 	Check(RIGHT_X, y, RIGHT_W, "Auto-place split stacks",
 		function() return db.autoPlaceSplit ~= false end,
 		function(on) db.autoPlaceSplit = on end,
 		"After you split a stack, the new stack goes straight into a free slot next to the original. Paused while a merchant, mailbox, trade, bank or auction window is open, so you can drop it there.")
-	y = y - 26
+	y = y - 25
 	local reagent = Check(RIGHT_X, y, RIGHT_W, "Prefer the reagent bag",
 		function() return db.preferReagentBag ~= false end,
 		function(on) db.preferReagentBag = on end,
-		ns.REAGENT_BAG and "Reagents you drop on the window (and split reagent stacks) go into your reagent bag first, while it has room. Everything else goes into your bags."
+		ns.REAGENT_BAG and "Reagents you drop on the window, split reagent stacks, and loose reagents when sorting go into your reagent bag first while it has room."
 			or "This version of the game has no reagent bag.")
 	if not ns.REAGENT_BAG then
 		reagent:SetActive(false)
 	end
+	y = y - 25
+	Check(RIGHT_X, y, RIGHT_W, "Prefer ammo bag",
+		function() return db.preferAmmoBag ~= false end,
+		function(on) db.preferAmmoBag = on end,
+		"Ammo (arrows and bullets) you drop on the window, split ammo stacks, and loose ammo when sorting go into an equipped quiver or ammo pouch first while it has room.")
 	y = y - 26
 
 	-- Full width: Start collapsed (3 columns) ---------------------------------
-	local foldY = math.min(-360, y) - 20          -- below whichever column is longer
+	local foldY = math.min(leftY, y) - 16          -- below whichever column is longer
 	Header("Start collapsed", LEFT_X, foldY, FULL_W)
 	local names = {}
 	for i, n in ipairs(ns.CATEGORY_NAMES) do names[i] = n end
@@ -412,15 +417,17 @@ local function Build()
 	local resetPos = PanelButton("Reset Position", 140)
 	resetPos:SetPoint("TOPLEFT", LEFT_X, resetY - 22)
 	resetPos:SetScript("OnClick", function()
-		db.pos = nil; ns.ResetPosition()
+		db.pos = nil; db.snipeAlertPos = nil; ns.ResetPosition()
+		if ns.SyncSnipeAlertScale then ns.SyncSnipeAlertScale() end
 	end)
 	local defaults = PanelButton("Restore Defaults", 150)
 	defaults:SetPoint("TOPRIGHT", -24, resetY - 22)
 	defaults:SetScript("OnClick", function()
-		db.columns, db.scale, db.viewHeight, db.pos, db.background, db.backgroundStyle = ns.ClampColumns(10), 1, nil, nil, 0.8, "dark"
+		db.columns, db.scale, db.viewHeight, db.pos, db.snipeAlertPos, db.background, db.backgroundStyle = ns.ClampColumns(10), 1, nil, nil, nil, 0.8, "dark"
+		db.baitPct, db.snipeMaxPct = 35, 75
 		db.oneBag, db.splitEquipment, db.splitReagents, db.splitConsumables = false, true, true, true
 		if ns.SetItemSetsLocked then ns.SetItemSetsLocked(false) else db.lockItemSets = false end
-		db.showCurrencies, db.showAuctionPrices, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag, db.confirmDestroy = true, true, true, true, true, true
+		db.showCurrencies, db.showAuctionPrices, db.showFreeSpace, db.autoPlaceSplit, db.preferReagentBag, db.preferAmmoBag, db.confirmDestroy = true, true, true, true, true, true, true
 		wipe(db.collapsed); wipe(db.startFolded); wipe(db.offGroups)
 		if db.customSetItems then wipe(db.customSetItems) end
 		ns.ApplyScale(); ns.ApplyBackground(); ns.ResetPosition(); ns.Relayout(); ns.RefreshCurrencies()
@@ -551,11 +558,19 @@ function ns.InitSettingsPanel()
 		local reagent = Settings.RegisterAddOnSetting(category, ADDON .. "_preferReagentBag", "preferReagentBag", ns.db,
 			Settings.VarType.Boolean, "Prefer the reagent bag", true)
 		Settings.CreateCheckbox(category, reagent,
-			"Reagents you drop on the window (and split reagent stacks) go into your reagent bag first, while it has room.")
+			"Reagents you drop on the window, split reagent stacks, and loose reagents when sorting go into your reagent bag first while it has room.")
 		reagent:SetValueChangedCallback(function()
 			ns.RefreshOptions()
 		end)
 	end
+
+	local ammoBag = Settings.RegisterAddOnSetting(category, ADDON .. "_preferAmmoBag", "preferAmmoBag", ns.db,
+		Settings.VarType.Boolean, "Prefer ammo bag", true)
+	Settings.CreateCheckbox(category, ammoBag,
+		"Ammo (arrows and bullets) you drop on the window, split ammo stacks, and loose ammo when sorting go into an equipped quiver or ammo pouch first while it has room.")
+	ammoBag:SetValueChangedCallback(function()
+		ns.RefreshOptions()
+	end)
 
 	Settings.RegisterAddOnCategory(category)
 	ns.settingsCategory = category

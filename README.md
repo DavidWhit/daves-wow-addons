@@ -7,25 +7,27 @@ World of Warcraft addons for **WoW: Forever** (Interface `16001`), plus the tool
 | Folder | What it is |
 | --- | --- |
 | [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs with sloshing liquid and cursor glare (`v0.1.5`) |
-| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 20 procedural looks — 7 elements, 4 gathering & 6 crafting professions, Disenchant, First Aid, and Plain (`v0.5.4`) |
+| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 21 looks — 7 elements, 4 gathering & 7 crafting professions, Disenchant, First Aid, and Plain (`v0.6.0`) |
 | [`wowaddons/daves_chat`](wowaddons/daves_chat) | **Dave's Chat**: movable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with an auto-closing collapsible left tab list, bordered inner chat pane, `Text direction`, and frosted-glass `Faint` mode (`v0.3.11`) |
-| [`wowaddons/daves_frames`](wowaddons/daves_frames) | **Dave's Frames**: custom target unit frame with central portrait ring, inward-emptying health & resource bars, hanging aura boards on chains, and 9 player class plates (`v0.2.10`) |
-| [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: Map Genie pin layer, quest chain links, search/filter sidebar, Ready-to-Turn-In & zone quest tracker, quest focus, and OpenMap seamless world map (`v0.5.7`) |
+| [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: QuestieDB Forever quests, objectives, turn-ins, quest chain links, townsfolk & rares, search/filter sidebar, Ready-to-Turn-In & zone quest tracker, quest focus, and OpenMap seamless world & dungeon maps (`v0.6.0`; companion addons `daves_map_data` & `daves_map_textures`) |
+| [`wowaddons/daves_map_data`](wowaddons/daves_map_data) | **Dave's Map (data)**: QuestieDB Forever pins, objectives, turn-ins, and quest chains for `daves_map` (`Update-MapData.py`) |
+| [`wowaddons/daves_map_textures`](wowaddons/daves_map_textures) | **Dave's Map (textures)**: OpenMap `v0.8.10` seamless world & dungeon map art and data tables for `daves_map` (`Update-MapTextures.py`) |
 | [`wowaddons/daves_outofmyway`](wowaddons/daves_outofmyway) | **Dave's Out Of My Way**: Edit Mode Need/Greed loot-roll mover and never-collapsed buff frame (`v0.1.5`) |
-| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories or an optional "One big bag" slot grid, reagent-bag routing, matching gold toolbar icons (sort, settings gear, trash/delete, and auction gavel), local Auction House price cache & companion **Market Analysis & Insights** window (**Margin**, **Scarce**, **Professions**, and **Bag Advisor**), and taint-safe secure controls (`v1.7.29`) |
+| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories or an optional "One big bag" slot grid, reagent-bag & ammo-bag routing + post-Sort sweep, matching gold toolbar icons (sort, settings gear, trash/delete, and auction gavel), local Auction House price cache & companion **Market Analysis & Insights** window (global search bar + **Margin**, **Scarce**, **Professions**, **Bag Advisor**, and **Bait & Snipe** with **Counter-Snipe Top 50** radar), and taint-safe secure controls (`v1.7.45`) |
+| [`wowaddons/daves_frames/tools`](wowaddons/daves_frames/tools) | Standalone `16:9` UV stencil & layered AI target-frame painting/packing toolkit (`Build-FrameTemplate.py`, `Pack-FrameTemplate.py`, `template/PAINT-LAYERS.md`) |
 | [`wow-addon-kit`](wow-addon-kit) | Plugin (`wow-forever-addons`) and Python CLI toolkit for scaffolding, static API/secret/taint validation, review packets, in-game error/taint inspection, and linking |
 
 ## The addons
 
 ### Dave's Cast Bar (`daves_castbar`)
 
-An animated cast bar that replaces Blizzard's. Each spell gets one of 20 looks, and every cast is different: seven elements (`frost`, `fire`, `shadow`, `nature`, `lightning`, `arcane`, `holy`), four gathering professions (`fishing`, `herbalism`, `mining`, `skinning`), six crafting professions (`smelting`, `blacksmithing`, `alchemy`, `tailoring`, `leatherworking`, `enchanting`), `disenchant`, `firstaid`, and Blizzard's `plain` bar — picked automatically from the spell or its recipe. Framed or borderless, square, soft or rounded corners, flat or bevelled.
+An animated cast bar that replaces Blizzard's. Each spell gets one of 21 looks, and every cast is different: seven elements (`frost`, `fire`, `shadow`, `nature`, `lightning`, `arcane`, `holy`), four gathering professions (`fishing`, `herbalism`, `mining`, `skinning`), seven crafting professions (`smelting`, `blacksmithing`, `alchemy`, `tailoring`, `leatherworking`, `engineering`, `enchanting`), `disenchant`, `firstaid`, and Blizzard's `plain` bar — picked automatically from the spell or its recipe. Framed or borderless, square, soft or rounded corners, flat or bevelled.
 
 ![Dave's Cast Bar: every look](docs/images/daves_castbar.png)
 
 ```text
 /castbar                 options
-/castbar test fishing    play a pretend cast of one look (frost, fire, shadow, nature, lightning, arcane, holy, fishing, herbalism, mining, skinning, smelting, blacksmithing, alchemy, tailoring, leatherworking, enchanting, disenchant, firstaid, plain)
+/castbar test fishing    play a pretend cast of one look (frost, fire, shadow, nature, lightning, arcane, holy, fishing, herbalism, mining, skinning, smelting, blacksmithing, alchemy, tailoring, leatherworking, engineering, enchanting, disenchant, firstaid, plain)
 /castbar set frost       right after casting a spell: always give that spell this look (/castbar set auto undoes it)
 /castbar unlock          move and resize the bar outside Edit Mode (/castbar lock, /castbar reset)
 ```
@@ -59,21 +61,9 @@ Movable, resizable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with 
 
 More in [its README](wowaddons/daves_chat/README.md) and [NOTES.md](wowaddons/daves_chat/NOTES.md).
 
-### Dave's Frames (`daves_frames`)
-
-Custom target unit frame built around a central portrait ring with health (left) and resource (right) bars emptying inward toward the portrait, damage trail, incoming heal and shield bars, cast overlay or stacked strips, hanging aura boards on chains, and automatic unit art (`plain`, `elite`, `rareelite` / silver elite, `boss`, plus nine player class plates).
-
-```text
-/davesframes             options
-/davesframes test        preview the target frame on yourself outside Edit Mode
-/davesframes art warrior preview a specific plate (plain, elite, rareelite, boss, or class; auto restores unit art)
-```
-
-More in [its README](wowaddons/daves_frames/README.md) and [NOTES.md](wowaddons/daves_frames/NOTES.md).
-
 ### Dave's Map (`daves_map`)
 
-Map Genie's WoW: Forever points of interest, travel routes, treasures, and pfQuest-linked quest chains drawn on a taint-free world map layer, paired with a Map Genie-style search/filter sidebar, a Ready-to-Turn-In & zone quest tracker with quest-focus clicks, and an optional seamless stitched world map (`Stitch/` + local gitignored `daves_map_data` and `daves_map_textures` companions).
+QuestieDB's WoW: Forever quests, objective spawns, turn-in NPCs, prerequisite quest chains, dungeons, flight masters, townsfolk, rares, and treasures drawn at exact in-game zone coordinates on a taint-free world map layer (via companion addon `daves_map_data`), paired with a search/filter sidebar, a Ready-to-Turn-In & zone quest tracker with quest-focus clicks, and OpenMap `v0.8.10`'s seamless stitched world map and multi-floor dungeon/raid maps (`Stitch/` + companion addon `daves_map_textures`).
 
 ```text
 /dmap                    toggle the map pin layer (/davesmap alias)
@@ -98,11 +88,13 @@ More in [its README](wowaddons/daves_outofmyway/README.md).
 
 ### Dave's Sack (`daves_sack`)
 
-One bag window for all your bags, styled like Blizzard's HUD Edit Mode window. Items are sorted into collapsible categories (including Forever Camping & Keys, Equipment split into **Item Sets** — with one-click `[Locked]` / `[Unlocked]` protection and drag-and-drop custom set gear — and Other Equipment, Consumables split into Alchemy / Food & Drink / First Aid, and Reagents split by profession) or shown in one continuous **"One big bag"** slot grid, with search, sort, quality-coloured slots, reagent-bag routing, an item destroy/trash button to the left of the search bar (with `"Confirm delete (trash)"`), local Auction House price & market caching (unit & stack prices on item tooltips, tradeable bag AH value and cache age in the footer, and a gavel button beside Settings that opens a companion **Market Analysis & Insights** window with **Margin**, **Scarce**, **Professions** — showing per-profession **Cost to Make vs. Sell** and **Top Trades** — and **Bag Advisor** tabs), backpack currencies, and corner resizing.
+One bag window for all your bags, styled like Blizzard's HUD Edit Mode window. Items are sorted into collapsible categories (including Ammo, Forever Camping & Keys, Equipment split into **Item Sets** — with one-click `[Locked]` / `[Unlocked]` protection and drag-and-drop custom set gear — and Other Equipment, Consumables split into Alchemy / Food & Drink / First Aid, and Reagents split by profession) or shown in one continuous **"One big bag"** slot grid, with search, sort, quality-coloured slots, reagent-bag & ammo-bag (quiver / ammo pouch) Free Space, footer capacity & priority routing, an item destroy/trash button to the left of the search bar (with `"Confirm delete (trash)"`), local Auction House price & market caching (unit & stack prices on item tooltips, tradeable bag AH value and cache age in the footer, and a gavel button beside Settings that opens a companion **Market Analysis & Insights** window with **Margin**, **Scarce**, **Professions** — showing per-profession **Cost to Make vs. Sell** and **Top Trades** — and **Bag Advisor** tabs), backpack currencies, and corner resizing.
 
 ```text
 /sack                    open or close the bags (/davessack alias)
 /sack market             open the companion Market Analysis & Insights window (also the gavel button)
+/sack bait               open Market Analysis on Bait & Snipe (/sack bait test previews alert; /sack counter toggles Top 50 radar)
+/sack scan               force an Auction House deep scan while the AH window is open
 /sack lock | unlock      lock or unlock all items in the Equipment -> Item Sets sub-category
 /sack options            settings (also the gear button in the window, plus Esc > Options > AddOns > Dave's Sack)
 ```
@@ -133,7 +125,7 @@ Add `-WhatIf` (`--dry-run` for bash) to preview, and `-Remove` (`--remove`) to u
 
 ## Installing an addon without the repo
 
-Ready-to-extract `<addon>.zip` packages for all 7 addons live on the [`releases` branch](https://github.com/DavidWhit/daves-wow-addons/tree/releases) (updated automatically via `Publish-WowReleases.py -Push`). Download any `<addon>.zip` and extract it into your game's `AddOns` folder, or copy an addon folder from `wowaddons/` into:
+Ready-to-extract `<addon>.zip` packages for all 8 tracked addons (including `daves_map_data.zip` and `daves_map_textures.zip`) live on the [`releases` branch](https://github.com/DavidWhit/daves-wow-addons/tree/releases) (updated automatically via `Publish-WowReleases.py -Push`). Download any `<addon>.zip` and extract it into your game's `AddOns` folder, or copy an addon folder from `wowaddons/` into:
 
 ```
 <WoW install>\_forever_\Interface\AddOns\daves_sack

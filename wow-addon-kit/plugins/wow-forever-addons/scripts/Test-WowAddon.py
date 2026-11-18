@@ -45,6 +45,32 @@ TAINT_UNREG_RX = re.compile(
 )
 BUILTIN_GUARDS = {"issecretvalue", "canaccessvalue", "issecrettable", "hasanysecretvalues", "scrubsecretvalues"}
 LOCAL_WARN_THRESHOLD = 175
+UPVALUE_WARN_THRESHOLD = 55
+LUA_MAX_LOCALS = 200
+LUA_MAX_UPVALUES = 60
+LUA_KEYWORDS = {
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
+    "if", "in", "local", "nil", "not", "or", "repeat", "return", "then",
+    "true", "until", "while",
+}
+LUA_STD_GLOBALS = {
+    "_G", "assert", "bit", "collectgarbage", "coroutine", "date", "debugprofilestop",
+    "error", "format", "gcinfo", "getfenv", "getmetatable", "ipairs", "loadstring",
+    "math", "newproxy", "next", "pairs", "pcall", "print", "rawequal", "rawget",
+    "rawset", "select", "setfenv", "setmetatable", "sort", "string", "strsplit",
+    "strtrim", "table", "time", "tinsert", "tonumber", "tostring", "tremove",
+    "type", "unpack", "wipe", "xpcall",
+}
+LUA_TOKEN_RX = re.compile(
+    r"--\[(=*)\[[\s\S]*?\]\1\]"
+    r"|--[^\n]*"
+    r"|\[(=*)\[[\s\S]*?\]\2\]"
+    r"|\"(?:\\.|[^\"\\])*\""
+    r"|'(?:\\.|[^'\\])*'"
+    r"|0x[0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?"
+    r"|\.\.\.|\.\.|==|~=|<=|>=|[+\-*/%^#=<>;:,(){}\[\].]"
+    r"|[A-Za-z_][A-Za-z0-9_]*"
+)
 HAND_UI = re.compile(
     r"\bCreateFrame\s*\([^)]*?['\"](DefaultPanelTemplate|ButtonFrameTemplate|BasicFrameTemplate\w*|PortraitFrameTemplate\w*|DialogBorder\w*Template|MinimalSliderWithSteppersTemplate|OptionsSliderTemplate|UICheckButtonTemplate|InterfaceOptionsCheckButtonTemplate)['\"]\s*[,)]",
     re.I,
@@ -119,6 +145,294 @@ def get_code_lines(text):
 def strip_comments(text):
     text = re.sub(r"(?s)--\[(=*)\[.*?\]\1\]", "", text)
     return re.sub(r"--[^\n]*", "", text)
+
+
+def check_lua_compiler_limits(raw, rel, add, api=None, defined=None):
+    """Check Lua 5.1 hard limits (200 locals, 60 upvalues) and out-of-scope local references."""
+    tokens = []
+    line = 1
+    pos = 0
+    for m in LUA_TOKEN_RX.finditer(raw):
+        line += raw.count("\n", pos, m.start())
+        tok = m.group(0)
+        pos = m.end()
+        if not tok.startswith("--"):
+            tokens.append((tok, line))
+        line += tok.count("\n")
+
+    n = len(tokens)
+    idx = 0
+    uid = 0
+    brace_stack = []
+    funcs = [{
+        "name": "file chunk",
+        "line": 1,
+        "blocks": [[("...", 0)]],
+        "max_locals": 1,
+        "max_local_line": 1,
+        "upvalues": set(),
+    }]
+    all_funcs = [funcs[0]]
+    block_kinds = [["func"]]
+    all_local_names = set()
+    unresolved_globals = []
+
+    def cur_locals(fn):
+        return sum(len(b) for b in fn["blocks"])
+
+    def add_local(name, ln):
+        nonlocal uid
+        uid += 1
+        all_local_names.add(name)
+        fn = funcs[-1]
+        fn["blocks"][-1].append((name, uid))
+        cnt = cur_locals(fn)
+        if cnt > fn["max_locals"]:
+            fn["max_locals"] = cnt
+            fn["max_local_line"] = ln
+
+    def find_in_fn(fn, name):
+        for b in reversed(fn["blocks"]):
+            for nm, _ in b:
+                if nm == name:
+                    return True
+        return False
+
+    def resolve_ident(name, ln):
+        if find_in_fn(funcs[-1], name):
+            return
+        found_at = None
+        for fi in range(len(funcs) - 2, -1, -1):
+            if find_in_fn(funcs[fi], name):
+                found_at = fi
+                break
+        if found_at is not None:
+            for fi in range(found_at + 1, len(funcs)):
+                funcs[fi]["upvalues"].add(name)
+        else:
+            unresolved_globals.append((name, ln))
+
+    def maybe_resolve(i):
+        t, ln = tokens[i]
+        if not re.match(r"^[A-Za-z_]", t) or t in LUA_KEYWORDS:
+            return
+        prev = tokens[i - 1][0] if i > 0 else ""
+        nxt = tokens[i + 1][0] if i + 1 < n else ""
+        if prev in (".", ":"):
+            return
+        if nxt == "=" and brace_stack and brace_stack[-1] == "{" and prev in ("{", ",", ";"):
+            return
+        resolve_ident(t, ln)
+
+    try:
+        while idx < n:
+            tok, ln = tokens[idx]
+            if tok in ("(", "{", "["):
+                brace_stack.append(tok)
+                idx += 1
+                continue
+            if tok in (")", "}", "]"):
+                if brace_stack:
+                    brace_stack.pop()
+                idx += 1
+                continue
+            if tok == "local":
+                idx += 1
+                if idx < n and tokens[idx][0] == "function":
+                    idx += 1
+                    fname, fline = tokens[idx]
+                    add_local(fname, fline)
+                    idx += 1
+                    params = []
+                    if idx < n and tokens[idx][0] == "(":
+                        idx += 1
+                        while idx < n and tokens[idx][0] != ")":
+                            if tokens[idx][0] != ",":
+                                params.append(tokens[idx][0])
+                            idx += 1
+                        idx += 1
+                    new_fn = {
+                        "name": f"local function {fname}",
+                        "line": fline,
+                        "blocks": [[(p, j) for j, p in enumerate(params)]],
+                        "max_locals": len(params),
+                        "max_local_line": fline,
+                        "upvalues": set(),
+                    }
+                    funcs.append(new_fn)
+                    all_funcs.append(new_fn)
+                    block_kinds.append(["func"])
+                    continue
+                names = []
+                while idx < n:
+                    nm, nline = tokens[idx]
+                    if not re.match(r"^[A-Za-z_]", nm) or nm in LUA_KEYWORDS:
+                        break
+                    names.append((nm, nline))
+                    idx += 1
+                    if idx < n and tokens[idx][0] == ",":
+                        idx += 1
+                    else:
+                        break
+                for nm, nline in names:
+                    add_local(nm, nline)
+                continue
+            if tok == "function":
+                fline = ln
+                idx += 1
+                fname_parts = []
+                has_self = False
+                while idx < n and tokens[idx][0] != "(":
+                    t2, _ = tokens[idx]
+                    fname_parts.append(t2)
+                    if t2 == ":":
+                        has_self = True
+                    idx += 1
+                if fname_parts and re.match(r"^[A-Za-z_]", fname_parts[0]) and fname_parts[0] not in LUA_KEYWORDS:
+                    resolve_ident(fname_parts[0], fline)
+                params = ["self"] if has_self else []
+                if idx < n and tokens[idx][0] == "(":
+                    idx += 1
+                    while idx < n and tokens[idx][0] != ")":
+                        if tokens[idx][0] != ",":
+                            params.append(tokens[idx][0])
+                        idx += 1
+                    idx += 1
+                label = "function " + "".join(fname_parts) if fname_parts else "anonymous function"
+                new_fn = {
+                    "name": label,
+                    "line": fline,
+                    "blocks": [[(p, j) for j, p in enumerate(params)]],
+                    "max_locals": len(params),
+                    "max_local_line": fline,
+                    "upvalues": set(),
+                }
+                funcs.append(new_fn)
+                all_funcs.append(new_fn)
+                block_kinds.append(["func"])
+                continue
+            if tok == "for":
+                idx += 1
+                loop_vars = []
+                while idx < n and tokens[idx][0] not in ("=", "in"):
+                    if tokens[idx][0] != ",":
+                        loop_vars.append(tokens[idx][0])
+                    idx += 1
+                while idx < n and tokens[idx][0] != "do":
+                    if tokens[idx][0] in ("(", "{", "["):
+                        brace_stack.append(tokens[idx][0])
+                    elif tokens[idx][0] in (")", "}", "]") and brace_stack:
+                        brace_stack.pop()
+                    else:
+                        maybe_resolve(idx)
+                    idx += 1
+                do_line = tokens[idx][1] if idx < n else ln
+                idx += 1
+                b = [("<f1>", 1), ("<f2>", 2), ("<f3>", 3)] + [(v, j + 10) for j, v in enumerate(loop_vars)]
+                funcs[-1]["blocks"].append(b)
+                cnt = cur_locals(funcs[-1])
+                if cnt > funcs[-1]["max_locals"]:
+                    funcs[-1]["max_locals"] = cnt
+                    funcs[-1]["max_local_line"] = do_line
+                block_kinds[-1].append("for")
+                continue
+            if tok == "while":
+                idx += 1
+                while idx < n and tokens[idx][0] != "do":
+                    if tokens[idx][0] in ("(", "{", "["):
+                        brace_stack.append(tokens[idx][0])
+                    elif tokens[idx][0] in (")", "}", "]") and brace_stack:
+                        brace_stack.pop()
+                    else:
+                        maybe_resolve(idx)
+                    idx += 1
+                idx += 1
+                funcs[-1]["blocks"].append([])
+                block_kinds[-1].append("while")
+                continue
+            if tok == "do":
+                funcs[-1]["blocks"].append([])
+                block_kinds[-1].append("do")
+                idx += 1
+                continue
+            if tok == "if":
+                idx += 1
+                while idx < n and tokens[idx][0] != "then":
+                    if tokens[idx][0] in ("(", "{", "["):
+                        brace_stack.append(tokens[idx][0])
+                    elif tokens[idx][0] in (")", "}", "]") and brace_stack:
+                        brace_stack.pop()
+                    else:
+                        maybe_resolve(idx)
+                    idx += 1
+                idx += 1
+                funcs[-1]["blocks"].append([])
+                block_kinds[-1].append("if")
+                continue
+            if tok == "elseif":
+                if len(funcs[-1]["blocks"]) > 1:
+                    funcs[-1]["blocks"].pop()
+                idx += 1
+                while idx < n and tokens[idx][0] != "then":
+                    if tokens[idx][0] in ("(", "{", "["):
+                        brace_stack.append(tokens[idx][0])
+                    elif tokens[idx][0] in (")", "}", "]") and brace_stack:
+                        brace_stack.pop()
+                    else:
+                        maybe_resolve(idx)
+                    idx += 1
+                idx += 1
+                funcs[-1]["blocks"].append([])
+                continue
+            if tok == "else":
+                if len(funcs[-1]["blocks"]) > 1:
+                    funcs[-1]["blocks"].pop()
+                funcs[-1]["blocks"].append([])
+                idx += 1
+                continue
+            if tok == "repeat":
+                funcs[-1]["blocks"].append([])
+                block_kinds[-1].append("repeat")
+                idx += 1
+                continue
+            if tok == "until":
+                if len(funcs[-1]["blocks"]) > 1:
+                    funcs[-1]["blocks"].pop()
+                if len(block_kinds[-1]) > 1:
+                    block_kinds[-1].pop()
+                idx += 1
+                continue
+            if tok == "end":
+                kind = block_kinds[-1].pop() if block_kinds and block_kinds[-1] else "do"
+                if kind == "func" and len(funcs) > 1:
+                    funcs.pop()
+                    block_kinds.pop()
+                elif len(funcs[-1]["blocks"]) > 1:
+                    funcs[-1]["blocks"].pop()
+                idx += 1
+                continue
+            maybe_resolve(idx)
+            idx += 1
+    except Exception:
+        return
+
+    for fn in all_funcs:
+        nups = len(fn["upvalues"])
+        if nups > LUA_MAX_UPVALUES:
+            add("error", "upvalue-limit", rel, fn["line"], f"{fn['name']} captures {nups} upvalues (Lua 5.1 hard limit is {LUA_MAX_UPVALUES}; file will fail to compile at load time). Split helper functions out or group state into tables.")
+        elif nups >= UPVALUE_WARN_THRESHOLD:
+            add("warn", "upvalue-limit", rel, fn["line"], f"{fn['name']} captures {nups} upvalues (approaching Lua 5.1's hard limit of {LUA_MAX_UPVALUES}; group state into tables or split helpers).")
+        if fn["max_locals"] > LUA_MAX_LOCALS:
+            add("error", "local-limit", rel, fn["max_local_line"], f"{fn['name']} reaches {fn['max_locals']} active locals (Lua 5.1 hard limit is {LUA_MAX_LOCALS}; file will fail to compile at load time).")
+
+    known_globals = set(LUA_STD_GLOBALS) | set(BUILTIN_GUARDS) | set(defined or ())
+    if api:
+        known_globals |= set(api.get("Functions") or ()) | set(api.get("Globals") or ()) | set(api.get("Namespaces") or ()) | set(api.get("Deprecated") or ())
+    seen_leaked = set()
+    for nm, ln in unresolved_globals:
+        if nm in all_local_names and nm not in known_globals and (nm, ln) not in seen_leaked:
+            seen_leaked.add((nm, ln))
+            add("error", "out-of-scope-local", rel, ln, f"'{nm}' was declared local in another block/function and is out of scope here (resolves to nil global '{nm}'). Expose it on `ns.{nm}` or hoist the local declaration.")
 
 
 def list_lua(addon_dir):
@@ -429,6 +743,8 @@ def check(path, flavors, no_luacheck=False):
         raw_lines = raw.split("\n")
         code_lines = get_code_lines(raw)
         file_text = "\n".join(code_lines)
+        if not is_kit_copy:
+            check_lua_compiler_limits(raw, rel, add, api, defined)
         locals_ = set()
         for match in re.finditer(r"\blocal\s+(?:function\s+)?([A-Za-z_][\w]*(?:\s*,\s*[A-Za-z_][\w]*)*)", file_text):
             for item in re.split(r"\s*,\s*", match.group(1)):

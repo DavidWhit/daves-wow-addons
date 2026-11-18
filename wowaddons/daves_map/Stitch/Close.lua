@@ -18,7 +18,7 @@
 -- Everything here follows the view: S.SetView from WorldMap.lua on every pan / zoom.
 --------------------------------------------------------------------------------
 
--- (daves_map: OpenMap's namespace is the drop-in daves_map_textures', handed over in Base.lua; without it, nothing)
+-- (daves_map: OpenMap's isolated sub-namespace created in Base.lua)
 local ns = select(2, ...).OM
 if not ns then return end
 local S = ns.MapStitch
@@ -30,7 +30,7 @@ d.minimapMix = 0.45             -- how strong the minimap's detail is up close (
 d.minimapDeep = 0.85            -- the most it shows at any zoom (reached at the deepest, where the painted map has nothing left)
 d.minimapFrom = 20              -- the zoom where it starts to mix in (MINI_FROM: what it can be set to)
 d.cityMinimap = true            -- ... over the six major cities' own maps too (off: their own maps alone)
-d.soften = true                 -- soften + paper grain at the closest zoom
+d.soften = false                -- soften + paper grain zoomed in (its blur rests while the map moves)
 d.underground = true            -- caves and pre-instance areas
 d.gapMinimap = false            -- the minimap in land no zone map covers (experimental: off, that land is left as
                                 --  the zone maps' blank parchment, an unfinished map)
@@ -75,18 +75,28 @@ local function TileTone(u, v)
 	local chain = S.ChainAt(u, v)
 	return Tint(ns.MapTones and ns.MapTones[chain[#chain]] or DEFAULT_TONE)
 end
-local GRAIN = ns.Media.path .. "Textures\\MapGrain"
-local TOOTH = ns.Media.path .. "Textures\\MapTooth"
-local CONT_OF = { [1415] = 0, [1414] = 1 }
-local CONT_MAP = { [0] = 1415, [1] = 1414 }
+local GRAIN = ns.Media.tex .. "MapGrain"
+local TOOTH = ns.Media.tex .. "MapTooth"
+-- each continent's game maps (its minimap tiles and caves) and each game map's continent (whose land its
+-- minimap is drawn through): WoW Forever's two, or a client's own (ns.MapWorld.minimap, world.py)
+local CONT_OF, CONT_MAP = { [1415] = { 0 }, [1414] = { 1 } }, { [0] = 1415, [1] = 1414 }
+if ns.MapWorld and ns.MapWorld.minimap then
+	CONT_OF, CONT_MAP = ns.MapWorld.minimap, {}
+	local ids = {}
+	for c in pairs(CONT_OF) do ids[#ids + 1] = c end
+	table.sort(ids)                 -- (a game map two continents share: the first's land, the Eastern Kingdoms')
+	for _, c in ipairs(ids) do
+		for _, g in ipairs(CONT_OF[c]) do CONT_MAP[g] = CONT_MAP[g] or c end
+	end
+end
 
 local function Smooth(x, r)
 	local t = math.max(0, math.min(1, (x - r[1]) / (r[2] - r[1])))
 	return t * t * (3 - 2 * t)
 end
 
--- the continent (0 / 1) the view's centre is on: looked up again only once the centre has
--- moved a little (the game's lookup makes tables, and this runs every frame of a pan or zoom)
+-- the game maps (continent 0 / 1 ...) of the continent the view's centre is on: looked up again only once
+-- the centre has moved a little (the game's lookup makes tables, and this runs every frame of a pan or zoom)
 local lastCU, lastCV, lastCont
 local function ContinentAt(u, v)
 	if lastCU and math.abs(u - lastCU) < 0.002 and math.abs(v - lastCV) < 0.002 then return lastCont end
@@ -97,14 +107,18 @@ local function ContinentAt(u, v)
 	return lastCont
 end
 
--- every continent (0 / 1) whose map the view overlaps (one list, reused)
+-- every game map (continent 0 / 1 ...) whose continent's map the view overlaps (one list, reused)
 local contsInView = {}
 local function ContinentsInView(u, v, hu, hv)
 	local out = contsInView
 	wipe(out)
-	for mapID, cont in pairs(CONT_OF) do
+	for mapID, conts in pairs(CONT_OF) do
 		local l, r, t, b = S.Rect(mapID)
-		if l and r > u - hu and l < u + hu and b > v - hv and t < v + hv then out[#out + 1] = cont end
+		if l and r > u - hu and l < u + hu and b > v - hv and t < v + hv then
+			for _, cont in ipairs(conts) do
+				if not tContains(out, cont) then out[#out + 1] = cont end
+			end
+		end
 	end
 	return out
 end
@@ -131,6 +145,7 @@ local function Tile(layer, fid, cont)
 		t.mask = mask
 	end
 	t[1]:SetTexture(fid, nil, nil, "LINEAR")
+	t.omA = nil                 -- (its alpha set again: UpdateMinimap skips an unchanged one)
 	return t
 end
 
@@ -146,7 +161,7 @@ end
 -- thousand). Each copy is cut into pieces of `per` tiles a side, tinted as the tiles are. Drawn
 -- coarse under fine under the game's own tiles, their strengths set so the three add up to `mix`:
 -- the finer takes over as fewer tiles are in view
-local LOD = ns.Media.path .. "Textures\\MapMiniLOD\\"
+local LOD = ns.Media.tex .. "MapMiniLOD\\"
 local NATIVE_FROM = { 64, 36 }  -- tiles in view where the game's own tiles start / finish taking over
 local FINE_FROM = { 40, 24 }    -- tiles across the view where the finer copy starts / finishes taking over
 local lodPieces, lodPool, wantedLOD = {}, {}, {}   -- key -> texture; free textures; (reused each update)
@@ -166,6 +181,7 @@ local function LODPiece(layer, cont, sub)
 	local t = tremove(lodPool) or layer:CreateTexture(nil, "ARTWORK")
 	t:SetDrawLayer("ARTWORK", sub)
 	t:SetDesaturation(MINI_DESAT)
+	t.omA = nil                 -- (see Tile)
 	local mask = CONT_MAP[cont] and S.LandMask and S.LandMask(layer, CONT_MAP[cont])
 	if t.omMask ~= mask then
 		if t.omMask then t:RemoveMaskTexture(t.omMask) end
@@ -185,15 +201,17 @@ local function ShowLOD(layer, cont, level, per, keys, tx0, tx1, ty0, ty1, alpha)
 				wantedLOD[key] = true
 				local t = lodPieces[key]
 				if not t then
-					t = LODPiece(layer, cont, -level)
-					t:SetTexture(LOD .. cont .. "_" .. per .. "_" .. col .. "_" .. row, nil, nil, "LINEAR")
-					lodPieces[key] = t
 					local u0, v0 = S.FromYards(cont, (32 - row * per) * TILE, (32 - col * per) * TILE)
 					local u1, v1 = S.FromYards(cont, (32 - (row + 1) * per) * TILE, (32 - (col + 1) * per) * TILE)
-					S.PlaceWorld(t, math.min(u0, u1), math.min(v0, v1), math.max(u0, u1), math.max(v0, v1))
-					t:Show()
+					if u0 and u1 then           -- (none for a piece off the stitched world: Outland's, on 530)
+						t = LODPiece(layer, cont, -level)
+						t:SetTexture(LOD .. cont .. "_" .. per .. "_" .. col .. "_" .. row, nil, nil, "LINEAR")
+						lodPieces[key] = t
+						S.PlaceWorld(t, math.min(u0, u1), math.min(v0, v1), math.max(u0, u1), math.max(v0, v1))
+						t:Show()
+					end
 				end
-				t:SetAlpha(alpha)
+				if t and t.omA ~= alpha then t.omA = alpha t:SetAlpha(alpha) end
 			end
 		end
 	end
@@ -231,6 +249,12 @@ local function UpdateMinimap(layer, conts, u, v, hu, hv, mix)
 				for tx = tx0, tx1 do
 					for ty = ty0, ty1 do
 						local fid = list[tx * 64 + ty]
+						local u0, v0, u1, v1
+						if fid and not tiles[TileKey(cont, tx, ty)] then
+							u0, v0 = S.FromYards(cont, (32 - ty) * TILE, (32 - tx) * TILE)
+							u1, v1 = S.FromYards(cont, (31 - ty) * TILE, (31 - tx) * TILE)
+							if not (u0 and u1) then fid = nil end     -- (a tile off the stitched world)
+						end
 						if fid then
 							local key = TileKey(cont, tx, ty)
 							wanted[key] = true
@@ -238,15 +262,13 @@ local function UpdateMinimap(layer, conts, u, v, hu, hv, mix)
 							if not t then
 								t = Tile(layer, fid, cont)
 								tiles[key] = t
-								local u0, v0 = S.FromYards(cont, (32 - ty) * TILE, (32 - tx) * TILE)
-								local u1, v1 = S.FromYards(cont, (31 - ty) * TILE, (31 - tx) * TILE)
 								t[1]:SetVertexColor(TileTone((u0 + u1) / 2, (v0 + v1) / 2))
 								for _, tex in ipairs(t) do
 									S.PlaceWorld(tex, math.min(u0, u1), math.min(v0, v1), math.max(u0, u1), math.max(v0, v1))
 									tex:Show()
 								end
 							end
-							t[1]:SetAlpha(a3)
+							if t.omA ~= a3 then t.omA = a3 t[1]:SetAlpha(a3) end
 						end
 					end
 				end
@@ -307,7 +329,7 @@ local function UpdateGapMinimap(conts, u, v, hu, hv, alpha)
 	for _, cont in ipairs(conts) do
 		local list = ns.MapMinimap and ns.MapMinimap[cont]
 		local mapID = CONT_MAP[cont]
-		local landMask = mapID and S.GapMask and S.GapMask(mapID)
+		local landMask = mapID and ns.MapGaps and S.GapMask and S.GapMask(mapID)   -- (a client with gaps only)
 		local xa, ya, xb, yb
 		if list and alpha > 0.01 and layer and landMask and ns.MapGaps then
 			xa, ya = S.ToYards(cont, u - hu, v - hv)
@@ -577,18 +599,18 @@ local function Surface(shown, key, r, u, v, hu, hv, steps, focus)
 	return math.max(focus, tz * (1 - Smooth(off, FOCUS_RANGE)))
 end
 
-local function UpdateUnderground(layer, cont, u, v, hu, hv, steps)
+local function UpdateUnderground(layer, conts, u, v, hu, hv, steps)
 	local shown, focus = underShown, 0
 	wipe(shown)
-	if mod.db.underground and cont then
+	if mod.db.underground and conts then
 		for id, c in pairs(ns.MapCaves or EMPTY) do
-			if c[2] == cont and not UNDER_SKIP[id] and Primary(id, c) then
+			if tContains(conts, c[2]) and not UNDER_SKIP[id] and Primary(id, c) then
 				local r = RectOf(id)
 				if r then focus = Surface(shown, id, r, u, v, hu, hv, steps, focus) end
 			end
 		end
 		for i, c in ipairs(ns.MapCaveMinimap or EMPTY) do
-			if c[1] == cont then
+			if tContains(conts, c[1]) then
 				local r = RectOf(-i)
 				if r then focus = Surface(shown, -i, r, u, v, hu, hv, steps, focus) end
 			end
@@ -759,11 +781,29 @@ end
 -- DetailK), and `steps`: the plain zoom, from the whole world fitting, as far as the wheel has gone.
 -- The minimap's fades go by that: the same wheel turns in a small window or full screen (by the
 -- area, the full screen's wide view took it in later)
+-- the blur rests while the map moves: its four copies of every zone in view are laid out again
+-- on every frame of a zoom or pan (about 60 ms a zoom frame and 8 ms a pan frame at 16x,
+-- /openmap bench); back `after` seconds once it stops. A lone view update (the map opening, a
+-- setting changed) applies it at once: it rests from the second update in a row (`gap` apart at most).
+-- It comes back `step` zones a frame: all at once, it was one long frame each time the map stopped,
+-- which the next wheel notch, a moment later, landed on. `after` is longer than a pause between
+-- notches, so zooming in notch by notch keeps it resting; a zoom starting again stops the return
+local BlurRest = { frame = CreateFrame("Frame"), args = {}, at = -10, after = 0.35, gap = 0.1, step = 2 }
+BlurRest.frame:Hide()
+BlurRest.frame:SetScript("OnUpdate", function(self)
+	if mod.Zooming and mod.Zooming() then BlurRest.at = GetTime() return end
+	if GetTime() - BlurRest.at < BlurRest.after then return end
+	local a = BlurRest.args
+	local done = Try("blur", S.SetBlur, a[1], a[2], a[3], a[4], a[5], BlurRest.step)
+	if done ~= false then self:Hide() end
+end)
+
 S.closeView = {}
 function S.SetView(u, v, hu, hv, zoom, steps)
 	steps = steps or zoom
 	local L = S.closeLayers
 	if not L then return end
+	if not ns.Safe.Finite(u, v, hu, hv, zoom) then return end   -- (not a view: #261's NaN)
 	local cv = S.closeView
 	local start = debugprofilestop and debugprofilestop()
 	cv.zoom, cv.time, cv.updates = zoom, GetTime(), (cv.updates or 0) + 1
@@ -773,7 +813,19 @@ function S.SetView(u, v, hu, hv, zoom, steps)
 	Try("culling", S.Cull, u - hu, v - hv, u + hu, v + hv)
 	local soft = mod.db.soften and Smooth(zoom, SOFT_FADE) or 0
 	cv.soft = soft
-	Try("blur", S.SetBlur, soft, u - hu, v - hv, u + hu, v + hv)
+	local now = GetTime()
+	local moving = (mod.Zooming and mod.Zooming()) or now - BlurRest.at < BlurRest.gap
+	BlurRest.at = now
+	local blur = soft               -- (the grain still goes by soft: only the blur rests)
+	if soft > 0 and moving then
+		local a = BlurRest.args
+		a[1], a[2], a[3], a[4], a[5] = soft, u - hu, v - hv, u + hu, v + hv
+		BlurRest.frame:Show()
+		blur = 0
+	else
+		BlurRest.frame:Hide()       -- (applied now: an older one waiting would undo it)
+	end
+	Try("blur", S.SetBlur, blur, u - hu, v - hv, u + hu, v + hv)
 	local base = mod.db.minimap and mod.db.minimapMix or 0
 	local k = (mod.db.minimapFrom or MINI_FADE[1]) / MINI_FADE[1]          -- (sooner or later: the fades scale with it)
 	-- (the take-over toward minimapDeep moves later with it, never sooner: it's where the painted
@@ -802,7 +854,14 @@ function S.SetView(u, v, hu, hv, zoom, steps)
 	local under = Try("underground", UpdateUnderground, L.under, cont, u, v, hu, hv, steps) or 0
 	-- the out-of-focus world above a cave gets heavier grain
 	Try("grain", UpdateGrain, L.grain, u, v, hu, hv, math.max(soft, math.min(1.4, under * 1.4)))
-	for i, fn in ipairs(S.viewHooks) do Try("view hook " .. i, fn, u, v, hu, hv, zoom) end
+	-- the hooks' names made once, not a new string each a frame
+	S.viewHookNames = S.viewHookNames or {}
+	local names = S.viewHookNames
+	for i, fn in ipairs(S.viewHooks) do
+		local step = names[i]
+		if not step then step = "view hook " .. i names[i] = step end
+		Try(step, fn, u, v, hu, hv, zoom)
+	end
 	local n = 0
 	for _ in pairs(tiles) do n = n + 1 end
 	cv.tiles = n

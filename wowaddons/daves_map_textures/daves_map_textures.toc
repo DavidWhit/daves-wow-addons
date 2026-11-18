@@ -1,0 +1,27 @@
+## Interface: 16001
+## Title: |cffd4a94eDave's|r Map (textures)
+## Notes: OpenMap's seamless world map and dungeon map art and tables for Dave's Map.
+## Author: davidwhit5 (OpenMap: MIT, LICENSE-OpenMap.txt; map art: Blizzard, NOTICE-OpenMap.md)
+## Version: 0.8.10
+## IconTexture: Interface\Icons\INV_Misc_Map_01
+
+Init.lua
+Data\ArtEdits.lua
+Data\Banners.lua
+Data\Caves.lua
+Data\CaveMinimap.lua
+Data\DungeonMaps.lua
+Data\DungeonDrawn.lua
+Data\DungeonMinimap.lua
+Data\DungeonBosses.lua
+Data\Gaps.lua
+Data\GapPlaces.lua
+Data\Grade.lua
+Data\Labels.lua
+Data\Minimap.lua
+Data\MinimapLOD.lua
+Data\Places.lua
+Data\Reveal.lua
+Data\Tones.lua
+Data\Tiles.lua
+Export.lua

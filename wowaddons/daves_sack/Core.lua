@@ -66,13 +66,14 @@ end
 ---------------------------------------------------------------------------
 -- Categories (display order)
 ---------------------------------------------------------------------------
-local EQUIP, CONSUME, PROF, CAMP, REAGENT, QUEST, KEYS, MISC, JUNK = 1, 2, 3, 4, 5, 6, 7, 8, 9
-ns.CATEGORY_NAMES = { "Equipment", "Consumables", "Professions", "Camping", "Reagents", "Quest", "Keys", "Miscellaneous", "Junk" }
+local EQUIP, AMMO, CONSUME, PROF, CAMP, REAGENT, QUEST, KEYS, MISC, JUNK = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
+ns.CATEGORY_NAMES = { "Equipment", "Ammo", "Consumables", "Professions", "Camping", "Reagents", "Quest", "Keys", "Miscellaneous", "Junk" }
 ns.NUM_CATEGORIES = #ns.CATEGORY_NAMES
 
 -- Enum.ItemClass values have been stable since vanilla.
 local CLASS_TO_CAT = {
 	[2] = EQUIP, [4] = EQUIP,               -- weapon, armor
+	[6] = AMMO,                             -- projectile (arrows, bullets)
 	[0] = CONSUME, [8] = CONSUME,           -- consumable, item enhancement
 	[9] = PROF, [19] = PROF,                -- recipes, profession tools & gear
 	[5] = REAGENT, [7] = REAGENT,           -- reagents, trade goods (cloth, ore, herbs…)
@@ -101,7 +102,7 @@ local FISHING_POLE = 20  -- weapon subclass
 -- Fishing): linen is Tailoring, not First Aid; a fish Alchemy turns into oil is
 -- Alchemy, not Cooking. Secondary groups only get what no primary uses, and
 -- they're listed after every primary group.
-ns.CAT_EQUIP, ns.CAT_REAGENT, ns.CAT_CONSUME, ns.CAT_QUEST = EQUIP, REAGENT, CONSUME, QUEST
+ns.CAT_EQUIP, ns.CAT_AMMO, ns.CAT_REAGENT, ns.CAT_CONSUME, ns.CAT_QUEST = EQUIP, AMMO, REAGENT, CONSUME, QUEST
 
 -- Sub-category ids are global; a section only ever shows its own. Their order
 -- here is the order they're drawn in.
@@ -261,13 +262,80 @@ ns.IsReagentBag = IsReagentBag
 -- quivers, herb bags and the reagent bag: the item's family bits must overlap
 -- the bag's (C_Item.GetItemFamily / C_Container.GetContainerNumFreeSlots, both
 -- documented on Forever). A plain bag (family 0) takes anything.
+local ContainerIDToInventoryID = C_Container.ContainerIDToInventoryID
+local GetFreeSlots = C_Container.GetContainerNumFreeSlots
 local GetItemFamily = C_Item.GetItemFamily
 local band = bit and bit.band
+local AMMO_FAMILY_MASK = 3                  -- bagFamily bit 0 (1 = arrows) | bit 1 (2 = bullets)
+
+local function EquippedBagClass(bag)
+	if not (bag and bag >= 1 and bag <= (NUM_BAG_SLOTS or 4)) then return nil, nil end
+	if (ns.GetNumSlots(bag) or 0) <= 0 then return nil, nil end
+	local invID = ContainerIDToInventoryID and ContainerIDToInventoryID(bag)
+	local bagItemID = invID and GetInventoryItemID and GetInventoryItemID("player", invID)
+	if not (bagItemID and GetItemInfoInstant) then return nil, nil end
+	local _, _, _, _, _, classID, subclassID = GetItemInfoInstant(bagItemID)
+	return classID, subclassID
+end
+
+-- Quivers and ammo pouches sit in equipped bag slots 1..4 (Enum.ItemClass.Quiver == 11,
+-- or bagFamily bits 1/2 for arrows/bullets).
+local function IsAmmoBag(bag, bagFamily)
+	if not (bag and bag >= 1 and bag <= (NUM_BAG_SLOTS or 4)) then return false end
+	if (ns.GetNumSlots(bag) or 0) <= 0 then return false end
+	local classID = EquippedBagClass(bag)
+	if classID == 11 then return true end
+	if bagFamily == nil and GetFreeSlots then
+		local _, fam = GetFreeSlots(bag)
+		bagFamily = fam
+	end
+	return (bagFamily and band and band(bagFamily, AMMO_FAMILY_MASK) ~= 0) and true or false
+end
+ns.IsAmmoBag = IsAmmoBag
+
+function ns.IsAmmoItem(itemID)
+	if not (itemID and GetItemInfoInstant) then return false end
+	return select(6, GetItemInfoInstant(itemID)) == 6   -- Enum.ItemClass.Projectile
+end
+
 function ns.FitsBagFamily(itemID, bagFamily)
 	if (bagFamily or 0) == 0 then return true end
 	if not (itemID and GetItemFamily and band) then return false end
 	local fam = GetItemFamily(itemID)
 	return fam ~= nil and band(fam, bagFamily) ~= 0
+end
+
+function ns.FitsReagentBag(itemID, bagFamily)
+	if not (itemID and ns.REAGENT_BAG and (ns.GetNumSlots(ns.REAGENT_BAG) or 0) > 0) then return false end
+	local classID = GetItemInfoInstant and select(6, GetItemInfoInstant(itemID))
+	if classID == 1 or classID == 11 then return false end   -- never drop a container or quiver into the reagent bag
+	if bagFamily == nil and GetFreeSlots then
+		local _, fam = GetFreeSlots(ns.REAGENT_BAG)
+		bagFamily = fam
+	end
+	if (bagFamily or 0) ~= 0 then
+		return ns.FitsBagFamily(itemID, bagFamily)
+	end
+	-- Fallback if an equipped reagent bag ever reports family 0: check WoW's crafting-reagent flag / reagent classes.
+	local isCrafting = GetItemInfo and select(17, GetItemInfo(itemID))
+	if isCrafting ~= nil then return isCrafting and true or false end
+	return classID == 5 or classID == 7
+end
+
+function ns.FitsAmmoBag(itemID, bag, bagFamily)
+	if not ns.IsAmmoItem(itemID) then return false end
+	if bagFamily == nil and GetFreeSlots then
+		local _, fam = GetFreeSlots(bag)
+		bagFamily = fam
+	end
+	if (bagFamily or 0) ~= 0 then
+		return ns.FitsBagFamily(itemID, bagFamily)
+	end
+	-- Fallback if an ammo container ever reports family 0: Quiver (2) -> Arrow (2), Ammopouch (3) -> Bullet (3).
+	local bagClass, bagSub = EquippedBagClass(bag)
+	if bagClass ~= 11 then return false end
+	local itemSub = select(7, GetItemInfoInstant(itemID))
+	return bagSub == nil or bagSub <= 1 or bagSub == itemSub
 end
 
 function ns.Categorize(bag, slot, rec)
@@ -290,6 +358,7 @@ function ns.Categorize(bag, slot, rec)
 	if PROFESSION_TOOLS[id] or (rec.classID == 2 and rec.subclassID == FISHING_POLE) then return PROF end
 	if rec.classID == 5 and (rec.subclassID or 0) ~= 0 then return MISC end   -- keystones, context tokens
 	if IsReagentBag(bag) then return REAGENT, ReagentGroup(rec) end
+	if IsAmmoBag(bag) then return AMMO end
 
 	if cat == EQUIP then return EQUIP, E_OTHER end
 	if cat == REAGENT then return REAGENT, ReagentGroup(rec) end
@@ -324,7 +393,8 @@ do
 	local Clock = debugprofilestop
 	local issecretvalue = issecretvalue
 	local BATCH_SIZE = 50               -- max ItemKeys per C_AuctionHouse.SearchForItemKeys call
-	local REPLICATE_COOLDOWN = 7200     -- 2-hour cooldown between full AH deep caches (fast bag cache runs every time)
+	local REPLICATE_COOLDOWN = 7200     -- 2-hour cooldown between completed full AH deep caches (fast bag cache runs every time)
+	local REPLICATE_RETRY_QUIET = 900   -- Blizzard's ~15m server throttle window on C_AuctionHouse.ReplicateItems
 	local REPLICATE_SLICE = 240         -- max auctions inspected per background tick
 	local REPLICATE_BUDGET_MS = 1.8     -- max CPU milliseconds spent per background tick (prevents frame stutter)
 
@@ -337,13 +407,20 @@ do
 		return format("%dd ago", floor(d / 86400))
 	end
 
-	local ahEvents
-	local ahOpen, wantReplicate = false, false
+	local ahEvents, StepAutoScan
+	local ahOpen, wantReplicate, awaitingReplicate, userSearchedThisVisit = false, false, false, false
 	local pendingBatches, batchIndex = nil, 0
 	local replicateTicker = nil
+	local scanSeq = 0
+	local lastReplicateReqAt, lastReplicateListAt, replicateConsumed = nil, nil, false
 	local batchMin, batchQty = {}, {}
 	local repBuyMin, repBuyMin2, repMinQty, repBidMin = {}, {}, {}, {}
 	local repQty, repListings, repBids, repBidQty, repName, repQual = {}, {}, {}, {}, {}, {}
+
+	local function IsDeepScanDue()
+		if not (ns.db and ns.db.showAuctionPrices ~= false) then return false end
+		return not Now or (Now() - (ns.db.ahLastReplicate or 0)) >= REPLICATE_COOLDOWN
+	end
 
 	local function WipeReplicateScratch()
 		wipe(repBuyMin); wipe(repBuyMin2); wipe(repMinQty); wipe(repBidMin)
@@ -352,7 +429,7 @@ do
 	end
 
 	local function NotifyUpdated(changed)
-		if changed and Now then
+		if changed and Now and not IsDeepScanDue() then
 			ns.db.ahUpdated = Now()
 		end
 		if ns.RefreshAuctionFooter then ns.RefreshAuctionFooter() end
@@ -483,50 +560,31 @@ do
 		local any = false
 		local ts = Now and Now() or 0
 		for id, qty in pairs(repQty) do
-			local price = repBuyMin[id] or repBidMin[id]
-			if price and price > 0 and SetCachedPrice(prices, id, price) then
-				any = true
-				UpdateMarketEntry(
-					id,
-					price,
-					repBuyMin2[id],
-					repMinQty[id] or qty,
-					repBidMin[id],
-					qty,
-					repListings[id] or 1,
-					repBids[id] or 0,
-					repBidQty[id] or 0,
-					repName[id],
-					repQual[id],
-					ts,
-					true,
-					true
-				)
+			if not (ns.IsBaitProtectedItem and ns.IsBaitProtectedItem(id)) then
+				local price = repBuyMin[id] or repBidMin[id]
+				if price and price > 0 and SetCachedPrice(prices, id, price) then
+					any = true
+					UpdateMarketEntry(
+						id,
+						price,
+						repBuyMin2[id],
+						repMinQty[id] or qty,
+						repBidMin[id],
+						qty,
+						repListings[id] or 1,
+						repBids[id] or 0,
+						repBidQty[id] or 0,
+						repName[id],
+						repQual[id],
+						ts,
+						true,
+						true
+					)
+				end
 			end
 		end
 		if any then
 			ns.db.ahScanCount = (ns.db.ahScanCount or 0) + 1
-		end
-		return any
-	end
-
-	local function CommitPartialBatch(prices, minTbl, fallbackTbl)
-		local any = false
-		local ts = Now and Now() or 0
-		for id, price in pairs(minTbl) do
-			local cur = prices[id]
-			if (not cur or price < cur) and SetCachedPrice(prices, id, price) then
-				any = true
-				UpdateMarketEntry(id, price, repBuyMin2[id], repMinQty[id], repBidMin[id], repQty[id], repListings[id], repBids[id], repBidQty[id], repName[id], repQual[id], ts, false, false)
-			end
-		end
-		if fallbackTbl then
-			for id, price in pairs(fallbackTbl) do
-				if not minTbl[id] and not prices[id] and SetCachedPrice(prices, id, price) then
-					any = true
-					UpdateMarketEntry(id, price, nil, nil, price, repQty[id], repListings[id], repBids[id], repBidQty[id], repName[id], repQual[id], ts, false, false)
-				end
-			end
 		end
 		return any
 	end
@@ -539,40 +597,26 @@ do
 		pendingBatches, batchIndex = nil, 0
 	end
 
-	local function StopReplicateTicker(commitPartial)
+	local function StopReplicateTicker()
+		awaitingReplicate = false
 		if ahEvents then
 			pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
 		end
 		if replicateTicker then
 			replicateTicker:Cancel()
 			replicateTicker = nil
-			if commitPartial and ns.db and ns.db.ahPrices then
-				local changed = CommitPartialBatch(ns.db.ahPrices, repBuyMin, repBidMin)
-				WipeReplicateScratch()
-				FinishScan(changed, false)
-				return
-			end
 		end
 		WipeReplicateScratch()
 		ns.ahScanProgress = nil
 		ns.ahScanDoneUntil = nil
 	end
 
-	local function UserStartedSearch()
-		local f = AuctionHouseFrame
-		if f and f.activeSearches then
-			local allBids = AuctionHouseSearchContext and AuctionHouseSearchContext.AllBids
-			for k in pairs(f.activeSearches) do
-				if not (allBids and k == allBids) then
-					return true
-				end
-			end
-		end
-		return false
-	end
-
 	local function RecordBrowseList(list)
 		if not (list and ns.db and ns.db.ahPrices) then return end
+		if not ns.ahScanning and not HasPendingBatches()
+			and ns.OnCounterSnipeBrowseResults and ns.OnCounterSnipeBrowseResults(list) then
+			return
+		end
 		wipe(batchMin); wipe(batchQty)
 		for i = 1, #list do
 			local r = list[i]
@@ -580,7 +624,7 @@ do
 			local id = key and key.itemID
 			local p = r and r.minPrice
 			local q = r and r.totalQuantity or 0
-			if id and id > 0 and p and p > 0 and q > 0 then
+			if id and id > 0 and p and p > 0 and q > 0 and not (ns.IsBaitProtectedItem and ns.IsBaitProtectedItem(id)) then
 				local cur = batchMin[id]
 				if not cur or p < cur then batchMin[id] = p end
 				batchQty[id] = (batchQty[id] or 0) + q
@@ -588,11 +632,18 @@ do
 		end
 		local changed = CommitBatch(ns.db.ahPrices, batchMin, nil, batchQty)
 		wipe(batchQty)
-		if not HasPendingBatches() and not wantReplicate and not replicateTicker then
+		if not HasPendingBatches() and not wantReplicate and not awaitingReplicate and not replicateTicker then
 			if ns.ahScanning then
 				FinishScan(changed, true)
 				return
 			end
+		elseif not HasPendingBatches() and wantReplicate and not awaitingReplicate and not replicateTicker then
+			local seq = scanSeq
+			C_Timer.After(0.15, function()
+				if seq == scanSeq and wantReplicate and not awaitingReplicate and not replicateTicker then
+					StepAutoScan()
+				end
+			end)
 		elseif ns.ahScanning and pendingBatches and #pendingBatches > 0 then
 			local done = max(1, batchIndex - 1)
 			local totalSteps = #pendingBatches + (wantReplicate and 4 or 0)
@@ -604,23 +655,25 @@ do
 	local function RecordCommodityResults(itemID)
 		local A = C_AuctionHouse
 		if not (A and itemID and itemID > 0 and ns.db and ns.db.ahPrices) then return end
+		if ns.IsBaitProtectedItem and ns.IsBaitProtectedItem(itemID) then return end
 		local n = A.GetNumCommoditySearchResults and A.GetNumCommoditySearchResults(itemID) or 0
 		local best, second, minQty, totalQty = nil, nil, 0, 0
 		for i = 1, n do
 			local r = A.GetCommoditySearchResultInfo(itemID, i)
 			local p = r and r.unitPrice
-			local q = r and r.quantity or 0
-			if p and p > 0 and q > 0 then
-				totalQty = totalQty + q
+			local q = r and (r.quantity or 0) or 0
+			local avail = max(0, q - (r and r.numOwnerItems or 0))
+			if p and p > 0 and avail > 0 then
+				totalQty = totalQty + avail
 				if not best then
 					best = p
-					minQty = q
+					minQty = avail
 				elseif p < best then
 					second = best
 					best = p
-					minQty = q
+					minQty = avail
 				elseif p == best then
-					minQty = minQty + q
+					minQty = minQty + avail
 				elseif not second or p < second then
 					second = p
 				end
@@ -685,11 +738,10 @@ do
 	-- Uses a per-tick millisecond budget (REPLICATE_BUDGET_MS) and lightweight progress-only
 	-- widget updates so even 160,000+ active auctions scan with zero frame stutter.
 	local function StartReplicateSlice()
-		if ahEvents then
-			pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
-		end
 		local A = C_AuctionHouse
 		if not (ahOpen and A and A.GetNumReplicateItems and A.GetReplicateItemInfo and ns.db and ns.db.ahPrices) then
+			awaitingReplicate = false
+			if ahEvents then pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE") end
 			ns.ahScanProgress = nil
 			ns.ahScanning = false
 			NotifyUpdated(false)
@@ -697,11 +749,14 @@ do
 		end
 		local total = A.GetNumReplicateItems() or 0
 		if total <= 0 then
-			ns.ahScanProgress = nil
-			ns.ahScanning = false
-			NotifyUpdated(false)
-			return
+			return   -- keep REPLICATE_ITEM_LIST_UPDATE registered until the list is populated
 		end
+		awaitingReplicate = false
+		if ahEvents then
+			pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
+		end
+		replicateConsumed = false
+		if GetTime then lastReplicateListAt = GetTime() end
 		if replicateTicker then replicateTicker:Cancel() end
 		WipeReplicateScratch()
 		local idx = 1
@@ -715,12 +770,15 @@ do
 		replicateTicker = C_Timer.NewTicker(0.04, function()
 			if not (ahOpen and A and ns.db and ns.db.ahPrices and ns.db.showAuctionPrices ~= false)
 				or (AuctionHouseFrame and not AuctionHouseFrame:IsShown()) then
-				StopReplicateTicker(true)
+				StopReplicateTicker()
+				FinishScan(false, false)
 				return
 			end
 			local n = GetNumRep() or 0
 			if n <= 0 then
-				StopReplicateTicker(true)
+				lastReplicateListAt = nil
+				StopReplicateTicker()
+				FinishScan(false, false)
 				return
 			end
 			local t0 = Clock and Clock() or nil
@@ -779,9 +837,15 @@ do
 			idx = done + 1
 			if idx > n then
 				if replicateTicker then replicateTicker:Cancel(); replicateTicker = nil end
+				lastReplicateListAt = nil
+				replicateConsumed = true
 				local changed = CommitReplicateBatch(ns.db.ahPrices)
 				WipeReplicateScratch()
-				if Now then ns.db.ahLastReplicate = Now() end
+				if Now then
+					local now = Now()
+					ns.db.ahLastReplicate = now
+					ns.db.ahUpdated = now
+				end
 				FinishScan(changed, true)
 			else
 				local pct = 25 + floor((done / max(1, n)) * 75 + 0.5)
@@ -795,24 +859,24 @@ do
 		end)
 	end
 
-	local function StepAutoScan()
+	StepAutoScan = function()
 		local A = C_AuctionHouse
 		if not (ahOpen and A and ns.db and ns.db.showAuctionPrices ~= false) then
 			ClearPendingBatches()
 			wantReplicate = false
-			StopReplicateTicker(false)
+			StopReplicateTicker()
 			if ns.ahScanning then
 				ns.ahScanning = false
 				NotifyUpdated(false)
 			end
 			return
 		end
-		if A.IsThrottledMessageSystemReady and not A.IsThrottledMessageSystemReady() then return end
 
 		if HasPendingBatches() then
-			if (A.HasFavorites and A.HasFavorites()) or UserStartedSearch() or not A.SearchForItemKeys then
+			if (A.HasFavorites and A.HasFavorites()) or userSearchedThisVisit or not A.SearchForItemKeys then
 				ClearPendingBatches()
 			else
+				if A.IsThrottledMessageSystemReady and not A.IsThrottledMessageSystemReady() then return end
 				local totalBatches = #pendingBatches
 				local curBatch = batchIndex
 				local batch = pendingBatches[batchIndex]
@@ -828,37 +892,61 @@ do
 					NotifyUpdated(false)
 					local sortOrder = Enum and Enum.AuctionHouseSortOrder and Enum.AuctionHouseSortOrder.Price or 0
 					pcall(A.SearchForItemKeys, batch, { { sortOrder = sortOrder, reverseSort = false } })
+					local seq = scanSeq
 					C_Timer.After(5, function()
-						if ns.ahScanning and not HasPendingBatches() and not wantReplicate and not replicateTicker then
+						if seq ~= scanSeq then return end
+						if HasPendingBatches() or wantReplicate then
+							StepAutoScan()
+						elseif ns.ahScanning and not awaitingReplicate and not replicateTicker then
 							FinishScan(false, true)
 						end
 					end)
-					return   -- AUCTION_HOUSE_THROTTLED_SYSTEM_READY will advance to next batch or wantReplicate
+					return   -- AUCTION_HOUSE_THROTTLED_SYSTEM_READY or RecordBrowseList will advance to next batch or wantReplicate
 				end
 			end
 		end
 
 		if wantReplicate then
 			wantReplicate = false
+			-- If an earlier visit in this session already downloaded the replicate list (even if closed
+			-- while in flight) and closed before finishing, reuse the in-memory list immediately.
+			local lastRep = (not replicateConsumed and (lastReplicateListAt or lastReplicateReqAt)) or nil
+			if lastRep and GetTime and (GetTime() - lastRep) < REPLICATE_RETRY_QUIET
+				and A.GetNumReplicateItems and (A.GetNumReplicateItems() or 0) > 0 then
+				StartReplicateSlice()
+				return
+			end
 			if A.ReplicateItems and ahEvents then
+				local recentAttempt = lastReplicateReqAt and GetTime and (GetTime() - lastReplicateReqAt) < REPLICATE_RETRY_QUIET
+				if not recentAttempt then
+					replicateConsumed = false
+					if GetTime then lastReplicateReqAt = GetTime() end
+				end
+				awaitingReplicate = true
 				ns.ahScanning = true
 				ns.ahScanDoneUntil = nil
 				ns.ahScanProgress = 20
 				NotifyUpdated(false)
-				if Now then ns.db.ahLastReplicate = Now() end
+				-- Keep REPLICATE_ITEM_LIST_UPDATE registered for the entire AH visit until StartReplicateSlice
+				-- receives total > 0 (or AUCTION_HOUSE_CLOSED runs): downloading 166k+ auctions at peak hours
+				-- can take 10-25s+, so never unregister the event on a timeout while the AH stays open.
 				pcall(ahEvents.RegisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
 				pcall(A.ReplicateItems)
-				C_Timer.After(15, function()
-					if ns.ahScanning and not replicateTicker and not HasPendingBatches() then
-						pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
-						FinishScan(false, false)
+				local seq = scanSeq
+				C_Timer.After(recentAttempt and 4 or 25, function()
+					if seq ~= scanSeq then return end
+					if not replicateTicker and not HasPendingBatches() then
+						awaitingReplicate = false
+						if ns.ahScanning then
+							FinishScan(false, false)
+						end
 					end
 				end)
 				return
 			end
 		end
 
-		if ns.ahScanning and not replicateTicker then
+		if ns.ahScanning and not awaitingReplicate and not replicateTicker then
 			FinishScan(false, true)
 		end
 	end
@@ -866,7 +954,7 @@ do
 	local function StartAutoScan()
 		local A = C_AuctionHouse
 		if not (ahOpen and A and ns.db and ns.db.showAuctionPrices ~= false) then return end
-		if not (A.HasFavorites and A.HasFavorites()) and not UserStartedSearch()
+		if not (A.HasFavorites and A.HasFavorites()) and not userSearchedThisVisit
 			and A.SearchForItemKeys and A.MakeItemKey and ns.BuildTradeableItemKeys then
 			local keys = ns.BuildTradeableItemKeys(A.MakeItemKey)
 			if keys and #keys > 0 then
@@ -882,6 +970,24 @@ do
 			end
 		end
 		StepAutoScan()
+	end
+
+	function ns.IsAuctionHouseOpen()
+		return ahOpen and true or false
+	end
+
+	function ns.ForceAuctionScan()
+		if not ahOpen then
+			print("|cffd4a94eDave's Sack:|r Open the Auction House first, then type |cffffd200/sack scan|r.")
+			return
+		end
+		userSearchedThisVisit = false
+		scanSeq = scanSeq + 1
+		ClearPendingBatches()
+		StopReplicateTicker()
+		wantReplicate = true
+		print("|cffd4a94eDave's Sack:|r Requesting full Auction House deep scan… (Note: WoW's server limits full replication to once every ~15 minutes.)")
+		StartAutoScan()
 	end
 
 	local function TooltipStackCount(tooltip, itemID)
@@ -1040,17 +1146,23 @@ do
 		end
 		ahEvents:SetScript("OnEvent", function(_, event, arg1)
 			if event == "AUCTION_HOUSE_SHOW" then
+				scanSeq = scanSeq + 1
+				local seq = scanSeq
 				ahOpen = true
+				userSearchedThisVisit = false
 				ClearPendingBatches()
-				StopReplicateTicker(false)
-				wantReplicate = (ns.db and ns.db.showAuctionPrices ~= false)
-					and (not Now or (Now() - (ns.db.ahLastReplicate or 0)) >= REPLICATE_COOLDOWN)
-				C_Timer.After(0.25, StartAutoScan)
+				StopReplicateTicker()
+				wantReplicate = IsDeepScanDue()
+				C_Timer.After(0.25, function()
+					if seq == scanSeq then StartAutoScan() end
+				end)
 			elseif event == "AUCTION_HOUSE_CLOSED" then
+				scanSeq = scanSeq + 1
 				ahOpen = false
+				userSearchedThisVisit = false
 				wantReplicate = false
 				ClearPendingBatches()
-				StopReplicateTicker(true)
+				StopReplicateTicker()
 				if ns.ahScanning then
 					ns.ahScanning = false
 					NotifyUpdated(false)
@@ -1063,8 +1175,12 @@ do
 				local list = (C_AuctionHouse and C_AuctionHouse.GetBrowseResults and C_AuctionHouse.GetBrowseResults()) or arg1
 				RecordBrowseList(list)
 			elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
+				if ahOpen and not (ns.IsBaitInternalQuery and ns.IsBaitInternalQuery(arg1)) then
+					userSearchedThisVisit = true
+				end
 				RecordCommodityResults(arg1)
 			elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
+				if ahOpen then userSearchedThisVisit = true end
 				RecordItemResults(arg1)
 			elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
 				StartReplicateSlice()
@@ -1085,7 +1201,7 @@ end
 ---------------------------------------------------------------------------
 -- Saved settings
 ---------------------------------------------------------------------------
-local CATEGORY_VERSION = 4  -- bump when category numbering changes
+local CATEGORY_VERSION = 5  -- bump when category numbering changes (v5 inserted Ammo at index 2)
 local DEFAULTS = {
 	columns = 10, scale = 1, collapsed = {}, startFolded = {}, offGroups = {},   -- startFolded = "Start collapsed"
 	oneBag = false,                                  -- show all bag slots as one single uncategorised grid
@@ -1094,11 +1210,14 @@ local DEFAULTS = {
 	customSetItems = {},                             -- [itemID] = true (added to Item Sets) or false (removed from Item Sets)
 	showCurrencies = true, showFreeSpace = true,     -- Free Space: drop target for split stacks
 	showAuctionPrices = true,                        -- AH price tooltips + bag footer summary & cache timestamp
+	baitPct = 35,                                    -- Bait & Snipe default undercut % of real market floor
+	snipeMaxPct = 75,                                -- Bait & Snipe max buy % of real market floor
 	ahPrices = {},                                   -- [itemID] = lowest unit price in copper from Auction House
 	ahMarket = {},                                   -- [itemID] = market stats, spreads, supply & multi-scan history
 	ahRecipes = {},                                  -- [outputItemID] = learned recipe { prof, qty, reags }
 	autoPlaceSplit = true,                           -- split stacks go straight into a free slot
 	preferReagentBag = true,                         -- reagents dropped on the window go into the reagent bag first
+	preferAmmoBag = true,                            -- ammo dropped/split/sorted goes into an equipped quiver or ammo pouch first
 	confirmDestroy = true,                           -- ask before destroying an item dropped on the delete button
 	background = 0.8,                                -- window background darkness (0.8 = Blizzard's translucent dialog)
 	backgroundStyle = "dark",                        -- which Blizzard background shows at that darkness (UI.lua BACKGROUND_STYLES)
@@ -1120,7 +1239,17 @@ loader:SetScript("OnEvent", function(self, event, name)
 	for k, v in pairs(DEFAULTS) do
 		if DavesSackDB[k] == nil then DavesSackDB[k] = type(v) == "table" and {} or v end
 	end
-	if DavesSackDB.catVersion ~= CATEGORY_VERSION then
+	if DavesSackDB.catVersion == 4 then
+		for _, tbl in ipairs({ DavesSackDB.collapsed, DavesSackDB.startFolded }) do
+			if type(tbl) == "table" then
+				for i = 10, 2, -1 do
+					tbl[i + 1] = tbl[i]
+					tbl[i] = nil
+				end
+			end
+		end
+		DavesSackDB.catVersion = CATEGORY_VERSION
+	elseif DavesSackDB.catVersion ~= CATEGORY_VERSION then
 		DavesSackDB.collapsed, DavesSackDB.startFolded = {}, {}
 		DavesSackDB.catVersion = CATEGORY_VERSION
 	end
@@ -1143,6 +1272,19 @@ SlashCmdList.DAVESSACK = function(msg)
 	elseif cmd == "market" or cmd == "ah" or cmd == "trends" then
 		if ns.Open then ns.Open() end
 		if ns.ToggleMarket then ns.ToggleMarket() end
+	elseif cmd == "bait" or cmd == "snipe" or cmd == "counter" then
+		local sub = match(lower(msg or ""), "^%S+%s+(%S+)")
+		if sub == "test" or sub == "alert" then
+			if ns.PreviewSnipeAlert then ns.PreviewSnipeAlert() end
+		else
+			if ns.Open then ns.Open() end
+			if ns.OpenMarketTab then ns.OpenMarketTab(5) elseif ns.ToggleMarket then ns.ToggleMarket() end
+			if cmd == "counter" or sub == "counter" then
+				if ns.ToggleCounterSnipe then ns.ToggleCounterSnipe() end
+			end
+		end
+	elseif cmd == "scan" or cmd == "rescan" then
+		if ns.ForceAuctionScan then ns.ForceAuctionScan() end
 	elseif cmd == "lock" or cmd == "unlock" then
 		if ns.SetItemSetsLocked then ns.SetItemSetsLocked(cmd == "lock") end
 	else

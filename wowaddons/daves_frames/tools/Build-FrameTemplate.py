@@ -803,6 +803,8 @@ def print_drawable_order_report(w: int, h: int, rgb: bytearray):
 
 
 def check_layout_lua():
+    if not os.path.isfile(LAYOUT):
+        return
     text = open(LAYOUT, encoding="utf-8").read()
     wanted = {
         "w = 1024, h = 300": "w = 1024, h = 300",

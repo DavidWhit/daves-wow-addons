@@ -1,4 +1,2 @@
-.release/
-*.zip
 __pycache__/
 tools/template/preview/

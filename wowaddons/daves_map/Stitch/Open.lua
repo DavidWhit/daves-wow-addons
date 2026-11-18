@@ -9,6 +9,7 @@
 
 local ns = select(2, ...).OM
 if not ns then return end
+if ns.loadMs and ns.loadMs.start and debugprofilestop then ns.loadMs.files = debugprofilestop() - ns.loadMs.start end
 local mod = ns:GetModule("worldmap")
 if not mod then return end
 

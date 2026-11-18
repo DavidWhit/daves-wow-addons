@@ -3450,6 +3450,439 @@ public static class CastbarArt
 		return img;
 	}
 
+	// ================================================================ ENGINEERING: painted clockwork baseplate, dials, hands, 16-phase interlocking gears
+	static int _engDiscW, _engDiscH;
+	static double[] _engDiscR, _engDiscG, _engDiscB;
+	static void EnsureEngDiscs(string path)
+	{
+		if (_engDiscR != null) return;
+		using (var bmp = new System.Drawing.Bitmap(path))
+		{
+			_engDiscW = bmp.Width; _engDiscH = bmp.Height;
+			int n = _engDiscW * _engDiscH;
+			_engDiscR = new double[n]; _engDiscG = new double[n]; _engDiscB = new double[n];
+			var rect = new System.Drawing.Rectangle(0, 0, _engDiscW, _engDiscH);
+			var bd = bmp.LockBits(rect, System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+			byte[] raw = new byte[_engDiscW * _engDiscH * 4];
+			System.Runtime.InteropServices.Marshal.Copy(bd.Scan0, raw, 0, raw.Length);
+			bmp.UnlockBits(bd);
+			for (int i = 0; i < n; i++)
+			{
+				_engDiscB[i] = raw[i*4] / 255.0;
+				_engDiscG[i] = raw[i*4 + 1] / 255.0;
+				_engDiscR[i] = raw[i*4 + 2] / 255.0;
+			}
+		}
+	}
+	static void SampleBuf(double[] R, double[] G, double[] B, int sw, int sh, double sx, double sy, out double or, out double og, out double ob)
+	{
+		sx = Math.Max(0, Math.Min(sw - 1.001, sx));
+		sy = Math.Max(0, Math.Min(sh - 1.001, sy));
+		int x0 = (int)sx, y0 = (int)sy;
+		double fx = sx - x0, fy = sy - y0;
+		int i00 = y0*sw + x0, i10 = i00 + 1, i01 = i00 + sw, i11 = i01 + 1;
+		or = Lerp(Lerp(R[i00], R[i10], fx), Lerp(R[i01], R[i11], fx), fy);
+		og = Lerp(Lerp(G[i00], G[i10], fx), Lerp(G[i01], G[i11], fx), fy);
+		ob = Lerp(Lerp(B[i00], B[i10], fx), Lerp(B[i01], B[i11], fx), fy);
+	}
+	// Seamless 512x64 horological watchmaker baseplate built from two 1:1-proportioned interior bands of tools/ref_eng_bg.jpg
+	// cross-faded at both junctions so REPEAT tiling has zero seam and circles/screws/degree arcs keep round proportions.
+	public static Img EngBg(string path)
+	{
+		int sw, sh; double[] R, G, B;
+		using (var bmp = new System.Drawing.Bitmap(path))
+		{
+			sw = bmp.Width; sh = bmp.Height; int n = sw * sh;
+			R = new double[n]; G = new double[n]; B = new double[n];
+			var bd = bmp.LockBits(new System.Drawing.Rectangle(0, 0, sw, sh), System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+			byte[] raw = new byte[n * 4];
+			System.Runtime.InteropServices.Marshal.Copy(bd.Scan0, raw, 0, raw.Length);
+			bmp.UnlockBits(bd);
+			for (int i = 0; i < n; i++) { B[i] = raw[i*4]/255.0; G[i] = raw[i*4+1]/255.0; R[i] = raw[i*4+2]/255.0; }
+		}
+		var img = new Img(W, H);
+		double xStart = sw * 0.095, xSpan = sw * 0.825;   // clear of the curved pocket-watch outer wall at far left
+		double yA0 = sh * 0.12, yB0 = sh * 0.53, bandH = sh * 0.36;
+		double blend = 0.14;
+		for (int y = 0; y < H; y++)
+		{
+			double v = (y + 0.5) / H;
+			// keep top/bottom edge shading light (<= .16) so Flat looks flat and Bevel isn't doubled
+			double edge = 1.0 - 0.14 * Math.Pow(Math.Abs(v - 0.5) * 2.0, 2.4);
+			for (int x = 0; x < W; x++)
+			{
+				double u = (x + 0.5) / W;
+				double r, g, b;
+				if (u < 0.5)
+				{
+					double t = u * 2.0;   // 0..1 across Strip A
+					double sx = xStart + (blend * 0.5 + t * (1.0 - blend)) * xSpan;
+					SampleBuf(R, G, B, sw, sh, sx, yA0 + v * bandH, out r, out g, out b);
+					if (t < blend)
+					{
+						double k = 0.5 + 0.5 * Math.Cos(Math.PI * (t / blend));   // 1 at t=0 fading to 0 at t=blend: tail of Strip B
+						double r2, g2, b2;
+						double sxB = xStart + (1.0 - blend * 0.5 + t) * xSpan;
+						SampleBuf(R, G, B, sw, sh, sxB, yB0 + v * bandH, out r2, out g2, out b2);
+						r = Lerp(r, r2, k); g = Lerp(g, g2, k); b = Lerp(b, b2, k);
+					}
+				}
+				else
+				{
+					double t = (u - 0.5) * 2.0;   // 0..1 across Strip B
+					double sx = xStart + (blend * 0.5 + t * (1.0 - blend)) * xSpan;
+					SampleBuf(R, G, B, sw, sh, sx, yB0 + v * bandH, out r, out g, out b);
+					if (t < blend)
+					{
+						double k = 0.5 + 0.5 * Math.Cos(Math.PI * (t / blend));   // tail of Strip A
+						double r2, g2, b2;
+						double sxA = xStart + (1.0 - blend * 0.5 + t) * xSpan;
+						SampleBuf(R, G, B, sw, sh, sxA, yA0 + v * bandH, out r2, out g2, out b2);
+						r = Lerp(r, r2, k); g = Lerp(g, g2, k); b = Lerp(b, b2, k);
+					}
+				}
+				// moody oiled-workshop contrast so gleaming foreground gears and white text stand out clearly
+				r = Clamp(Math.Pow(r, 1.08) * 0.88 * edge);
+				g = Clamp(Math.Pow(g, 1.08) * 0.88 * edge);
+				b = Clamp(Math.Pow(b, 1.06) * 0.90 * edge);
+				img.Set(x, y, r, g, b, 1);
+			}
+		}
+		return img;
+	}
+	// 256x128 horological background accents:
+	//   cell 0 (0..128): antique Roman-numeral I-XII clock dial cut cleanly from tools/ref_eng_discs.jpg (disc 4)
+	//   cell 1 (128..256): etched Vernier degree ring, 60 minute ticks, crosshair arcs and coiled hairspring spiral
+	public static Img EngDials(string path)
+	{
+		EnsureEngDiscs(path);
+		var img = new Img(256, 128);
+		double dcx = 1029.5, dcy = 572.5, dR = 177.0;
+		for (int y = 0; y < 128; y++) for (int x = 0; x < 128; x++)
+		{
+			double ar = 0, ag = 0, ab = 0, aa = 0;
+			for (int sy = 0; sy < 2; sy++) for (int sx = 0; sx < 2; sx++)
+			{
+				double px = x + 0.25 + 0.5*sx - 64.0, py = y + 0.25 + 0.5*sy - 64.0;
+				double r = Math.Sqrt(px*px + py*py);
+				double cov = Smooth(60.6, 59.2, r);
+				if (cov <= 0) continue;
+				double sr, sg, sb;
+				SampleBuf(_engDiscR, _engDiscG, _engDiscB, _engDiscW, _engDiscH, dcx + px/60.0*dR, dcy + py/60.0*dR, out sr, out sg, out sb);
+				// subtle recessed bezel shadow around outer edge so it sits into the movement plate
+				double rim = Smooth(55.5, 60.0, r);
+				sr *= (1.0 - 0.30*rim); sg *= (1.0 - 0.30*rim); sb *= (1.0 - 0.30*rim);
+				ar += sr*cov; ag += sg*cov; ab += sb*cov; aa += cov;
+			}
+			if (aa > 0) img.Set(x, y, Clamp(ar/aa), Clamp(ag/aa), Clamp(ab/aa), Clamp(aa * 0.25));
+		}
+		// Cell 1: etched golden-brass Vernier degree scale + coiled balance hairspring (neutral/warm white, tinted in Lua)
+		for (int y = 0; y < 128; y++) for (int x = 0; x < 128; x++)
+		{
+			double dx = x + 0.5 - 64.0, dy = 64.0 - (y + 0.5);
+			double r = Math.Sqrt(dx*dx + dy*dy), ang = Math.Atan2(dy, dx);
+			if (ang < 0) ang += Math.PI * 2;
+			double a = 0;
+			// outer double degree rings
+			a = Math.Max(a, 0.85 * Smooth(1.1, 0.2, Math.Abs(r - 58.0)));
+			a = Math.Max(a, 0.55 * Smooth(0.95, 0.15, Math.Abs(r - 48.5)));
+			a = Math.Max(a, 0.45 * Smooth(0.9, 0.15, Math.Abs(r - 32.0)));
+			// 60 degree/minute ticks between r=48.5 and r=58
+			double t60 = ang / (2*Math.PI) * 60.0;
+			int ti = (int)Math.Round(t60);
+			double td = Math.Abs(t60 - ti) * (2*Math.PI / 60.0) * r;
+			bool major12 = (ti % 5) == 0;
+			double inR = major12 ? 48.5 : 53.0;
+			if (r >= inR - 0.5 && r <= 58.0) a = Math.Max(a, (major12 ? 0.9 : 0.55) * Smooth(major12 ? 1.05 : 0.8, 0.15, td));
+			// 4 cardinal astrolabe ticks inward to r=32
+			double t4 = ang / (Math.PI * 0.5);
+			double td4 = Math.Abs(t4 - Math.Round(t4)) * (Math.PI * 0.5) * r;
+			if (r >= 32.0 && r <= 48.5) a = Math.Max(a, 0.45 * Smooth(0.85, 0.15, td4));
+			// Archimedean balance hairspring spiral from r=6 to r=27 (3.5 turns)
+			if (r >= 5.0 && r <= 28.5)
+			{
+				double turns = 3.5, pitch = 22.0 / turns;
+				double u = (r - 6.0 - pitch * (ang / (2*Math.PI))) / pitch;
+				double sd = Math.Abs(u - Math.Round(u)) * pitch;
+				a = Math.Max(a, 0.72 * Smooth(0.95, 0.2, sd) * Smooth(5.0, 7.0, r) * Smooth(28.5, 26.0, r));
+			}
+			// center jewel ring
+			a = Math.Max(a, 0.8 * Smooth(1.1, 0.2, Math.Abs(r - 5.2)));
+			if (a > 0.002) img.Set(128 + x, y, 1.0, 0.88, 0.64, Clamp(a));
+		}
+		return img;
+	}
+	// 512x128 atlas of 16 pre-rendered Breguet clock-hand angles (8x2 cells of 64x64 px; nothing calls SetRotation per frame).
+	public static Img EngHands()
+	{
+		var img = new Img(512, 128);
+		for (int k = 0; k < 16; k++)
+		{
+			int ox = (k % 8) * 64, oy = (k / 8) * 64;
+			double th = k * (2.0 * Math.PI / 16.0);   // x right, y up (0 = +x, 4 = +y/12 o'clock)
+			double ux = Math.Cos(th), uy = Math.Sin(th);
+			double px = -uy, py = ux;
+			double loopC = 17.5, loopR = 2.9;
+			for (int y = 0; y < 64; y++) for (int x = 0; x < 64; x++)
+			{
+				double dx = x + 0.5 - 32.0, dy = 32.0 - (y + 0.5);
+				double s = dx*ux + dy*uy, p = Math.Abs(dx*px + dy*py);
+				double r = Math.Sqrt(dx*dx + dy*dy);
+				// shadow offset (+0.8, -1.0)
+				double sdx = dx - 0.8, sdy = dy + 1.0;
+				double ss = sdx*ux + sdy*uy, sp = Math.Abs(sdx*px + sdy*py), sr = Math.Sqrt(sdx*sdx + sdy*sdy);
+				double d = 1e9, sd = 1e9;
+				// tapered shaft from -6.5 (tail) to +27.5 (tip), interrupted by open Breguet moon eyelet
+				if (s >= -6.5 && s <= 27.5)
+				{
+					double hw = s < 0 ? Lerp(1.5, 1.15, (s + 6.5)/6.5) : Lerp(1.35, 0.42, s/27.5);
+					if (Math.Abs(s - loopC) > loopR - 0.5) d = Math.Min(d, p - hw);
+				}
+				if (ss >= -6.5 && ss <= 27.5)
+				{
+					double hw = ss < 0 ? Lerp(1.5, 1.15, (ss + 6.5)/6.5) : Lerp(1.35, 0.42, ss/27.5);
+					if (Math.Abs(ss - loopC) > loopR - 0.5) sd = Math.Min(sd, sp - hw);
+				}
+				// Breguet moon eyelet ring at loopC + tail counterweight ring at -6.8 + center boss
+				double dl = Math.Sqrt((s - loopC)*(s - loopC) + p*p);
+				d = Math.Min(d, Math.Abs(dl - loopR) - 0.9);
+				double sdl = Math.Sqrt((ss - loopC)*(ss - loopC) + sp*sp);
+				sd = Math.Min(sd, Math.Abs(sdl - loopR) - 0.9);
+				double dt = Math.Sqrt((s + 7.2)*(s + 7.2) + p*p) - 1.9;
+				d = Math.Min(d, dt);
+				sd = Math.Min(sd, Math.Sqrt((ss + 7.2)*(ss + 7.2) + sp*sp) - 1.9);
+				d = Math.Min(d, r - 2.6);
+				sd = Math.Min(sd, sr - 2.6);
+
+				double bodyA = Cov(d), shadA = 0.45 * Smooth(1.2, -0.5, sd);
+				double outA = bodyA + shadA * (1.0 - bodyA);
+				if (outA <= 0.002) continue;
+				// lit brass pointer with top-left glint
+				double lit = 0.78 + 0.22 * Clamp((-dx*0.5 + dy*0.85) / (Math.Max(1.0, r)));
+				double cr = 1.0 * lit, cg = 0.84 * lit, cb = 0.46 * lit;
+				if (r < 1.3) { cr = 0.95; cg = 0.72; cb = 0.34; }
+				img.Set(ox + x, oy + y, (cr*bodyA) / outA, (cg*bodyA) / outA, (cb*bodyA) / outA, Clamp(outA));
+			}
+		}
+		return img;
+	}
+	// Signed distance (in circular-module units; negative = inside gear metal) for each of the 4 interlocking gear rows:
+	//   row 0: Z=20, S=5  giant spoked Gnomish brass master wheel (cell radius = 11.40 modules)
+	//   row 1: Z=16, S=4  large forged Dwarven copper-bronze cross-spoke gear (cell radius = 9.40 modules)
+	//   row 2: Z=12, S=6  medium tempered blued-steel 6-hole spur gear (cell radius = 7.40 modules)
+	//   row 3: Z=8,  S=4  small high-speed gilded pinion gear (cell radius = 5.40 modules)
+	static readonly int[] ENG_Z = { 20, 16, 12, 8 };
+	static readonly int[] ENG_S = { 5, 4, 6, 4 };
+	static double EngGearSd(int row, double mx, double my, double theta, out double rOut, out double angOut)
+	{
+		int Z = ENG_Z[row], S = ENG_S[row];
+		double r = Math.Sqrt(mx*mx + my*my);
+		double ang = Math.Atan2(my, mx);
+		rOut = r; angOut = ang;
+		double rp = Z * 0.5, rRoot = rp - 0.84, rTip = rp + 0.74;
+		// crisp flat-land involute-trapezoid tooth profile
+		double w = Math.Cos(Z * (ang - theta));
+		double tProf = Clamp(0.5 + 1.25 * w);
+		double rOuter = rRoot + (rTip - rRoot) * tProf;
+		double d = (r - rOuter) * 0.80;   // outer toothed silhouette
+
+		double sec = 2.0 * Math.PI / S;
+		double rel = ang - theta;
+		rel = rel - Math.Floor(rel / sec + 0.5) * sec;   // [-sec/2 .. +sec/2] around nearest spoke/feature
+
+		if (row == 0 || row == 1)
+		{
+			// spoked wheel: solid outer rim + S radial spokes + solid central hub; windows between spokes are cut out
+			double rRim = rRoot - (row == 0 ? 1.62 : 1.55);
+			double rHub = row == 0 ? 2.55 : 2.30;
+			double spokeHw = row == 0 ? Lerp(0.62, 0.46, Clamp((r - rHub) / (rRim - rHub))) : 0.68;
+			double dRing = Math.Min(r - rHub, rRim - r);          // negative inside hub or inside outer rim
+			double dSpoke = r * Math.Abs(Math.Sin(rel)) - spokeHw; // negative inside spoke
+			// smooth fillet where spokes join hub and rim
+			double a = Math.Max(0, 0.35 - dRing), b = Math.Max(0, 0.35 - dSpoke);
+			double dInterior = Math.Min(dRing, dSpoke) - 0.35 * Math.Sqrt(a*a + b*b) * 0.7;
+			d = Math.Max(d, dInterior);
+		}
+		else if (row == 2)
+		{
+			// 6-hole machined spur gear: 6 separate circular lightening holes at r = 3.05, hole radius = 0.86
+			double rx = r * Math.Cos(rel), ry = r * Math.Sin(rel);
+			double dHole = Math.Sqrt((rx - 3.05)*(rx - 3.05) + ry*ry) - 0.86;
+			d = Math.Max(d, -dHole);
+		}
+		return d;
+	}
+	public const int ENG_COLS = 16, ENG_ROWS = 4, ENG_CELL = 128;
+	public static Img EngGears(string path)
+	{
+		EnsureEngDiscs(path);
+		// Disc centers and safe interior radii in tools/ref_eng_discs.jpg:
+		//   0: TL brass (342.5, 190.0, 170), 1: TR copper (1030.5, 190.0, 170), 2: BL blued steel (343.5, 575.5, 168)
+		double[] dcx = { 342.5, 1030.5, 343.5 }, dcy = { 190.0, 190.0, 575.5 }, dR = { 170.0, 170.0, 168.0 };
+		// Radial average per disc (64 bins) so we can separate stationary world-space sheen from revolving grain/dimples
+		double[][] radR = new double[3][], radG = new double[3][], radB = new double[3][];
+		for (int d = 0; d < 3; d++)
+		{
+			radR[d] = new double[64]; radG[d] = new double[64]; radB[d] = new double[64];
+			for (int bi = 0; bi < 64; bi++)
+			{
+				double rr = (bi + 0.5) / 64.0 * dR[d], sr = 0, sg = 0, sb = 0;
+				for (int ai = 0; ai < 48; ai++)
+				{
+					double a = ai * (2.0 * Math.PI / 48.0), cr, cg, cb;
+					SampleBuf(_engDiscR, _engDiscG, _engDiscB, _engDiscW, _engDiscH, dcx[d] + Math.Cos(a)*rr, dcy[d] + Math.Sin(a)*rr, out cr, out cg, out cb);
+					sr += cr; sg += cg; sb += cb;
+				}
+				radR[d][bi] = sr / 48.0; radG[d][bi] = sg / 48.0; radB[d][bi] = sb / 48.0;
+			}
+		}
+
+		var img = new Img(ENG_COLS * ENG_CELL, ENG_ROWS * ENG_CELL);
+		for (int row = 0; row < ENG_ROWS; row++)
+		{
+			int Z = ENG_Z[row], S = ENG_S[row];
+			double rCell = Z * 0.5 + 1.40;            // cell half-size in circular-module units
+			double pxPerMod = (ENG_CELL * 0.5) / rCell;
+			double rp = Z * 0.5, rRoot = rp - 0.84, rTip = rp + 0.74;
+			double sec = 2.0 * Math.PI / S;
+			int discIdx = row == 0 ? 0 : row == 1 ? 1 : row == 2 ? 2 : 0;
+
+			for (int col = 0; col < ENG_COLS; col++)
+			{
+				double theta = col * sec / ENG_COLS;
+				double cosT = Math.Cos(-theta), sinT = Math.Sin(-theta);
+				int ox = col * ENG_CELL, oy = row * ENG_CELL;
+
+				for (int y = 0; y < ENG_CELL; y++) for (int x = 0; x < ENG_CELL; x++)
+				{
+					double mx = (x + 0.5 - ENG_CELL * 0.5) / pxPerMod;
+					double my = (ENG_CELL * 0.5 - (y + 0.5)) / pxPerMod;
+					double r, ang;
+					double sd = EngGearSd(row, mx, my, theta, out r, out ang);
+					// soft drop shadow offset (+0.20, -0.26) modules (down-right on screen)
+					double sr0, sa0;
+					double sdShad = EngGearSd(row, mx - 0.20, my + 0.26, theta, out sr0, out sa0);
+					double shadA = 0.44 * Smooth(0.32, -0.18, sdShad);
+					double bodyA = Clamp(0.5 - sd * pxPerMod);
+					if (bodyA <= 0.002 && shadA <= 0.002) continue;
+
+					double cr = 0, cg = 0, cb = 0;
+					if (bodyA > 0.002)
+					{
+						// 1. Sample painted Warcraft metal disc in stationary world space (anisotropic sheen stays top-left!)
+						double uWorldX = Clamp((mx / rTip) * 0.5 + 0.5) * 2.0 - 1.0;
+						double uWorldY = Clamp((-my / rTip) * 0.5 + 0.5) * 2.0 - 1.0;
+						double wr, wg, wb;
+						SampleBuf(_engDiscR, _engDiscG, _engDiscB, _engDiscW, _engDiscH, dcx[discIdx] + uWorldX * dR[discIdx], dcy[discIdx] + uWorldY * dR[discIdx], out wr, out wg, out wb);
+						if (row == 3)   // small pinion: warm gilded brass-bronze blend (disc 0 + disc 1)
+						{
+							double wr2, wg2, wb2;
+							SampleBuf(_engDiscR, _engDiscG, _engDiscB, _engDiscW, _engDiscH, dcx[1] + uWorldX * dR[1], dcy[1] + uWorldY * dR[1], out wr2, out wg2, out wb2);
+							wr = Lerp(wr, wr2, 0.35); wg = Lerp(wg, wg2, 0.35); wb = Lerp(wb, wb2, 0.35);
+						}
+						// 2. Revolving surface grain/hammered dimples sampled at rotated coordinates (mxRot, myRot)
+						double mxRot = mx * cosT - my * sinT, myRot = mx * sinT + my * cosT;
+						double uRotX = Clamp((mxRot / rTip) * 0.5 + 0.5) * 2.0 - 1.0;
+						double uRotY = Clamp((-myRot / rTip) * 0.5 + 0.5) * 2.0 - 1.0;
+						double rrNorm = Math.Min(0.999, Math.Sqrt(uRotX*uRotX + uRotY*uRotY));
+						int bi = (int)(rrNorm * 63);
+						double tr, tg, tb;
+						SampleBuf(_engDiscR, _engDiscG, _engDiscB, _engDiscW, _engDiscH, dcx[discIdx] + uRotX * dR[discIdx], dcy[discIdx] + uRotY * dR[discIdx], out tr, out tg, out tb);
+						cr = Clamp(wr + (tr - radR[discIdx][bi]) * 0.48);
+						cg = Clamp(wg + (tg - radG[discIdx][bi]) * 0.48);
+						cb = Clamp(wb + (tb - radB[discIdx][bi]) * 0.48);
+
+						// 3. Recessed web & decorative horological grooves/rivets
+						if (row == 3 && r > 1.15 && r < 2.35)
+						{
+							// recessed dished collar + 4 revolving watchmaker dimples
+							cr *= 0.80; cg *= 0.80; cb *= 0.80;
+							double rel = ang - theta; rel -= Math.Floor(rel / sec + 0.5) * sec;
+							double dxD = r * Math.Cos(rel) - 1.76, dyD = r * Math.Sin(rel);
+							double dDim = Math.Sqrt(dxD*dxD + dyD*dyD);
+							if (dDim < 0.36) { double kd = Smooth(0.36, 0.12, dDim); cr *= (1 - 0.38*kd); cg *= (1 - 0.38*kd); cb *= (1 - 0.38*kd); }
+						}
+						else if (row == 2 && r > 1.85 && r < rRoot - 0.85)
+						{
+							cr *= 0.90; cg *= 0.90; cb *= 0.92;   // subtle stepped web around the 6 holes
+						}
+						else if (row == 1)
+						{
+							// 4 revolving hub rivets on the copper cross-spoke gear
+							double rel = ang - theta; rel -= Math.Floor(rel / sec + 0.5) * sec;
+							double dxR = r * Math.Cos(rel) - 1.65, dyR = r * Math.Sin(rel);
+							double dRiv = Math.Sqrt(dxR*dxR + dyR*dyR);
+							if (dRiv < 0.32)
+							{
+								double kr = Smooth(0.32, 0.08, dRiv);
+								double rl = 1.0 + 0.28 * ((-mx/Math.Max(0.1,r))*0.5 + (my/Math.Max(0.1,r))*0.8);
+								cr = Lerp(cr, 0.88*rl, kr); cg = Lerp(cg, 0.66*rl, kr); cb = Lerp(cb, 0.38*rl, kr);
+							}
+						}
+						// Engraved concentric pitch/rim groove just inside root circle
+						double grooveR = rRoot - 0.52;
+						double gDist = Math.Abs(r - grooveR);
+						if (gDist < 0.22) { double kg = Smooth(0.22, 0.03, gDist) * 0.28; cr *= (1 - kg); cg *= (1 - kg); cb *= (1 - kg); }
+
+						// 4. World-space 3D bevel normal from finite-difference SDF gradient (top-left UI light)
+						double eps = 0.14, r1, a1;
+						double gx = EngGearSd(row, mx + eps, my, theta, out r1, out a1) - EngGearSd(row, mx - eps, my, theta, out r1, out a1);
+						double gy = EngGearSd(row, mx, my + eps, theta, out r1, out a1) - EngGearSd(row, mx, my - eps, theta, out r1, out a1);
+						double gl = Math.Sqrt(gx*gx + gy*gy);
+						double bevelZone = Smooth(-0.58, -0.04, sd);
+						if (gl > 1e-4 && bevelZone > 0)
+						{
+							double nx = gx / gl, ny = gy / gl;
+							double ndl = nx * (-0.52) + ny * 0.85;   // > 0 on top-left edges, < 0 on bottom-right edges
+							if (ndl > 0)
+							{
+								double hi = ndl * bevelZone * 0.42;
+								cr = cr + (1.0 - cr) * hi; cg = cg + (0.95 - cg) * hi; cb = cb + (0.78 - cb) * hi;
+							}
+							else
+							{
+								double shd = (-ndl) * bevelZone * 0.46;
+								cr *= (1.0 - shd); cg *= (1.0 - shd); cb *= (1.0 - shd);
+							}
+						}
+
+						// 5. Central axle collar & jewel bearing (symmetric under all rotations; world-space specular pinpoint!)
+						if (r < 1.12)
+						{
+							double kCol = Smooth(1.12, 0.94, r);
+							double radN = (-mx * 0.5 + my * 0.85) / Math.Max(0.25, r);
+							double colLit = 0.85 + 0.25 * Clamp(radN);
+							cr = Lerp(cr, 0.90 * colLit, kCol); cg = Lerp(cg, 0.72 * colLit, kCol); cb = Lerp(cb, 0.36 * colLit, kCol);
+							if (r < 0.66)
+							{
+								double kJew = Smooth(0.66, 0.50, r);
+								double spec = Math.Exp(-((mx + 0.18)*(mx + 0.18) + (my - 0.20)*(my - 0.20)) / 0.045);
+								if (row == 0)   // crimson horological ruby bearing
+								{
+									double jr = 0.78 + 0.22*spec, jg = 0.10 + 0.65*spec, jb = 0.24 + 0.65*spec;
+									cr = Lerp(cr, jr, kJew); cg = Lerp(cg, jg, kJew); cb = Lerp(cb, jb, kJew);
+								}
+								else if (row == 2)   // polished brass center bushing + dark steel bore
+								{
+									double jr = 0.26 + 0.55*spec, jg = 0.30 + 0.55*spec, jb = 0.38 + 0.55*spec;
+									cr = Lerp(cr, jr, kJew); cg = Lerp(cg, jg, kJew); cb = Lerp(cb, jb, kJew);
+								}
+								else   // gleaming domed steel/gold pivot pin
+								{
+									double jr = 0.66 + 0.34*spec, jg = 0.64 + 0.34*spec, jb = 0.60 + 0.34*spec;
+									cr = Lerp(cr, jr, kJew); cg = Lerp(cg, jg, kJew); cb = Lerp(cb, jb, kJew);
+								}
+							}
+						}
+					}
+					double outA = bodyA + shadA * (1.0 - bodyA);
+					img.Set(ox + x, oy + y, Clamp((cr * bodyA) / outA), Clamp((cg * bodyA) / outA), Clamp((cb * bodyA) / outA), Clamp(outA));
+				}
+			}
+		}
+		return img;
+	}
+
 	// ================================================================ preview composite
 	static void Add(double[] dst, double r, double g, double b) { dst[0] += r; dst[1] += g; dst[2] += b; }
 	public static void Preview(string dir, string png)
@@ -3571,6 +4004,10 @@ $jobs = [ordered]@{
 	'fa_blot'    = { [CastbarArt]::FaBlots() }
 	'fa_fold'    = { [CastbarArt]::FaFold() };      'fa_roll'     = { [CastbarArt]::FaRoll() }
 	'fa_drop'    = { [CastbarArt]::FaDrop() };      'fa_round'    = { [CastbarArt]::FaRound() }
+	'eng_bg'     = { [CastbarArt]::EngBg((Join-Path $PSScriptRoot 'ref_eng_bg.jpg')) }
+	'eng_dials'  = { [CastbarArt]::EngDials((Join-Path $PSScriptRoot 'ref_eng_discs.jpg')) }
+	'eng_hands'  = { [CastbarArt]::EngHands() }
+	'eng_gears'  = { [CastbarArt]::EngGears((Join-Path $PSScriptRoot 'ref_eng_discs.jpg')) }
 	'p_flame'    = { [CastbarArt]::AlchFlame() };   'p_valve'     = { [CastbarArt]::AlchValve() }
 	'p_chip'     = { [CastbarArt]::Chip() };        'p_flower'    = { [CastbarArt]::Flower() }
 	'fire_base'  = { [CastbarArt]::FireBase() };    'fire_flow'   = { [CastbarArt]::FireFlow() }

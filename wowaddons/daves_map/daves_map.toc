@@ -1,21 +1,22 @@
 ## Interface: 16001
 ## Title: |cffd4a94eDave's|r Map
-## Notes: Map Genie's Forever points of interest, quests and travel as a world map layer with search, filters and linked quest chains, on a seamless world map (OpenMap's) when daves_map_textures is installed.
+## Notes: QuestieDB Forever quests, objectives, turn-ins, quest chains, townsfolk and rares with search, filters and zone quest tracking, on OpenMap's seamless world map and dungeon maps.
 ## Author: davidwhit5
-## Version: 0.5.7
+## Version: 0.6.0
+## OptionalDeps: daves_map_data, daves_map_textures
 ## SavedVariables: daves_mapDB
 ## SavedVariablesPerCharacter: daves_mapCharDB
 ## IconTexture: Interface\Icons\INV_Misc_Map_01
 ## AddonCompartmentFunc: daves_map_OnAddonCompartmentClick
-## OptionalDeps: daves_map_data, daves_map_textures
 
 Core.lua
 
-# The seamless world map: OpenMap's code (MIT, Stitch\LICENSE-OpenMap.txt); its art is daves_map_textures
+# The seamless world map & dungeon maps: OpenMap's code (MIT, Stitch\LICENSE-OpenMap.txt); art & tables in daves_map_textures
 Stitch\Base.lua
 Stitch\Stitch.lua
 Stitch\WorldMap.lua
 Stitch\Close.lua
+Stitch\Dungeons.lua
 Stitch\Combat.lua
 Stitch\Open.lua
 

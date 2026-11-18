@@ -1,9 +1,9 @@
 -- daves_map / Core.lua
 -- Startup, saved settings, events and the slash command.
 --
--- The addon draws Map Genie's WoW Forever pins (Data.lua, built by tools/Update-MapData.py) as a layer of its own on
--- Blizzard's world map, with a search and filter panel beside it (Layer.lua, Panel.lua). Map Genie's positions are
--- pixels on their own map image; Calibrate.lua turns them into game map positions in game, from the flight points.
+-- The addon draws QuestieDB Forever's pins, objectives, turn-ins and quest chains (companion addon daves_map_data,
+-- built by tools/Update-MapData.py) as a taint-free layer on Blizzard's world map, with a search and filter panel
+-- beside it (Layer.lua, Panel.lua) and OpenMap's seamless world & dungeon maps (Stitch\ + companion daves_map_textures).
 
 local ADDON, ns = ...
 
@@ -137,9 +137,16 @@ function ns:ADDON_LOADED(name)
 	daves_mapCharDB = type(daves_mapCharDB) == "table" and daves_mapCharDB or {}
 	if ns.InitStitch then ns.InitStitch(daves_mapDB, daves_mapCharDB) end   -- the seamless map's settings (Stitch\Base.lua)
 
-	-- The map data lives in the companion addon daves_map_data (generated on this machine, not in git). It is our
-	-- ## OptionalDeps, so when it's installed and enabled it has loaded by now and left one global behind.
 	if type(DAVES_MAP_DATA) == "table" and DAVES_MAP_DATA.x then ns.DATA = DAVES_MAP_DATA end
+
+	-- Seed default-off categories cleanly on QuestieDB schema v2 (wiping stale legacy Map Genie category IDs).
+	if ns.DATA and daves_mapDB.dataSchema ~= 2 then
+		wipe(daves_mapDB.hidden)
+		for _, c in ipairs(ns.DATA.cats or {}) do
+			if c.defaultOff then daves_mapDB.hidden[c.id] = true end
+		end
+		daves_mapDB.dataSchema = 2
+	end
 
 	ns:InitOptions()
 	-- the world map is a Blizzard add-on of its own: it may load before us or after
@@ -155,22 +162,12 @@ function ns:PLAYER_LOGIN()
 	local _, class = UnitClass("player")
 	if class and not issecretvalue(class) then ns.playerClass = class end
 	ns.InitTracker()
-	if ns.StartStitch then ns.StartStitch() end   -- the seamless map, with daves_map_textures (Stitch\Base.lua)
+	if ns.StartStitch then ns.StartStitch() end   -- the seamless map (Stitch\Base.lua)
 	local D = ns.DATA
 	if D then
 		ns.Print(("v%s loaded: %d map pins from %s (%s). /dmap for commands."):format(ns.VERSION, #D.x, D.source.map, D.source.fetched))
 	else
-		-- installed but not loaded (disabled, out of date, ...), or not on this machine at all?
-		local exists = C_AddOns and C_AddOns.DoesAddOnExist and C_AddOns.DoesAddOnExist("daves_map_data")
-		if exists then
-			-- why it didn't load, in the game's own words (the AddOns list shows the same: ADDON_<reason>)
-			local ok, _, _, _, _, reason = pcall(C_AddOns.GetAddOnInfo, "daves_map_data")
-			local why = ok and type(reason) == "string" and reason ~= "" and (_G["ADDON_" .. reason] or reason) or nil
-			ns.Print(("v%s: %s (Dave's Map (data) is installed but not loaded%s: check it in the AddOns list.)"):format(
-				ns.VERSION, ns.NO_DATA, why and (", " .. why) or ""))
-		else
-			ns.Print(("v%s: %s (daves_map_data.zip: unzip it into Interface\\AddOns and restart the game.)"):format(ns.VERSION, ns.NO_DATA))
-		end
+		ns.Print(("v%s loaded (no daves_map_data — %s)"):format(ns.VERSION, ns.NO_DATA))
 	end
 end
 
@@ -201,7 +198,7 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 	elseif msg == "seamless" then
 		local mod = ns.OM and ns.OM:GetModule("worldmap")
 		if not mod then
-			ns.Print("no seamless map: daves_map_textures isn't loaded (tools\\Update-MapTextures.py builds it).")
+			ns.Print("no daves_map_textures: the seamless map isn't installed.")
 		elseif mod.padWaits then
 			ns.Print(mod.PadOffText())
 		elseif not mod.enabled then

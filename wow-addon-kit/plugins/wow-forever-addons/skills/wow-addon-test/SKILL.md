@@ -79,7 +79,9 @@ What each rule means and how to fix it:
 | `slash-handler` | error | Assign `SlashCmdList["NAME"]` for every `SLASH_NAME1` |
 | `savedvariables-unused` | warn | Use it, or drop it from the TOC |
 | `load-version` | warn | Read `## Version` via `GetAddOnMetadata` and print it on `PLAYER_LOGIN` |
-| `local-limit` | warn | File chunk or function reached >=175 active locals (Lua's hard compile limit is 200). Move locals into a table or split files |
+| `local-limit` | error/warn | Error: >200 active locals in a file chunk or function (Lua 5.1 refuses to compile the file). Warn: >=175 active locals. Move locals into a table, wrap subsystems in `do ... end`, or split files |
+| `upvalue-limit` | error/warn | Error: >60 upvalues captured by a function (Lua 5.1 refuses to compile the file: `has more than 60 upvalues`). Warn: >=55 upvalues. Split helper functions out or group state into tables |
+| `out-of-scope-local` | error | An identifier declared `local` in another `do ... end` block or function in the same file is referenced outside its lexical scope (resolving to a `nil` global). Expose it on `ns.*` or hoist the `local` declaration |
 | `editmode-dialog` | error/warn | Error: the addon joins Edit Mode but has no `EditModeDialog.lua`. Copy the kit's `templates/editmode/EditModeDialog.lua` in, list it after `Core.lua`. Warn: the copy was edited. Restore the kit's version and make the change in the kit instead |
 | `editmode-snap` | error/warn | Error: hand-rolled grid snapping (`gridSpacing`, `IsSnapEnabled`, `EditModeMagnetismManager`). Warn: a frame dragged without the kit's snapping. Use `ns.EditMode.Attach`, or `ns.EditMode.SnapRect` / `SnapEdge` in the drag's OnUpdate, so it snaps like Blizzard's frames |
 | `editmode-ui` | error | A hand-built panel, slider or checkbox in an Edit Mode addon. Rebuild it with `ns.EditMode.CreateDialog` (see the **wow-forever-api** skill). For a window that isn't Edit Mode settings (a bag window, say), end the line with `-- editmode-ui: ok` |

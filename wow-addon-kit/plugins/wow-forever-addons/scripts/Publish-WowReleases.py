@@ -18,7 +18,7 @@ ADDONS_ROOT = os.path.join(REPO_ROOT, "wowaddons")
 
 EXCLUDE_DIRS = {".git", ".vscode", "tests", "tools", "__pycache__", ".release", "guides"}
 EXCLUDE_FILES = [".luacheckrc", ".pkgmeta", ".gitignore", "README.md", "NOTES.md", "*.zip", "*.bak"]
-SKIP_ADDONS = {"ForeverLoot", "daves_map_data", "daves_map_textures"}
+SKIP_ADDONS = {"ForeverLoot"}
 ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
 
 
@@ -91,6 +91,7 @@ def build_releases_readme(entries: list[dict[str, str]], main_sha: str) -> str:
         "",
         "1. Click any `.zip` below and download it.",
         "2. Extract it into `World of Warcraft\\_forever_\\Interface\\AddOns\\` so the folder sits at `Interface\\AddOns\\<addon_name>\\`.",
+        "   - For **Dave's Map**, extract `daves_map.zip` together with its companion packages `daves_map_data.zip` (QuestieDB Forever pins) and `daves_map_textures.zip` (OpenMap seamless world & dungeon art).",
         "3. Fully restart the WoW: Forever client (or `/reload` when updating Lua-only changes).",
         "",
         "## Addons",
@@ -102,11 +103,7 @@ def build_releases_readme(entries: list[dict[str, str]], main_sha: str) -> str:
         lines.append(
             f"| **{e['title']}** (`{e['name']}`) | `v{e['version']}` | [`{e['zip_name']}`]({e['zip_name']}) | {e['size']} | {e['notes']} |"
         )
-    lines.extend([
-        "",
-        "> **Note for `daves_map`:** Map Genie pin data (`daves_map_data.zip`) and seamless map art (`daves_map_textures.zip`) are distributed separately.",
-        "",
-    ])
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -143,7 +140,7 @@ def main(argv: list[str]) -> None:
 
     if args["WhatIf"]:
         for name, _, meta in addons:
-            ver = meta.get("Version", "dev")
+            ver = meta.get("Version", "dev").lstrip("vV") or "dev"
             wowkit.host(f"[WhatIf] Would package {name}.zip (v{ver})")
         wowkit.host(f"[WhatIf] Would update orphan branch '{branch}' from HEAD {main_sha}" + (f" and push to {remote}" if args["Push"] else ""))
         return
@@ -160,7 +157,7 @@ def main(argv: list[str]) -> None:
             zip_name = f"{name}.zip"
             zip_path = os.path.join(work_dir, zip_name)
             count, size_bytes = build_addon_zip(name, addon_dir, zip_path)
-            ver = meta.get("Version", "dev")
+            ver = meta.get("Version", "dev").lstrip("vV") or "dev"
             size_str = format_size(size_bytes)
             wowkit.host(f"Packed {zip_name} (v{ver}, {count} files, {size_str})")
             entries.append({

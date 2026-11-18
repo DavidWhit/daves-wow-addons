@@ -19,7 +19,7 @@ function ns:InitOptions()
 
 	local enabled = Settings.RegisterAddOnSetting(category, ADDON .. "_enabled", "enabled", ns.db,
 		Settings.VarType.Boolean, "Show the map layer", true)
-	Settings.CreateCheckbox(category, enabled, "Draw Map Genie's pins on the world map (/dmap toggle).")
+	Settings.CreateCheckbox(category, enabled, "Draw QuestieDB Forever pins, objectives and quest chains on the world map (/dmap toggle).")
 
 	local panelOpen = Settings.RegisterAddOnSetting(category, ADDON .. "_panelOpen", "panelOpen", ns.db,
 		Settings.VarType.Boolean, "Show the search panel", true)
@@ -53,13 +53,21 @@ function ns:InitOptions()
 		if ns.Refresh then ns.Refresh() end
 	end)
 
-	-- the seamless map (Stitch\): only with the drop-in daves_map_textures; its settings are OpenMap's own keys
+	-- the seamless map (Stitch\): its settings are OpenMap's own keys
 	local stitch = ns.OM and ns.OM:GetModule("worldmap")
 	local seamless
 	if stitch and stitch.db and not ns.OpenMapOn() then   -- (with OpenMap itself on, ours stays off: no switches for it)
 		seamless = Settings.RegisterAddOnSetting(category, ADDON .. "_seamless", "enabled", stitch.db,
 			Settings.VarType.Boolean, "Seamless world map", true)
 		Settings.CreateCheckbox(category, seamless, "Every zone stitched into one map (OpenMap's): the wheel zooms from the whole world to street level, out of one zone into the next. Takes a /reload.")
+		local dungeons = Settings.RegisterAddOnSetting(category, ADDON .. "_dungeonMaps", "dungeonMaps", stitch.db,
+			Settings.VarType.Boolean, "Dungeon maps", true)
+		Settings.CreateCheckbox(category, dungeons, "OpenMap's dungeon and raid maps (floors, boss pins and entrance portals): opening the map inside a dungeon or clicking an entrance opens its map.")
+		dungeons:SetValueChangedCallback(function(_, v)
+			stitch.db.icons = v
+			if stitch.SetDungeonMaps then stitch.SetDungeonMaps(v) end
+			if ns.Refresh then ns.Refresh() end
+		end)
 		local follow = Settings.RegisterAddOnSetting(category, ADDON .. "_autoSwitch", "autoSwitch", stitch.db,
 			Settings.VarType.Boolean, "Load the zone in view", true)
 		Settings.CreateCheckbox(category, follow, "Once the seamless map stops moving, the zone you're looking at loads underneath: its quest areas, coordinates and name.")

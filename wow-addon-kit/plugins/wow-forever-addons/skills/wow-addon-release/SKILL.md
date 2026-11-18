@@ -25,7 +25,7 @@ Don't release with errors. Warnings need either a fix or a stated reason. If cha
 
 ## 3. Publish all `<addon>.zip` packages to the `releases` branch
 
-Whenever committing and pushing to `main`, update the orphan `releases` branch with fresh `<addon>.zip` archives for all 7 `daves_*` addons (`daves_balls`, `daves_castbar`, `daves_chat`, `daves_frames`, `daves_map`, `daves_outofmyway`, `daves_sack`):
+Whenever committing and pushing to `main`, update the orphan `releases` branch with fresh `<addon>.zip` archives for all 8 tracked `daves_*` addons (`daves_balls`, `daves_castbar`, `daves_chat`, `daves_map`, `daves_map_data`, `daves_map_textures`, `daves_outofmyway`, `daves_sack`):
 
 ```powershell
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Publish-WowReleases.py" -Push

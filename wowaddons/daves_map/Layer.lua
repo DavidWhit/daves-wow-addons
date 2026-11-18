@@ -14,7 +14,7 @@
 -- the pins) and joined by lines, with each step's turn-in. A step in another zone is held at the map's edge, pointing
 -- the way, with its number and zone. Click again to clear. Shift-click sets a waypoint.
 --
--- On the seamless map (Stitch\, with daves_map_textures) the same frame sits on the canvas over the stitched art: pins
+-- On the seamless map (Stitch\) the same frame sits on the canvas over the stitched art: pins
 -- are placed from their place on the stitched world, any pin in view is where it is (no edge markers), and a click
 -- that opens another map flies the view there instead (FlyToMap).
 
@@ -42,7 +42,7 @@ local posX, posY = {}, {}    -- [pin] = where each shown pin is on the current m
 local seamX, seamY = {}, {}  -- posX, posY's own tables on the seamless map (reused at each rebuild)
 
 ---------------------------------------------------------------------------
--- The seamless map (Stitch\, with daves_map_textures): the view runs past the map underneath into its neighbours,
+-- The seamless map (Stitch\): the view runs past the map underneath into its neighbours,
 -- so there pins are placed from their place on the stitched world (u, v) and any pin in view is drawn where it is,
 -- not held at the map's edge. The map underneath follows the view by itself; curMap is that map.
 ---------------------------------------------------------------------------
@@ -63,11 +63,18 @@ local function WorldUV(i)
 	local u = U[i]
 	if u == nil then
 		u = false
-		local cont = P.cont[i]
-		if cont and S.Rect(cont) then
+		local zone = P.zone[i]
+		if zone and S.Rect(zone) then
 			local v
-			u, v = stitch.ToWorld(cont, P.cx[i], P.cy[i])
+			u, v = stitch.ToWorld(zone, D.x[i], D.y[i])
 			V[i] = v
+		else
+			local cont = P.cont[i]
+			if cont and S.Rect(cont) then
+				local v
+				u, v = stitch.ToWorld(cont, P.cx[i], P.cy[i])
+				V[i] = v
+			end
 		end
 		U[i] = u
 	end
@@ -94,16 +101,28 @@ local function Hex(c)
 	if not c or #c ~= 6 then return 1, 1, 1 end
 	return tonumber(c:sub(1, 2), 16) / 255, tonumber(c:sub(3, 4), 16) / 255, tonumber(c:sub(5, 6), 16) / 255
 end
-local ATLAS = {   -- by Map Genie icon name; each checked with C_Texture.GetAtlasInfo before use
-	quest = { "QuestNormal" }, repeatable = { "QuestNormal" }, graveyard = { "poi-graveyard-neutral" },
-	flight_master = { "TaxiNode_Neutral" }, instance = { "Dungeon" }, treasure = { "VignetteLoot" },
+local ATLAS = {   -- by category icon name; each checked with C_Texture.GetAtlasInfo before use
+	quest = { "QuestNormal" }, repeatable = { "QuestNormal" },
+	turnin = { "UI-QuestPoi-QuestBangTurnIn", "QuestTurnin" },
+	quest_objective = { "Quest-In-Progress-Icon-yellow", "QuestObjective" },
+	graveyard = { "poi-soulspiritghost", "poi-graveyard-neutral" },
+	flight_master = { "TaxiNode_Neutral" }, instance = { "Dungeon" },
+	treasure = { "VignetteLoot" }, rare = { "VignetteKillElite", "VignetteKill" },
 }
-local TRACKING = {   -- by Map Genie icon name: words to look for in the minimap tracking list's names
+local TRACKING = {   -- words to look for in the minimap tracking list's names (plus file fallbacks)
 	auctioneer = "auction", banker = "bank", innkeeper = "innkeeper", mailbox = "mailbox", repair_vendor = "repair",
 	stable_master = "stable", transmogrifier = "transmog", barber_shop = "barber", bonus_objective = "battle",
-	merchant = "food", flight_master = "flight",
+	merchant = "food", flight_master = "flight", class_trainer = "class", profession_trainer = "profession",
+	_files = {
+		class_trainer = "Interface\\GossipFrame\\TrainerGossipIcon",
+		profession_trainer = "Interface\\GossipFrame\\TrainerGossipIcon",
+		merchant = "Interface\\GossipFrame\\VendorGossipIcon",
+		repair_vendor = "Interface\\GossipFrame\\VendorGossipIcon",
+		turnin = "Interface\\GossipFrame\\ActiveQuestIcon",
+		quest_objective = "Interface\\GossipFrame\\IncompleteQuestIcon",
+	},
 }
-local SIZE = { city = 1.5, town = 1.2, instance = 1.25 }
+local SIZE = { city = 1.5, town = 1.2, instance = 1.25, rare = 1.15, quest_objective = 0.9 }
 
 local function Style(ci)
 	local s = styles[ci]
@@ -126,6 +145,7 @@ local function Style(ci)
 			end
 		end
 	end
+	if not s.atlas and not s.file then s.file = TRACKING._files[c.icon] end
 	styles[ci] = s
 	return s
 end
@@ -378,6 +398,7 @@ local function UpdateFocus()
 			focusSet[i] = true
 			if D.endp[i] ~= 0 then focusSet[D.endp[i]] = true end
 			if D.dest[i] ~= 0 then focusSet[D.dest[i]] = true end
+			for _, o in ipairs(D.obj and D.obj[i] or {}) do focusSet[o] = true end
 		end
 	end
 	return true
@@ -500,6 +521,7 @@ end
 
 local LINK_COLORS = {
 	endp = { 1, .82, .2 },        -- turn in here
+	obj = { 1, .55, .2 },         -- objective target
 	pre = { .55, .65, 1 },        -- needs this first
 	next = { .35, 1, .45 },       -- leads on to this
 	dest = { .3, .9, 1 },         -- travels to
@@ -589,8 +611,9 @@ ns.StepHex = StepHex
 local function DrawLine(i, j, kind, alpha, thickPx, color)
 	local x1, y1, on1 = Pos(i)
 	local x2, y2, on2 = Pos(j)
-	if not (x1 and x2) or (x1 == x2 and y1 == y2) then return end
-	if not (on1 or on2) then return end   -- both ends off this map: it would only run along the border
+	if not (x1 and x2) or not (on1 or on2) then return end
+	local dx, dy = (x2 - x1) * (curW or 0) * (curScale or 1), (y2 - y1) * (curH or 0) * (curScale or 1)
+	if dx * dx + dy * dy < 16 then return end   -- same-NPC turn-in right at the starter spot
 	nLines = nLines + 1
 	local ln = Line(nLines)
 	local c = color or LINK_COLORS[kind]
@@ -685,15 +708,23 @@ local function DrawLinks()
 				if D.endp[i] ~= 0 then DrawLine(i, D.endp[i], "endp", .7, 1.5) end
 				if D.dest[i] ~= 0 then DrawLine(i, D.dest[i], "dest", .8, 2) end
 			end
+			for _, o in ipairs(D.obj and D.obj[lockedPin] or {}) do DrawLine(lockedPin, o, "obj", .8, 2) end
+			local marked = {}
 			for _, i in ipairs(chain.steps) do
 				Mark(i, i == lockedPin, colors[i])
-				if D.endp[i] ~= 0 and not chain.set[D.endp[i]] then Mark(D.endp[i], false) end
+				marked[i] = true
+				local e = D.endp[i]
+				if e ~= 0 and not chain.set[e] and not marked[e] then Mark(e, false); marked[e] = true end
+			end
+			for _, o in ipairs(D.obj and D.obj[lockedPin] or {}) do
+				if not chain.set[o] and not marked[o] then Mark(o, false); marked[o] = true end
 			end
 			if total > 1 then
 				for n, i in ipairs(chain.steps) do DrawStep(i, n, i == lockedPin, total) end
 			end
 		elseif hoverPin then
 			local i = hoverPin
+			for _, o in ipairs(D.obj and D.obj[i] or {}) do DrawLine(i, o, "obj", .8, 2); Mark(o, false) end
 			if D.endp[i] ~= 0 then DrawLine(i, D.endp[i], "endp", .85, 2.5); Mark(D.endp[i], false) end
 			if D.dest[i] ~= 0 then DrawLine(i, D.dest[i], "dest", .85, 2.5); Mark(D.dest[i], false) end
 			for _, p in ipairs(D.pre[i] or {}) do DrawLine(p, i, "pre", .85, 2.5); Mark(p, false) end
@@ -731,6 +762,22 @@ local function Rebuild()
 		Place(t, x, y, PinSize(i))
 		t:Show()
 	end
+	-- Sync OpenMap's dungeon entrance portals with our layer & Instance category filter (even when ns.db.enabled is off)
+	local openMapDungeons = false
+	if stitch and S and S.GetPinSet then
+		local dset = S.GetPinSet("dungeons")
+		if dset then
+			local instHidden = false
+			if D then
+				for _, cat in ipairs(D.cats) do
+					if cat.icon == "instance" and ns.db.hidden[cat.id] then instHidden = true break end
+				end
+			end
+			openMapDungeons = ns.db.enabled and D ~= nil and stitch.enabled and stitch.DungeonMapsOn and stitch.DungeonMapsOn()
+				and stitch.db.icons ~= false and not instHidden or false
+			S.SetPinSetOn(dset, openMapDungeons)
+		end
+	end
 	if ns.db.enabled and D and curMap and ns.Calibrate() then
 		SyncDoneQuests()
 		local u, v, zoom = nil, nil, nil
@@ -742,12 +789,15 @@ local function Rebuild()
 			win[1], win[2], win[3], win[4], win[5] = u - hu * WIN, u + hu * WIN, v - hv * WIN, v + hv * WIN, zoom
 			wipe(seamX) wipe(seamY)   -- (not posX itself: off the seamless map it's PinsOnMap's own table)
 			posX, posY = seamX, seamY
+			local skipInstance = openMapDungeons and searchSet == nil
 			for i = 1, #D.x do
-				local pu, pv = WorldUV(i)
-				if pu and pu >= win[1] and pu <= win[2] and pv >= win[3] and pv <= win[4] and Passes(i) then
-					local x, y = stitch.FromWorld(curMap, pu, pv)
-					posX[i], posY[i] = x, y
-					Add(i, x, y)
+				if not (skipInstance and D.cats[D.cat[i]].icon == "instance") then
+					local pu, pv = WorldUV(i)
+					if pu and pu >= win[1] and pu <= win[2] and pv >= win[3] and pv <= win[4] and Passes(i) then
+						local x, y = stitch.FromWorld(curMap, pu, pv)
+						posX[i], posY[i] = x, y
+						Add(i, x, y)
+					end
 				end
 			end
 		else
@@ -1121,7 +1171,7 @@ local function ShowVeil(title, zone)
 		veil:SetScript("OnHide", function(self) self:Hide() end)   -- the map closing: don't come back with it
 	end
 	veil.title:SetText(title)
-	veil.text:SetText("No map location: the game has none for this quest, and Map Genie's map doesn't list it"
+	veil.text:SetText("No map location: the game has none for this quest, and QuestieDB doesn't list a spawn for it"
 		.. (zone and (".\nThe quest log files it under " .. zone .. ", which has no map of its own.") or "."))
 	veil.mapID = WorldMapFrame:GetMapID()   -- the map now (opening the quest log may just have turned it)
 	veil:Show()
@@ -1130,8 +1180,8 @@ function ns.HideVeilIfMoved()   -- OnUpdate: the map turned elsewhere
 	if veil and veil:IsShown() and veil.mapID ~= curMap then veil:Hide() end
 end
 
--- With no location in the game or the map data (an instance like the Deeprun Tram, or a quest Map Genie doesn't
--- list): the game's map of the zone the quest log files it under, even when that map is empty (with a note, once a
+-- With no location in the game or the map data (an instance like the Deeprun Tram, or an unmapped quest):
+-- the game's map of the zone the quest log files it under, even when that map is empty (with a note, once a
 -- session); with no such map, the veil above.
 local toldNoMap = {}
 local function OnQuestDetails(q)
@@ -1191,6 +1241,7 @@ function ns.ShowTooltip(owner, i)
 		end
 	end
 	if completed then GameTooltip:AddLine("Completed", .4, 1, .4) end
+	LinkLine("|cffff8c33Objectives:|r ", D.obj and D.obj[i] or {}, i)
 	if D.endp[i] ~= 0 then LinkLine("|cffffd200Turn in:|r ", { D.endp[i] }, i) end
 	LinkLine("|cff8ca6ffRequires:|r ", D.pre[i] or {}, i)
 	LinkLine("|cff59ff73Leads to:|r ", nextOf[i] or {}, i)
@@ -1199,7 +1250,9 @@ function ns.ShowTooltip(owner, i)
 		GameTooltip:AddLine(("Step %d of %d in the selected chain"):format(step, #chain.steps), 1, .82, .2)
 	end
 	local hint
-	if isLocked then hint = "Click: clear the selection"
+	if c.icon == "instance" and stitch and stitch.enabled and stitch.DungeonMapsOn and stitch.DungeonMapsOn() then
+		hint = "Click: open dungeon map"
+	elseif isLocked then hint = "Click: clear the selection"
 	elseif D.pre[i] or nextOf[i] then hint = "Click: show this quest chain, numbered in order"
 	else hint = "Click: keep its links drawn" end
 	GameTooltip:AddLine(" ")
@@ -1211,6 +1264,11 @@ end
 -- Setup and the per-frame watch
 ---------------------------------------------------------------------------
 local function OnUpdate()
+	if stitch and stitch.DungeonViewShown and stitch.DungeonViewShown() then
+		if hoverPin then SetHover(nil) end
+		lastCX = nil
+		return
+	end
 	local map = WorldMapFrame:GetMapID()
 	local canvas = WorldMapFrame:GetCanvas()
 	local w, h = canvas:GetWidth(), canvas:GetHeight()
@@ -1311,6 +1369,9 @@ local function Init()
 	stitch = om and om:GetModule("worldmap")
 	S = om and om.MapStitch
 	if not (stitch and S) then stitch, S = nil, nil end
+	if stitch and stitch.RefreshDungeonCard then
+		hooksecurefunc(stitch, "RefreshDungeonCard", function() dirty = true end)
+	end
 	local canvas = WorldMapFrame:GetCanvas()
 	overlay = CreateFrame("Frame", nil, canvas)
 	overlay:SetAllPoints(canvas)
@@ -1340,6 +1401,11 @@ local function Init()
 			if stitch and stitch.SetPinMode then stitch.SetPinMode(false)
 			elseif pinBtn and pinBtn.SetActive then pinBtn:SetActive(false) end
 			ns.SetWaypoint(hoverPin)
+		elseif D and D.cats[D.cat[hoverPin]].icon == "instance" and stitch and stitch.OpenInstanceNear then
+			local pu, pv = WorldUV(hoverPin)
+			if not stitch.OpenInstanceNear(D.title[hoverPin], pu, pv, hot) then
+				ns.Focus(hoverPin)
+			end
 		else
 			ns.Focus(hoverPin)
 		end

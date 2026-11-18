@@ -9,7 +9,7 @@ Every unit variant in `wowaddons/daves_frames/` (`plain`, `elite`, `rareelite`, 
 
 > **Branched Extended Workflow (`guides/frame-template-extended-ai.png`):** For themes that use the top `#FF8000` Orange crest circle (`centre 512,20`, `r = 37`, `4/5` of the level ring) and background `#FF0000` Red intricate-artwork box (`x = 222..802, y = -70..350` layout px, packed with `Pack-FrameTemplate.py --extended`), use the companion skill [`daves-frames-paint-extended`](../daves-frames-paint-extended/SKILL.md).
 
-Full pixel coordinates live in `wowaddons/daves_frames/tools/template/PAINT-LAYERS.md` and `wowaddons/daves_frames/NOTES.md`.
+Full pixel coordinates live in `wowaddons/daves_frames/tools/template/PAINT-LAYERS.md` (note: the `daves_frames` addon itself was removed from git while keeping the standalone `wowaddons/daves_frames/tools/` templating pipeline).
 
 | Stencil colour | Hex | Paint? | Region (`1024 × 300` layout px) |
 | --- | --- | --- | --- |
@@ -143,8 +143,8 @@ If adding a brand-new art key beyond the built-in variants above, wire it into `
   - Concentric portrait ring (including the upper crown) and lower circular level ring;
   - Clean `600 × 220` aura board strip with seamless center seam and dark recessed interior.
 - **Validation:**
-  - Texture-only updates: run `py -3 "wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py" -Path "wowaddons/daves_frames" -NoInfo`.
-  - Any `.lua`, `.toc`, or `tools/*.py` change: run the full **`wow-addon-test`** skill (`Prepare-WowReview.py -Path "wowaddons/daves_frames"` + advisor review) and update `NOTES.md` / `README.md`.
+  - Verify `Build-FrameTemplate.py --drawable` passes cleanly (`Layout.lua` is checked automatically if an addon exists alongside `tools/`).
+  - If an addon is present in `wowaddons/daves_frames/`, run `py -3 "wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py" -Path "wowaddons/daves_frames" -NoInfo`.
 
 ## 5. Tell the user
 

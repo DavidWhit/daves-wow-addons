@@ -1,5 +1,5 @@
 -- daves_castbar / Elements.lua
--- The looks (seven elements, four gathering and six crafting professions plus Disenchant and First Aid, and a plain bar),
+-- The looks (seven elements, four gathering and seven crafting professions plus Disenchant and First Aid, and a plain bar),
 -- and which one a spell gets.
 --
 -- WoW has no API that returns a spell's school (C_Spell.GetSpellInfo has none, and the combat
@@ -8,7 +8,7 @@
 --   2. the gathering spells by name: Fishing, Mining, Herb Gathering, Skinning, and Smelt ... for smelting; Disenchant and
 --      First Aid (using a bandage) too
 --   3. crafting casts (tradeskill) by their recipe's profession: Blacksmithing, Mining (smelting), Alchemy,
---      Tailoring, Leatherworking, Enchanting, First Aid; else the fallback
+--      Tailoring, Leatherworking, Engineering, Enchanting, First Aid; else the fallback
 --   4. the spell's name: known names first, then words in it ("Frost", "Flame", "Lightning", ...)
 --   5. the "Other casts" setting: a look (Plain by default: Blizzard's own cast bar art), or "Your class",
 --      which picks your class's and specialization's element
@@ -17,7 +17,7 @@ local _, ns = ...
 
 -- Leading-edge marker (the spark at the fill edge): spell looks have one, like Blizzard's bar for damage and
 -- healing casts. Casts that are not spells - professions and gathering (fishing, herbalism, mining, skinning,
--- smelting, blacksmithing, alchemy, tailoring, leatherworking) - get none: set noSpark = true on every profession look. Plain has
+-- smelting, blacksmithing, alchemy, tailoring, leatherworking, engineering, enchanting) - get none: set noSpark = true on every profession look. Plain has
 -- the same flare as the spell looks (gold), not Blizzard's thin pip, so its marker matches the other bars.
 -- The finishing flash (Bar.lua) is .8 alpha in the spark colour; flashAlpha lowers it where a bright flash would glare.
 -- Colours are 0-1. Layers scroll in texture widths (su) and heights (sv) per second; "a" is an
@@ -26,7 +26,7 @@ local _, ns = ...
 local function C(r, g, b) return { r / 255, g / 255, b / 255 } end
 
 ns.ELEMENT_ORDER = { "frost", "fire", "shadow", "nature", "lightning", "arcane", "holy", "fishing", "herbalism", "mining", "skinning",
-	"smelting", "blacksmithing", "alchemy", "tailoring", "leatherworking", "enchanting", "disenchant", "firstaid", "plain" }
+	"smelting", "blacksmithing", "alchemy", "tailoring", "leatherworking", "engineering", "enchanting", "disenchant", "firstaid", "plain" }
 
 ns.ELEMENTS = {
 	frost = {
@@ -201,6 +201,19 @@ ns.ELEMENTS = {
 		noSpark = true,     -- no marker: the needle works the joint being laced
 		emit = {},
 	},
+	engineering = {
+		-- an interlocking train of big spoked wheels and small pinions over a painted clockwork movement plate with Roman
+		-- clock dials, ticking Breguet hands and astrolabe rings; as the cast progresses each gear engages in turn and
+		-- drives the next down the train until the whole mechanism turns together to complete the recipe
+		label = "Engineering", border = C(214, 168, 74), glow = C(196, 134, 42), spark = C(255, 226, 152), veil = C(0, 0, 0),
+		layers = { { tex = "eng_bg" } },
+		track = { tex = "eng_bg", a = 0 },          -- the movement plate covers the whole bar; nothing of the track shows
+		engineering = true,
+		wholeBar = true,    -- the gear train spans the bar; sequential engagement shows the progress, not the fill
+		noSpark = true,     -- no marker: the meshing gear front works the cast edge
+		flashAlpha = .34,   -- a warm brass finish without glaring over the dials
+		emit = {},
+	},
 	enchanting = {
 		-- a vortex at the cast edge pulls glittering dust out of the unfilled part and spins it into the filled part, where
 		-- it settles on dark velvet as shimmering, flowing magic (a palette per cast: the velvet and the flow are tinted)
@@ -351,6 +364,7 @@ local CRAFTS = Enum and Enum.Profession and {
 	[Enum.Profession.Alchemy] = "alchemy",
 	[Enum.Profession.Tailoring] = "tailoring",
 	[Enum.Profession.Leatherworking] = "leatherworking",
+	[Enum.Profession.Engineering] = "engineering",
 	[Enum.Profession.Enchanting] = "enchanting",
 } or {}
 if Enum and Enum.Profession and Enum.Profession.FirstAid then   -- bandages (ProfessionConstantsDocumentation.lua: FirstAid = 0)

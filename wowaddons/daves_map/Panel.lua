@@ -314,7 +314,7 @@ function ns.OnLayerChanged()
 	else
 		s = ("%d of %d pins on this map shown."):format(ns.ShownCount(), onMap)
 	end
-	status:SetText(s .. "\n|cff888888Map Genie data, " .. D.source.fetched .. "|r")
+	status:SetText(s .. "\n|cff888888" .. (D.source and D.source.map or "QuestieDB Forever") .. ", " .. D.source.fetched .. "|r")
 	Render()
 end
 

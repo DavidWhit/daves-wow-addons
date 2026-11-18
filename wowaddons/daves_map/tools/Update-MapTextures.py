@@ -1,7 +1,11 @@
-"""Build wowaddons/daves_map_textures from a local OpenMap folder or zip.
+"""Build the companion addon wowaddons/daves_map_textures from a local OpenMap release.
 
-Nothing is downloaded. The default output is the
-gitignored daves_map_textures addon next to daves_map. Pass a source you already have.
+Nothing is downloaded. Reads a local OpenMap WoW Forever release folder or .zip
+(defaulting to <repo>/OpenMap) and writes wowaddons/daves_map_textures:
+  - daves_map_textures.toc, Init.lua, Export.lua, .luacheckrc
+  - Data/*.lua (OpenMap's declarative data tables)
+  - Media/Textures/* (excluding MapChart, MapGapFill, MapZones)
+  - NOTICE-OpenMap.md & LICENSE-OpenMap.txt
 """
 
 from __future__ import annotations
@@ -15,11 +19,14 @@ import zipfile
 from datetime import datetime, timezone
 
 DATA = (
-    "ArtEdits", "Banners", "Caves", "CaveMinimap", "Gaps", "GapPlaces", "Grade",
+    "ArtEdits", "Banners", "Caves", "CaveMinimap",
+    "DungeonMaps", "DungeonDrawn", "DungeonMinimap", "DungeonBosses",
+    "Gaps", "GapPlaces", "Grade",
     "Labels", "Minimap", "MinimapLOD", "Places", "Reveal", "Tones",
 )
-EXCLUDE = ("MapChart", "MapGapFill", "MapZones", "MapDungeonDrawn")
+EXCLUDE = ("MapChart", "MapGapFill", "MapZones")
 CODE_RX = re.compile(r"\bfunction\b|\bloadstring\b|\bsetfenv\b|_G\b", re.I)
+DANGEROUS_RX = re.compile(r"\bloadstring\b|\bsetfenv\b|_G\b", re.I)
 IFACE_RX = re.compile(r"(?m)^## Interface:\s*(.+?)\s*$")
 VERSION_RX = re.compile(r"(?m)^## Version:\s*(.+?)\s*$")
 
@@ -46,10 +53,11 @@ def paths_from_script(script_file):
     tools = os.path.dirname(os.path.abspath(script_file))
     addon_dir = os.path.dirname(tools)
     repo = os.path.dirname(os.path.dirname(addon_dir))
-    return addon_dir, repo
+    out = os.path.join(os.path.dirname(addon_dir), "daves_map_textures")
+    return addon_dir, repo, out
 
 
-def build(source, addon_dir, repo, make_zip):
+def build(source, addon_dir, repo, out_dir):
     if not source:
         source = os.path.join(repo, "OpenMap")
     if not os.path.exists(source):
@@ -99,107 +107,136 @@ def build(source, addon_dir, repo, make_zip):
         if want.casefold() not in {part.casefold() for part in have}:
             raise RuntimeError(f"OpenMap at {src} is for Interface {om_iface}, not WoW Forever's {want}.")
 
+        data_src = os.path.join(src, "Data", "Forever")
+        if not os.path.isdir(data_src):
+            data_src = os.path.join(src, "Data")
+        tex_src = os.path.join(src, "Media", "Textures", "Forever")
+        if not os.path.isdir(tex_src):
+            tex_src = os.path.join(src, "Media", "Textures")
+
+        data_names = list(DATA)
+        tiles_src = os.path.join(data_src, "Tiles.lua")
+        if os.path.isfile(tiles_src):
+            data_names.append("Tiles")
+
         for name in DATA:
-            path = os.path.join(src, "Data", name + ".lua")
+            path = os.path.join(data_src, name + ".lua")
             if not os.path.isfile(path):
+                rel_path = os.path.relpath(path, src)
                 raise RuntimeError(
-                    f"OpenMap {om_version} has no Data\\{name}.lua: "
+                    f"OpenMap {om_version} has no {rel_path}: "
                     "daves_map\\Stitch needs updating to this release."
                 )
             if CODE_RX.search(_read(path)):
+                rel_path = os.path.relpath(path, src)
                 raise RuntimeError(
-                    f"Data\\{name}.lua in OpenMap {om_version} holds code, not just tables: "
+                    f"{rel_path} in OpenMap {om_version} holds code, not just tables: "
                     "check it before using it."
                 )
+        if os.path.isfile(tiles_src) and DANGEROUS_RX.search(_read(tiles_src)):
+            raise RuntimeError(f"Data\\Tiles.lua in OpenMap {om_version} holds unsafe globals.")
 
-        out = os.path.join(repo, "wowaddons", "daves_map_textures")
-        if os.path.exists(out):
-            own = os.path.join(out, "daves_map_textures.toc")
-            if not os.path.isfile(own):
-                raise RuntimeError(f"{out} exists and isn't a daves_map_textures build; move it away first.")
-            shutil.rmtree(out)
-        os.makedirs(os.path.join(out, "Data"))
-        os.makedirs(os.path.join(out, "Media", "Textures"))
+        if os.path.isdir(out_dir):
+            shutil.rmtree(out_dir)
+        data_out = os.path.join(out_dir, "Data")
+        tex_out = os.path.join(out_dir, "Media", "Textures")
+        os.makedirs(data_out, exist_ok=True)
+        os.makedirs(tex_out, exist_ok=True)
 
-        for name in DATA:
-            shutil.copy2(os.path.join(src, "Data", name + ".lua"), os.path.join(out, "Data"))
-        tex_src = os.path.join(src, "Media", "Textures")
+        for name in data_names:
+            shutil.copy2(
+                os.path.join(data_src, name + ".lua"),
+                os.path.join(data_out, name + ".lua"),
+            )
+
         excluded = {name.casefold() for name in EXCLUDE}
         for item in os.listdir(tex_src):
             if item.casefold() in excluded or _same_name(item, "NOTICE.md"):
                 continue
             src_item = os.path.join(tex_src, item)
-            dest_item = os.path.join(out, "Media", "Textures", item)
+            dest_item = os.path.join(tex_out, item)
             if os.path.isdir(src_item):
                 shutil.copytree(src_item, dest_item)
             else:
                 shutil.copy2(src_item, dest_item)
+
         copied = 0
         total = 0
-        media = os.path.join(out, "Media")
-        for dirpath, _dirs, files in os.walk(media):
+        for dirpath, _dirs, files in os.walk(tex_out):
             for name in files:
                 copied += 1
                 total += os.path.getsize(os.path.join(dirpath, name))
-        shutil.copy2(os.path.join(tex_src, "NOTICE.md"), os.path.join(out, "NOTICE-OpenMap.md"))
-        shutil.copy2(os.path.join(src, "LICENSE.txt"), os.path.join(out, "LICENSE-OpenMap.txt"))
+
+        shutil.copy2(os.path.join(tex_src, "NOTICE.md"), os.path.join(out_dir, "NOTICE-OpenMap.md"))
+        shutil.copy2(os.path.join(src, "LICENSE.txt"), os.path.join(out_dir, "LICENSE-OpenMap.txt"))
+        shutil.copy2(os.path.join(src, "LICENSE.txt"), os.path.join(addon_dir, "Stitch", "LICENSE-OpenMap.txt"))
 
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M") + " UTC"
-        # Here-strings in this script are LF, and the newline before the closing
-        # "@ is not part of the string. Data file names are joined with CRLF.
-        data_lines = "\r\n".join(f"Data\\{name}.lua" for name in DATA)
-        toc = (
+        toc_data_lines = "\n".join(f"Data\\{name}.lua" for name in data_names)
+        toc_ver = om_version.lstrip("vV") or om_version
+        toc_content = (
             f"## Interface: {iface}\n"
             "## Title: |cffd4a94eDave's|r Map (textures)\n"
-            f"## Notes: OpenMap's stitched world map art and tables for Dave's Map (OpenMap {om_version}), "
-            f"built on this machine by daves_map\\tools\\Update-MapTextures.py ({stamp}). Not in git.\n"
-            "## Author: generated (OpenMap contributors; map art is Blizzard's)\n"
-            f"## Version: {om_version}\n"
-            "## X-License: MIT (OpenMap's tables, LICENSE-OpenMap.txt); map art is Blizzard's (NOTICE-OpenMap.md)\n"
+            "## Notes: OpenMap's seamless world map and dungeon map art and tables for Dave's Map.\n"
+            "## Author: davidwhit5 (OpenMap: MIT, LICENSE-OpenMap.txt; map art: Blizzard, NOTICE-OpenMap.md)\n"
+            f"## Version: {toc_ver}\n"
             "## IconTexture: Interface\\Icons\\INV_Misc_Map_01\n"
             "\n"
-            f"{data_lines}\n"
-            "Export.lua"
+            "Init.lua\n"
+            f"{toc_data_lines}\n"
+            "Export.lua\n"
         )
-        export = (
-            "-- daves_map_textures / Export.lua -- GENERATED by daves_map\\tools\\Update-MapTextures.py. Do not edit; do not commit.\n"
-            "-- The data files above filled this addon's namespace (ns.MapReveal, ns.MapPlaces ...). daves_map (## OptionalDeps)\n"
-            "-- takes it as its stitched map's namespace (daves_map\\Stitch\\Base.lua). Its textures are under Media\\.\n"
+        with open(os.path.join(out_dir, "daves_map_textures.toc"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(toc_content)
+
+        init_lua = (
+            "-- daves_map_textures / Init.lua -- GENERATED by daves_map\\tools\\Update-MapTextures.py.\n"
             "local ADDON, ns = ...\n"
+            'ns.Client = "Forever"\n'
+            'ns.Media = { path = "Interface\\\\AddOns\\\\" .. ADDON .. "\\\\Media\\\\" }\n'
+            'ns.Media.tex = ns.Media.path .. "Textures\\\\"\n'
+        )
+        with open(os.path.join(out_dir, "Init.lua"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(init_lua)
+
+        export_lua = (
+            "-- daves_map_textures / Export.lua -- GENERATED by daves_map\\tools\\Update-MapTextures.py.\n"
+            "local ADDON, ns = ...\n"
+            'ns.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata(ADDON, "Version")) or "dev"\n'
             "ns.texturesAddon = ADDON\n"
             f'ns.openMapVersion = "{om_version}"\n'
             f'ns.built = "{stamp}"\n'
-            "DAVES_MAP_TEXTURES = ns"
+            "DAVES_MAP_TEXTURES = ns\n"
         )
-        with open(os.path.join(out, "daves_map_textures.toc"), "w", encoding="utf-8", newline="") as handle:
-            handle.write(toc)
-        with open(os.path.join(out, "Export.lua"), "w", encoding="utf-8", newline="") as handle:
-            handle.write(export)
+        with open(os.path.join(out_dir, "Export.lua"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(export_lua)
+
+        luacheck_rc = (
+            'std = "lua51"\n'
+            "max_line_length = false\n"
+            "codes = true\n"
+            'exclude_files = { "Data/" }\n'
+            'ignore = { "113", "143", "212", "542" }\n'
+            'globals = { "DAVES_MAP_TEXTURES" }\n'
+        )
+        with open(os.path.join(out_dir, ".luacheckrc"), "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(luacheck_rc)
+
+        # Clean up any temporary bundled Stitch/Data or Media/Textures inside daves_map
+        for stale_dir in (
+            os.path.join(addon_dir, "Stitch", "Data"),
+            os.path.join(addon_dir, "Media", "Textures"),
+        ):
+            if os.path.isdir(stale_dir):
+                shutil.rmtree(stale_dir)
+        stale_notice = os.path.join(addon_dir, "Stitch", "NOTICE-OpenMap.md")
+        if os.path.isfile(stale_notice):
+            os.remove(stale_notice)
+
         left = ", ".join(EXCLUDE)
         print(
-            f"Built {out}: OpenMap {om_version}, {len(DATA)} data tables, {n0(copied)} textures "
-            f"({n0(total / 1048576)} MB). Left out: {left}.",
-            flush=True,
-        )
-
-        if make_zip:
-            zip_path = os.path.join(os.path.dirname(out), "daves_map_textures.zip")
-            if os.path.exists(zip_path):
-                os.remove(zip_path)
-            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-                for dirpath, _dirs, files in os.walk(out):
-                    for name in files:
-                        full = os.path.join(dirpath, name)
-                        rel = "daves_map_textures/" + os.path.relpath(full, out).replace("\\", "/")
-                        archive.write(full, rel)
-            print(
-                f"Shareable copy: {zip_path} ({n0(os.path.getsize(zip_path) / 1048576)} MB). "
-                "Unzip into World of Warcraft\\_forever_\\Interface\\AddOns, restart the client.",
-                flush=True,
-            )
-        print("First time on this machine: link it into the game, then restart the client fully:", flush=True)
-        print(
-            f'  py -3 <kit>\\scripts\\Link-WowAddons.py -Path "{out}"',
+            f"Wrote {out_dir}: OpenMap {om_version}, {len(data_names)} data tables, "
+            f"{n0(copied)} textures ({n0(total / 1048576)} MB). Left out: {left}.",
             flush=True,
         )
     finally:
@@ -209,14 +246,11 @@ def build(source, addon_dir, repo, make_zip):
 
 def main(argv):
     source = None
-    make_zip = False
     i = 0
     while i < len(argv):
         token = argv[i]
         key = token[1:].lower() if token.startswith("-") else ""
-        if key == "zip":
-            make_zip = True
-        elif key == "source":
+        if key == "source":
             if i + 1 >= len(argv):
                 print("Missing value for -Source", file=sys.stderr, flush=True)
                 raise SystemExit(1)
@@ -224,16 +258,13 @@ def main(argv):
             source = argv[i]
         elif key.startswith("source:"):
             source = token.split(":", 1)[1]
-        elif token.startswith("-"):
-            print("Unknown argument: " + token, file=sys.stderr, flush=True)
-            raise SystemExit(1)
         else:
             print("Unknown argument: " + token, file=sys.stderr, flush=True)
             raise SystemExit(1)
         i += 1
-    addon_dir, repo = paths_from_script(__file__)
+    addon_dir, repo, out_dir = paths_from_script(__file__)
     try:
-        build(source, addon_dir, repo, make_zip)
+        build(source, addon_dir, repo, out_dir)
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr, flush=True)
         raise SystemExit(1)

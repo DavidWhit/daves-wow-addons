@@ -287,6 +287,26 @@ EL.leatherworking = {
 	leather: true, wholeBar: true, noSpark: true, padTop: 1.0,
 	emit: [],
 };
+EL.engineering = {
+	// an interlocking train of big spoked wheels and small pinions over a painted clockwork movement plate with Roman
+	// clock dials, ticking Breguet hands and astrolabe rings (as Effects_Engineering.lua)
+	spell: 'Thorium Rifle', border: [214, 168, 74], glow: [196, 134, 42], spark: [255, 226, 152], veil: [0, 0, 0],
+	layers: [{ t: 'eng_bg', su: 0 }],
+	track: { t: 'eng_bg', a: 0 },
+	engineering: true, wholeBar: true, noSpark: true, flashAlpha: .34, padTop: 1.0,
+	emit: [],
+};
+const ENG_Z = [20, 16, 12, 8], ENG_S = [5, 4, 6, 4], ENG_SPAN = [22.8, 18.8, 14.8, 10.8];
+const ENG_PALETTES = [
+	{ tint: [[255, 255, 255], [255, 250, 242], [245, 255, 255], [255, 250, 235]], dial: [255, 214, 132], glow: [255, 192, 92] },
+	{ tint: [[255, 235, 209], [255, 230, 209], [219, 224, 235], [255, 235, 204]], dial: [244, 184, 112], glow: [255, 162, 72] },
+	{ tint: [[255, 255, 240], [250, 235, 240], [250, 255, 255], [255, 255, 245]], dial: [220, 232, 255], glow: [210, 220, 255] },
+	{ tint: [[245, 242, 219], [245, 235, 219], [224, 240, 240], [255, 245, 224]], dial: [236, 206, 138], glow: [245, 198, 104] },
+];
+let engTurn = Math.floor(Math.random() * ENG_PALETTES.length);
+const ENG_SPARK = P({ t: 'p_star', color: [[255, 226, 148], [255, 190, 96], [255, 248, 214]], size: [.11, .22], life: [.18, .42], vx: [-26, 22], vy: [-28, 14], gravity: 75 });
+const ENG_STEAM = P({ t: 'p_soft', color: [[226, 220, 206]], size: [.18, .34], grow: [.22, .42], life: [.45, .85], vx: [-8, 10], vy: [-26, -10], alpha: .22, add: false });
+const engMesh = (beta, Zp, thetaP, Zc) => beta + Math.PI - Math.PI / Zc + (Zp / Zc) * (beta - thetaP);
 EL.enchanting = {
 	// dark velvet the magic settles on (as Effects.lua): a palette per cast tints the velvet and its mottling; flowing
 	// bands of light and glitter behind the edge; a vortex at the edge pulls dust out of the unfilled part and spins it in
@@ -432,6 +452,7 @@ class Bar {
 		if (this.cfg.alchemy) this.makeAlchemy();
 		if (this.cfg.tailor) this.makeTailor();
 		if (this.cfg.leather) this.makeLeather();
+		if (this.cfg.engineering) this.makeEngineering();
 		if (this.cfg.ench) this.makeEnch();
 		if (this.cfg.firstaid) this.makeFirstAid();
 		this.glyphs = []; this.glyphT = 0; this.twinkles = []; this.twinkleAcc = 0; this.circles = []; this.circleNext = rand(.2, 1.2) * settings.H;
@@ -1486,6 +1507,166 @@ class Bar {
 		g.restore();
 	}
 
+	// ---- engineering (as Effects_Engineering.lua): Roman clock dials, astrolabe rings and an interlocking gear train
+	makeEngineering() {
+		engTurn = (engTurn + 1) % ENG_PALETTES.length;
+		this.eng = null;
+		this.buildEngineeringLayout(false);
+	}
+	buildEngineeringLayout(keep) {
+		const { W, H } = settings;
+		const prev = keep && this.eng;
+		const seed = prev ? prev.seed : Math.floor(Math.random() * 2000000000) + 1;
+		let st = seed % 2147483647; if (st <= 0) st += 2147483646;
+		const u01 = () => ((st = (st * 16807) % 2147483647) - 1) / 2147483646;
+		const rrng = (a, b) => a + u01() * (b - a);
+		const pal = prev ? prev.pal : ENG_PALETTES[engTurn];
+		const mod = prev ? prev.mod : rrng(.068, .075);
+		const dir = prev ? prev.dir : (u01() < .5 ? 1 : -1);
+		const drive = prev ? prev.drive : rrng(0, 6.283);
+		const mH = mod * H;
+
+		const dials = [];
+		let dx = H * rrng(.65, 1.35), kind = u01() < .5 ? 0 : 1;
+		while (dx < W - H * .45 && dials.length < 12) {
+			const roman = (kind % 2) === 0;
+			const sz = H * (roman ? rrng(.92, 1.26) : rrng(.86, 1.22));
+			const dy = H * (roman ? rrng(.24, .76) : rrng(.20, .80));
+			const m0 = rrng(0, 6.283), pd = prev && prev.dials[dials.length];
+			dials.push({ x: dx, y: dy, sz, roman, h0: rrng(0, 6.283), m0, sweep: pd ? pd.sweep : m0, rate: rrng(1.8, 3.0) * (u01() < .5 ? 1 : -1) });
+			dx += H * rrng(2.5, 3.8); kind++;
+		}
+
+		const gears = [];
+		const r1 = u01() < .55 ? 0 : 1, y1 = H * (u01() < .5 ? rrng(.22, .38) : rrng(.62, .78));
+		gears.push({ row: r1, x: H * rrng(.12, .28), y: y1, parent: -1, beta: 0, theta0: rrng(0, 6.283), theta: 0, engageX: 0, sparked: true });
+		let highSide = y1 > H * .5, satBudget = Math.min(6, Math.max(1, Math.floor(W / (H * 3.2))));
+		while (gears[gears.length - 1].x < W - H * .08 && gears.length < 44 - satBudget) {
+			const p = gears[gears.length - 1], pRow = p.row, u = u01();
+			let nRow;
+			if (pRow <= 1) nRow = u < .42 ? 3 : u < .80 ? 2 : (1 - pRow);
+			else nRow = u < .38 ? 0 : u < .72 ? 1 : (5 - pRow);
+			const Zp = ENG_Z[pRow], Zn = ENG_Z[nRow], dist = (Zp + Zn) * .5 * mH;
+			let targetY;
+			if (nRow === 3) targetY = H * rrng(.30, .70);
+			else if (nRow === 2) targetY = H * rrng(.25, .75);
+			else { highSide = !highSide; targetY = H * (highSide ? rrng(.64, .86) : rrng(.14, .36)); }
+			let dy = Math.max(-dist * .66, Math.min(dist * .66, targetY - p.y)), ny = p.y + dy;
+			if (nRow === 3) { ny = Math.max(H * .26, Math.min(H * .74, ny)); dy = ny - p.y; }
+			if (Math.abs(dy) > dist * .68) { dy = (dy < 0 ? -1 : 1) * dist * .68; ny = p.y + dy; }
+			const dx2 = Math.sqrt(Math.max(.01, dist * dist - dy * dy)), nx = p.x + dx2, beta = Math.atan2(dy, dx2);
+			const th0 = engMesh(beta, Zp, p.theta0, Zn), contactX = p.x + (Zp * .5 * mH) * Math.cos(beta);
+			gears.push({ row: nRow, x: nx, y: ny, parent: gears.length - 1, beta, theta0: th0, theta: th0, engageX: Math.max(0, contactX), sparked: !!keep });
+		}
+		const mainCount = gears.length;
+		for (let i = 1; i < mainCount - 1 && gears.length < 44 && satBudget > 0; i++) {
+			const g = gears[i];
+			if (g.row <= 1 && u01() < .55) {
+				const sRow = u01() < .72 ? 3 : 2, Zp = ENG_Z[g.row], Zs = ENG_Z[sRow], dist = (Zp + Zs) * .5 * mH;
+				const beta = (g.y < H * .5 ? 1 : -1) * rrng(1.18, 1.96), sx = g.x + dist * Math.cos(beta), sy = g.y + dist * Math.sin(beta);
+				if (sx > H * .25 && sx < W - H * .25 && sy > H * .24 && sy < H * .76) {
+					let clear = true;
+					for (let j = 0; j < gears.length; j++) if (j !== i) {
+						const o = gears[j], minD = (ENG_Z[o.row] + Zs) * .5 * mH * 1.08, ddx = sx - o.x, ddy = sy - o.y;
+						if (ddx * ddx + ddy * ddy < minD * minD) { clear = false; break; }
+					}
+					if (clear) {
+						satBudget--;
+						const th0 = engMesh(beta, Zp, g.theta0, Zs);
+						gears.push({ row: sRow, x: sx, y: sy, parent: i, beta, theta0: th0, theta: th0, engageX: Math.max(0, Math.min(g.x, sx)), sparked: !!keep });
+					}
+				}
+			}
+		}
+		this.eng = { seed, pal, mod, mH, dir, drive, dials, gears, W, H, steamAcc: prev ? prev.steamAcc : 0 };
+	}
+	drawEngineeringFill(og, fillW, H, dt) {
+		const W = settings.W, casting = this.state === 'cast';
+		if (!this.eng || this.eng.W !== W || this.eng.H !== H) this.buildEngineeringLayout(true);
+		const s = this.eng, pal = s.pal;
+		if (casting) s.drive += dt * s.dir * (1.25 + .45 * clamp01(fillW / Math.max(1, W)));
+		else if (this.state === 'done' && dt > 0) s.drive += dt * s.dir * .35;
+
+		// unpowered clockplate shade ahead of fillW + warm horological glow behind fillW
+		if (fillW < W) { og.fillStyle = 'rgba(5,6,9,.46)'; og.fillRect(fillW, 0, W - fillW, H); }
+		if (fillW > 2) {
+			const ww = Math.min(fillW, H * 2.4);
+			og.save(); og.globalCompositeOperation = 'lighter'; og.globalAlpha = .22;
+			og.drawImage(tinted('edge_h', pal.glow), fillW - ww, 0, ww, H);
+			og.restore();
+		}
+
+		// background Roman I-XII clock dials (with hour + minute hands) & etched Vernier/hairspring rings
+		const dialVernier = tinted('eng_dials', pal.dial);
+		for (const d of s.dials) {
+			const wake = clamp01((fillW - (d.x - d.sz * .35)) / Math.max(1, H * .55)), cy = H - d.y;
+			if (d.roman) {
+				if (casting && wake > 0) d.sweep += dt * wake * d.rate;
+				else if (this.state === 'done' && wake > 0 && dt > 0) d.sweep += dt * .25 * d.rate;
+				const b = Math.round((.42 + .50 * wake) * 255 / 8) * 8;
+				og.drawImage(tinted('eng_dials', [b, b, b]), 0, 0, 128, 128, d.x - d.sz / 2, cy - d.sz / 2, d.sz, d.sz);
+				const hb = Math.round((.45 + .55 * wake) * 255 / 8) * 8, hImg = tinted('eng_hands', [hb, hb, hb]);
+				const drawHand = (ang, sc) => {
+					const idx = Math.floor((((ang / (2 * Math.PI)) % 1 + 1) % 1) * 16), col = idx % 8, row = Math.floor(idx / 8), hs = d.sz * sc;
+					og.drawImage(hImg, col * 64, row * 64, 64, 64, d.x - hs / 2, cy - hs / 2, hs, hs);
+				};
+				drawHand(d.h0 + (d.sweep - d.m0) / 12, .54);
+				drawHand(d.sweep, .78);
+			} else {
+				og.save(); og.globalCompositeOperation = 'lighter'; og.globalAlpha = .10 + .20 * wake;
+				og.drawImage(dialVernier, 128, 0, 128, 128, d.x - d.sz / 2, cy - d.sz / 2, d.sz, d.sz);
+				og.restore();
+			}
+		}
+
+		// compute meshed gear angles and draw big spoked gears (sublevel 4) then medium/small gears (sublevel 5)
+		let activeX = null, activeY = 0, activeK = 0;
+		for (let i = 0; i < s.gears.length; i++) {
+			const g = s.gears[i];
+			g.liveTheta = i === 0 ? g.theta0 + s.drive : engMesh(g.beta, ENG_Z[s.gears[g.parent].row], s.gears[g.parent].liveTheta, ENG_Z[g.row]);
+			const engK = clamp01((fillW - g.engageX) / Math.max(1, H * .38));
+			g.engK = engK;
+			if (engK > 0) {
+				g.theta = g.liveTheta;
+				if (casting && !g.sparked && engK > .25 && i > 0) {
+					g.sparked = true;
+					const cy = H - g.y;
+					for (let k = 0; k < 3; k++) this.spawn(ENG_SPARK, g.engageX + rand(-2, 2), cy + rand(-.18, .18) * H);
+					this.spawn(ENG_STEAM, g.engageX, cy);
+				}
+				if (engK < 1 && engK > activeK) { activeX = g.engageX; activeY = H - g.y; activeK = Math.sin(engK * Math.PI); }
+			} else {
+				g.sparked = false; g.theta = g.theta0;
+			}
+		}
+		for (let pass = 0; pass < 2; pass++) {
+			for (const g of s.gears) {
+				if ((g.row <= 1 ? 0 : 1) !== pass) continue;
+				const sec = 2 * Math.PI / ENG_S[g.row], col = Math.floor((((g.theta / sec) % 1 + 1) % 1) * 16);
+				const flash = g.engK > 0 && g.engK < 1 ? .20 * Math.sin(g.engK * Math.PI) : 0;
+				const br = .34 + .58 * g.engK + flash;
+				const tc = q8(pal.tint[g.row].map(v => Math.min(255, v * br)));
+				const sz = ENG_SPAN[g.row] * s.mH, cy = H - g.y;
+				og.drawImage(tinted('eng_gears', tc), col * 128, g.row * 128, 128, 128, g.x - sz / 2, cy - sz / 2, sz, sz);
+			}
+		}
+		if (casting && fillW > H * .25 && fillW < W - H * .1) {
+			s.steamAcc += dt * 2.2;
+			while (s.steamAcc >= 1) {
+				s.steamAcc--;
+				const gy = activeX !== null ? activeY : H * .5;
+				if (Math.random() < .55) this.spawn(ENG_SPARK, fillW + rand(-3, 2), gy + rand(-.2, .2) * H);
+				else this.spawn(ENG_STEAM, fillW + rand(-3, 2), gy + rand(-.15, .15) * H);
+			}
+		}
+		if (casting && activeX !== null) {
+			const gs = H * 1.15;
+			og.save(); og.globalCompositeOperation = 'lighter'; og.globalAlpha = .18 + .26 * activeK;
+			og.drawImage(tinted('p_soft', pal.glow), activeX - gs / 2, activeY - gs / 2, gs, gs);
+			og.restore();
+		}
+	}
+
 	// ---- plain (as Effects.lua): Blizzard's cast bar; a stand-in here, since the browser can't load Blizzard's atlases
 	drawPlainFill(og, fillW, H) {
 		const ch = this.cur.plain === 'channel', done = this.state === 'done', broken = this.state === 'interrupted';
@@ -1862,6 +2043,7 @@ class Bar {
 		if (cfg.alchemy) this.drawAlchFill(og, fillW, H, dt * settings.speed);
 		if (cfg.tailor) this.drawTailorFill(og, fillW, H, dt * settings.speed);
 		if (cfg.leather) this.drawLeatherFill(og, fillW, H);
+		if (cfg.engineering) this.drawEngineeringFill(og, fillW, H, dt * settings.speed);
 		if (cfg.ench) this.drawEnchFill(og, fillW, H, dt * settings.speed);
 		if (cfg.firstaid) this.drawFirstAidFill(og, fillW, H);
 		if (cfg.plain) this.drawPlainFill(og, fillW, H);

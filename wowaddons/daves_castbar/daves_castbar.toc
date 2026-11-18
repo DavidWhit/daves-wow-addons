@@ -2,7 +2,7 @@
 ## Title: Dave's Cast Bar
 ## Notes: Animated elemental cast bar: frost, fire, shadow, nature, arcane and holy, each alive and different every cast
 ## Author: davidwhit5
-## Version: 0.5.4
+## Version: 0.6.0
 ## SavedVariables: DavesCastbarDB
 ## IconTexture: Interface\Icons\Spell_Frost_FrostBolt02
 ## AddonCompartmentFunc: DavesCastbar_OnAddonCompartmentClick
@@ -19,6 +19,7 @@ Effects_Storm.lua
 Effects_Alchemy.lua
 Effects_Tailor.lua
 Effects_Leather.lua
+Effects_Engineering.lua
 Effects_Ench.lua
 Effects_FirstAid.lua
 EditMode.lua

@@ -1,7 +1,7 @@
 # Dave's Cast Bar (daves_castbar)
 
-An animated, elemental player cast bar for WoW Forever. Each spell gets one of twenty looks (seven elements,
-four gathering and six crafting professions, Disenchant, First Aid, and a plain bar), and every cast is different:
+An animated, elemental player cast bar for WoW Forever. Each spell gets one of twenty-one looks (seven elements,
+four gathering and seven crafting professions, Disenchant, First Aid, and a plain bar), and every cast is different:
 
 | Element | Look |
 | --- | --- |
@@ -21,6 +21,7 @@ four gathering and six crafting professions, Disenchant, First Aid, and a plain 
 | Alchemy | A bench of glassware stands on the bar, shuffled every cast: a flask boiling over a burner, a retort, measuring cylinders, a condenser, a glass coil, a vial rack, a funnel dripping into a beaker, joined by glass, bent glass and hoses with brass valves. The potion works its way through, lighting burners and filling each in turn, and pours into the bar, which fills like a liquid (it spreads, sloshes and bubbles) and brims at the end |
 | Tailoring | A small loom: taut warp ahead of the cast, woven cloth behind it (linen, wool, silk, mageweave, runecloth or mooncloth, one per cast in turn, with a slow sheen); at the cast edge a small worn boat shuttle crosses the shed with the weft and a slim steel reed beats each pick in, fluff flying; the loom is clipped to the bar, so nothing of it shows past the bar's lines |
 | Leatherworking | Tooled leather panels (five tones; the tooling changes each cast: basket-weave, scrolling vine, diamond lattice, bordered shells, knotwork band) lie across the bar with their lacing holes punched, apart by the gaps still open. As the cast reaches each joint the gap closes and a steel needle cross-laces it shut with a thong; running stitches follow along both edges |
+| Engineering | An interlocking clockwork train of big spoked Gnomish brass and Dwarven copper wheels meshed with medium blued-steel spur gears and small gilded pinions over a painted watchmaker movement plate (`tools/ref_eng_bg.jpg`, `tools/ref_eng_discs.jpg`), with antique Roman-numeral `I–XII` clock dials, ticking Breguet hour and minute hands, and etched Vernier/hairspring rings peeking behind the spokes (four metal palettes cycled per cast). As the cast progresses from left to right, each gear engages at its contact point with a burst of sparks and steam and drives its meshed neighbor until the entire train turns together to complete the recipe |
 | Enchanting | Dark velvet the magic settles on (a palette per cast: violet, sea-blue, orchid or indigo): behind the cast edge it shimmers with flowing bands of light and glitter; at the edge a vortex of spinning rings pulls glittering dust out of the unfilled part and spins it in |
 | Disenchant | The bar starts solid with magic; the vortex comes in at the right end and moves left, drawing the magic out of the solid part ahead of it (it fades as it is drawn off) and throwing it out behind as glittering dust and small shimmers that settle on the cloth it leaves spent; the vortex leads the edge and is clipped away by the time the cast completes. For the spell Disenchant |
 | First Aid | An open crimson wound bleeding ahead of the cast: the blood runs down and pulses with a heartbeat, beads swell on its lower edge and drip off. Broad bandage turns (a seventh of the bar's length wide, 1.4 to 5 bar heights, so a long bar takes about as many turns as a short one) wrap round it at the cast edge, a roll riding the end of the band (it passes behind the limb at the bar's edges, clipped to the bar), and blood soaks through each turn a moment after it is laid, creeping and drying darker, the soaked turns dripping; the heartbeat slows and the bleeding eases as it binds. Every cast takes a random wrap (spiral, figure-eight, reverse spiral with a fold in each turn, spica, circular), never the last one, and a random lean and way round; the bandage itself is always the same. Using a bandage (the First Aid channel) wraps in from the right as the channel drains. Used for the First Aid channel by name (crafting bandages uses the Tailoring loom look) |
@@ -45,7 +46,7 @@ Targets: WoW: Forever (`## Interface: 16001`).
 
 WoW gives addons no way to read a spell's school, so the element comes from your choice for that
 spell, then the gathering and smelting spells, Disenchant and First Aid (using a bandage) by name, then for crafting casts the recipe's
-profession (Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting; First Aid bandage crafts use Tailoring; Mining recipes are smelts), then the spell's name ("Frostbolt", anything
+profession (Blacksmithing, Alchemy, Tailoring, Leatherworking, Engineering, Enchanting; First Aid bandage crafts use Tailoring; Mining recipes are smelts), then the spell's name ("Frostbolt", anything
 with "Flame", ...), then the "Other casts" setting: a look (Plain, Blizzard's own bar, unless you pick another) or "Your class", which picks your class's and specialization's element. Hearthstone, mounts and anything else without a match get that setting.
 
 ## Develop
@@ -65,7 +66,7 @@ Files:
 | File | What it does |
 | --- | --- |
 | `Core.lua` | Startup, saved settings, slash command |
-| `Elements.lua` | The twenty looks and which spell gets which (Fishing, Mining, Herb Gathering, Skinning, Smelt ..., Disenchant and the First Aid channel get theirs by name; Blacksmithing, Alchemy, Tailoring, Leatherworking, Enchanting, First Aid→Tailoring and Mining→Smelting crafts by their recipe's profession) |
+| `Elements.lua` | The twenty-one looks and which spell gets which (Fishing, Mining, Herb Gathering, Skinning, Smelt ..., Disenchant and the First Aid channel get theirs by name; Blacksmithing, Alchemy, Tailoring, Leatherworking, Engineering, Enchanting, First Aid→Tailoring and Mining→Smelting crafts by their recipe's profession) |
 | `Bar.lua` | The bar, casting states, fill, glow, spark, frame, text, hiding Blizzard's bar |
 | `Effects.lua` | Particles, the shared helpers (`ns.FXi`) and the hooks the bar calls; the looks register with it from the files below (Lua allows 200 locals a file, so each group has its own) |
 | `Effects_Spells.lua` | Frost, nature and herbalism vines, arcane, holy |
@@ -75,6 +76,7 @@ Files:
 | `Effects_Alchemy.lua` | The alchemy bench and trough |
 | `Effects_Tailor.lua` | The tailoring loom |
 | `Effects_Leather.lua` | The leatherworking panels and laces |
+| `Effects_Engineering.lua` | Engineering: Roman clock dials, astrolabe rings and the interlocking gear train |
 | `Effects_Ench.lua` | Enchanting and disenchant |
 | `Effects_FirstAid.lua` | First Aid: the wound, the bandage turns, the blood, the roll |
 | `EditModeDialog.lua` | The kit's shared Edit Mode settings dialog and selection art (copied from `wow-addon-kit`; don't edit it here) |

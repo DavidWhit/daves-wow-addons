@@ -22,7 +22,7 @@ You review WoW addon code for **WoW: Forever** (modern client, game type `camelo
 3. **Strict scope & files to skip:**
    - **Diff mode (default):** Review the packet's line-numbered diff and touched functions. Use `Read` (with `StartLine`/`EndLine` ranges, not whole multi-thousand-line files) or `Grep` **only** when checking surrounding function logic or cross-file `ns.*` callers/callees of changed code.
    - **Full mode (only when requested, for brand-new untracked addons, or before a release):** Read loaded addon Lua/XML/TOC files.
-   - **Never read:** an unmodified `EditModeDialog.lua` (already byte-checked by the validator), companion generated addons (`daves_map_data`, `daves_map_textures`), `Media/*`, or untouched `Effects_*.lua` / static data tables.
+   - **Never read:** an unmodified `EditModeDialog.lua` (already byte-checked by the validator), `Media/*`, or untouched `Effects_*.lua` / generated static data tables (`Data.lua`, `Stitch/Data/*`).
    - **Respect `NOTES.md`:** Check the packet's `NOTES.md` summary (or `<addon>/NOTES.md` if needed). Never re-flag findings already logged there as skipped, declined, deferred, or accepted design trade-offs unless the new diff broke their stated invariant.
 4. **Batch any extra lookups into a single command:**
    - Check all doubted APIs or widget methods in **one** call: `py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.py" FnOne FnTwo :MethodThree` (add `-Events` for events).
@@ -30,7 +30,7 @@ You review WoW addon code for **WoW: Forever** (modern client, game type `camelo
 
 ## What to inspect beyond the static validator
 
-`Test-WowAddon.py` already checks TOC/files, removed CLEU, unknown/moved/deprecated APIs and events, same-line & 1-hop local `secret-value` ops, `secret-args` (`AllowedWhenUntainted` / `NotAllowed`), direct `taint-call` UI globals, `taint-hook` global overwrites, `taint-unregister` on Blizzard frames, `editmode-dialog`/`ui`/`snap`/`onupdate`/`openfor`, `local-limit` (>=175 active locals), and `luacheck`. Do not spend turns re-verifying clean files for those; focus on what static rules can't see:
+`Test-WowAddon.py` already checks TOC/files, removed CLEU, unknown/moved/deprecated APIs and events, same-line & 1-hop local `secret-value` ops, `secret-args` (`AllowedWhenUntainted` / `NotAllowed`), direct `taint-call` UI globals, `taint-hook` global overwrites, `taint-unregister` on Blizzard frames, `editmode-dialog`/`ui`/`snap`/`onupdate`/`openfor`, `local-limit` (>200 error / >=175 warn), `upvalue-limit` (>60 error / >=55 warn), `out-of-scope-local`, and `luacheck`. Do not spend turns re-verifying clean files for those; focus on what static rules can't see:
 
 1. **Multi-hop secrets & event payloads:** secrets passed across functions, stored on `ns.*` / tables, unpacked from multi-return APIs (`UnitCastingInfo`, `UnitChannelInfo`, `UnitClass`, `C_UnitAuras.*`), or delivered in `UNIT_SPELLCAST_*` / `CHAT_MSG_*` event payloads that later reach comparisons, math, `..`, table keys, or truthy checks (e.g. treating a secret `interruptedBy` payload as truthy instead of inferring from readable end time).
 2. **Combat lockdown & secure hierarchy:** parenting or anchoring a `Secure*` frame to a frame that shows/hides/moves/resizes in combat (which makes the target frame protected too!), creating `Secure*` / item buttons lazily during combat instead of pre-creating out of combat, or calling `SetPoint`/`Show`/`Hide`/`SetAttribute` on protected frames without `InCombatLockdown()` + `PLAYER_REGEN_ENABLED` catch-up.

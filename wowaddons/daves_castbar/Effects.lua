@@ -8,9 +8,10 @@
 --   Effects_Storm      lightning (the painted clouds, the bolts)
 --   Effects_Alchemy    the glassware bench and the trough that fills like a liquid
 --   Effects_Tailor     the loom: shuttle, reed, the woven cloth
---   Effects_Leather    tooled leather panels laced shut by a needle
---   Effects_Ench       enchanting and disenchant: the velvet, the vortex, the dust
---   Effects_FirstAid   first aid: the wound, the bandage turns wrapping it, the blood soaking through, the roll
+--   Effects_Leather      tooled leather panels laced shut by a needle
+--   Effects_Engineering  interlocking big spoked wheels and small pinions over Roman clock dials and astrolabe rings
+--   Effects_Ench         enchanting and disenchant: the velvet, the vortex, the dust
+--   Effects_FirstAid     first aid: the wound, the bandage turns wrapping it, the blood soaking through, the roll
 --   (plain, Blizzard's own cast bar art, is small and lives here)
 -- Why several files: Lua 5.1 allows 200 local variables per function, and a file's top level is one function. One
 -- file for every look passed that (the game refuses the whole file: "too many local variables"), so each group has

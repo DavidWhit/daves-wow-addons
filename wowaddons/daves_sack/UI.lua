@@ -130,8 +130,7 @@ end
 ---------------------------------------------------------------------------
 local frame, content, search, slotsText, barBg, barFill, money
 local reagentText, reagentBarBg, reagentBarFill      -- footer: the reagent bag's own counter
-local ahRow, ahValueText, ahTimeText, ahScanBarBg, ahScanBarFill  -- footer bottom row: cached AH bag value, status & scan progress bar
-local ahBagValue, ahPricedStacks, ahTradeableStacks = 0, 0, 0
+local ah = { value = 0, priced = 0, tradeable = 0 }  -- footer bottom row: cached AH bag value, status & scan progress bar
 local AH_ROW_H = 18
 local function AhRowOffset() return (ns.db and ns.db.showAuctionPrices ~= false) and AH_ROW_H or 0 end
 local scroll, track, thumb, nativeBar, maxScroll = nil, nil, nil, nil, 0
@@ -150,6 +149,12 @@ for i = 1, FREE_CAT do sections[i] = {} end
 local dirty, dirtyAll, layoutDirty = {}, true, true
 local freeButton, freeCount, totalSlots = nil, 0, 0
 local freeReagentButton, reagentFree, reagentTotal = nil, 0, 0   -- the reagent bag, counted apart
+local ammo = {                                                   -- equipped quivers / ammo pouches, counted apart
+	trim = { 0.48, 0.38, 0.22, 1 },
+	bag = {},
+	freeBtn = nil, free = 0, total = 0,
+	text = nil, barBg = nil, barFill = nil, anchor = nil, extra = nil,
+}
 local BAR_W, BAR_GAP = 120, 16
 
 ---------------------------------------------------------------------------
@@ -213,7 +218,7 @@ do
 
 		-- Tooltips/clicks stay entirely Blizzard's own handlers (no wrapping), so
 		-- hovering and using items never runs through addon code (no taint).
-		b.fbRec, b.fbKey, b.fbReagent = {}, bag * 100 + slot, ns.IsReagentBag(bag)
+		b.fbRec, b.fbKey, b.fbReagent, b.fbAmmo = {}, bag * 100 + slot, ns.IsReagentBag(bag), ammo.bag[bag] and true or false
 		b.pTex = false             -- forces the first paint
 		return b
 	end
@@ -260,7 +265,7 @@ local function Paint(b)
 		b.fbEdge:SetVertexColor(c.r, c.g, c.b, 0.9)
 		if r.quality >= 3 then b.fbGlow:SetVertexColor(c.r, c.g, c.b, 0.45); b.fbGlow:Show() else b.fbGlow:Hide() end
 	else
-		local trim = (not r.id and b.fbReagent) and REAGENT_TRIM or TRIM
+		local trim = (not r.id and ((b.fbReagent and REAGENT_TRIM) or (b.fbAmmo and ammo.trim))) or TRIM
 		b.fbEdge:SetVertexColor(trim[1], trim[2], trim[3], 1)
 		b.fbGlow:Hide()
 	end
@@ -299,11 +304,16 @@ local function ScanBag(bag)
 	MakeButtons(bag)
 	-- Buttons are made in slot order, so any missing (combat) are the last ones: show the ones that exist.
 	local n = math.min(GetNumSlots(bag) or 0, #list)
+	local isAmmo = ammo.bag[bag] and true or false
 	if n < (GetNumSlots(bag) or 0) then missedInCombat = true end
 	if n ~= list.n then layoutDirty = true end
 	for slot = 1, n do
 		local b = list[slot]
 		local rec = b.fbRec
+		if b.fbAmmo ~= isAmmo then
+			b.fbAmmo = isAmmo
+			if not rec.id then b.pTex = false end
+		end
 		if ReadSlot(bag, slot, rec) or rec.recat then
 			rec.recat = nil
 			local cat, grp = Categorize(bag, slot, rec)
@@ -320,20 +330,25 @@ local function ScanBag(bag)
 	list.n = n
 end
 
--- Only plain bags count toward "free space" (not quivers, soul/herb bags or
--- the keyring). The reagent bag (modern client) gets its own count.
+-- Only plain bags count toward "free space" (not soul/herb bags or the
+-- keyring). The reagent bag and equipped ammo bags (quivers / ammo pouches)
+-- each get their own count.
 local GetFreeSlots = C_Container.GetContainerNumFreeSlots
 local generalBag, reagentBag = {}, {}
 
 local function SyncBagList()
 	ns.BuildBagList(bagList)
-	wipe(inList); wipe(generalBag); wipe(reagentBag)
+	wipe(inList); wipe(generalBag); wipe(reagentBag); wipe(ammo.bag)
 	local normal = NUM_BAG_SLOTS or 4
 	for _, bag in ipairs(bagList) do
 		inList[bag] = true; dirty[bag] = true
 		if bag >= 0 and bag <= normal then
 			local _, family = GetFreeSlots(bag)
-			generalBag[bag] = (family or 0) == 0
+			if bag > 0 and ns.IsAmmoBag(bag, family) then
+				ammo.bag[bag] = true
+			else
+				generalBag[bag] = (family or 0) == 0
+			end
 		elseif ns.IsReagentBag(bag) then
 			reagentBag[bag] = (GetNumSlots(bag) or 0) > 0        -- equipped?
 		end
@@ -482,6 +497,10 @@ do
 				ns.SyncItemSetLocks()
 			end
 		end)
+	end
+
+	function ns.IsSlotAddonLocked(bag, slot)
+		return addonLocked[bag * 100 + slot] and true or false
 	end
 
 	function ns.SettleSetLocksAfterSort()
@@ -738,12 +757,12 @@ do
 	end
 
 	function ns.GetBagAhSummary()
-		return ahBagValue, ahPricedStacks, ahTradeableStacks
+		return ah.value, ah.priced, ah.tradeable
 	end
 
 	local lastAhShow
 	local function UpdateAuctionFooter()
-		if not ahRow then return end
+		if not ah.row then return end
 		local show = ns.db and ns.db.showAuctionPrices ~= false
 		if show ~= lastAhShow then
 			lastAhShow = show
@@ -751,7 +770,7 @@ do
 			slotsText:ClearAllPoints(); slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24 + off)
 			barBg:ClearAllPoints(); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14 + off)
 			money:ClearAllPoints(); money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + off)
-			ahRow:SetShown(show)
+			ah.row:SetShown(show)
 		end
 		if not show then return end
 
@@ -776,7 +795,7 @@ do
 				end
 			end
 		end
-		ahBagValue, ahPricedStacks, ahTradeableStacks = total, priced, tradeable
+		ah.value, ah.priced, ah.tradeable = total, priced, tradeable
 
 		local hasCache = (ns.db and ns.db.ahUpdated) or (ns.ahCachedCount or 0) > 0
 		local doneFlash = not ns.ahScanning and ns.ahScanDoneUntil and GetTime and GetTime() < ns.ahScanDoneUntil
@@ -787,31 +806,31 @@ do
 			scanText = "|cff5cd65cAH Cache Complete|r"
 		end
 		if hasCache then
-			ahValueText:SetText(format("|cffd4a94eAH:|r %s", MoneyString(total)))
+			ah.valueText:SetText(format("|cffd4a94eAH:|r %s", MoneyString(total)))
 			if scanText then
-				ahTimeText:SetText(scanText)
+				ah.timeText:SetText(scanText)
 			else
 				local age = ns.FormatAge and ns.FormatAge(ns.db.ahUpdated)
-				ahTimeText:SetText(age and ("Updated " .. age) or "")
+				ah.timeText:SetText(age and ("Updated " .. age) or "")
 			end
 		else
-			ahValueText:SetText("|cff8c8c8cAH: Visit Auction House to cache prices|r")
-			ahTimeText:SetText(scanText or "")
+			ah.valueText:SetText("|cff8c8c8cAH: Visit Auction House to cache prices|r")
+			ah.timeText:SetText(scanText or "")
 		end
 
-		if ahScanBarBg and ahScanBarFill then
+		if ah.scanBarBg and ah.scanBarFill then
 			if ns.ahScanning or doneFlash then
 				local pct = doneFlash and 100 or max(5, min(100, ns.ahScanProgress or 15))
 				local barW = max(40, (frame:GetWidth() or 300) - (PAD + 4) * 2)
 				if doneFlash then
-					ahScanBarFill:SetColorTexture(0.35, 0.82, 0.42, 1)
+					ah.scanBarFill:SetColorTexture(0.35, 0.82, 0.42, 1)
 				else
-					ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
+					ah.scanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
 				end
-				ahScanBarFill:SetWidth(max(2, barW * pct / 100))
-				ahScanBarBg:Show(); ahScanBarFill:Show()
+				ah.scanBarFill:SetWidth(max(2, barW * pct / 100))
+				ah.scanBarBg:Show(); ah.scanBarFill:Show()
 			else
-				ahScanBarBg:Hide(); ahScanBarFill:Hide()
+				ah.scanBarBg:Hide(); ah.scanBarFill:Hide()
 			end
 		end
 	end
@@ -819,14 +838,14 @@ do
 	-- Lightweight O(1) progress update called on background scan ticks so we never
 	-- rescan bags, refit currencies, or rebuild the Market window mid-slice.
 	function ns.UpdateAhScanProgressOnly()
-		if ahRow and ahRow:IsShown() and ns.ahScanning then
+		if ah.row and ah.row:IsShown() and ns.ahScanning then
 			local pct = max(5, min(100, ns.ahScanProgress or 15))
-			ahTimeText:SetText(format("|cffd4a94eCaching AH %d%%…|r", pct))
-			if ahScanBarBg and ahScanBarFill then
+			ah.timeText:SetText(format("|cffd4a94eCaching AH %d%%…|r", pct))
+			if ah.scanBarBg and ah.scanBarFill then
 				local barW = max(40, (frame and frame:GetWidth() or 300) - (PAD + 4) * 2)
-				ahScanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
-				ahScanBarFill:SetWidth(max(2, barW * pct / 100))
-				ahScanBarBg:Show(); ahScanBarFill:Show()
+				ah.scanBarFill:SetColorTexture(0.85, 0.68, 0.25, 1)
+				ah.scanBarFill:SetWidth(max(2, barW * pct / 100))
+				ah.scanBarBg:Show(); ah.scanBarFill:Show()
 			end
 		end
 		if ns.UpdateMarketScanProgressOnly then
@@ -834,15 +853,17 @@ do
 		end
 	end
 
-	-- Two counters side by side: your bags, then the reagent bag (only while one
-	-- is equipped). Nothing shrinks or overlaps: the window's minimum width is
-	-- measured from these strings and the gold (ns.MinColumns, below).
-	local lastUsed, lastTotal, lastRUsed, lastRTotal
+	-- Up to three counters side by side: your bags, the reagent bag, and any
+	-- equipped ammo bag (each extra counter shown only while one is equipped).
+	-- Nothing shrinks or overlaps: the window's minimum width is measured from
+	-- these strings and the gold (ns.MinColumns, below).
+	local lastUsed, lastTotal, lastRUsed, lastRTotal, lastAUsed, lastATotal
 	UpdateFooter = function()
 		UpdateAuctionFooter()
-		local used, rUsed = totalSlots - freeCount, reagentTotal - reagentFree
-		if used == lastUsed and totalSlots == lastTotal and rUsed == lastRUsed and reagentTotal == lastRTotal then return end
-		lastUsed, lastTotal, lastRUsed, lastRTotal = used, totalSlots, rUsed, reagentTotal
+		local used, rUsed, aUsed = totalSlots - freeCount, reagentTotal - reagentFree, ammo.total - ammo.free
+		if used == lastUsed and totalSlots == lastTotal and rUsed == lastRUsed and reagentTotal == lastRTotal
+			and aUsed == lastAUsed and ammo.total == lastATotal then return end
+		lastUsed, lastTotal, lastRUsed, lastRTotal, lastAUsed, lastATotal = used, totalSlots, rUsed, reagentTotal, aUsed, ammo.total
 		slotsText:SetText(format("%d |cff8c8c8c/|r %d", used, totalSlots))
 		FillBar(barFill, used, totalSlots, BAR_W)
 		if reagentTotal > 0 then
@@ -851,6 +872,21 @@ do
 			reagentText:Show(); reagentBarBg:Show(); reagentBarFill:Show()
 		else
 			reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
+		end
+		if ammo.total > 0 then
+			ammo.text:SetText(format("%d |cff8c8c8c/|r %d |cff8c8c8cammo|r", aUsed, ammo.total))
+			local leftBar = reagentTotal > 0 and reagentBarBg or barBg
+			local leftText = reagentTotal > 0 and reagentText or slotsText
+			local extra = max(0, (leftText:GetStringWidth() or 0) - BAR_W)
+			if ammo.anchor ~= leftBar or ammo.extra ~= extra then
+				ammo.anchor, ammo.extra = leftBar, extra
+				ammo.text:ClearAllPoints(); ammo.text:SetPoint("BOTTOMLEFT", leftBar, "BOTTOMRIGHT", BAR_GAP + extra, 10)
+				ammo.barBg:ClearAllPoints(); ammo.barBg:SetPoint("BOTTOMLEFT", leftBar, "BOTTOMRIGHT", BAR_GAP + extra, 0)
+			end
+			FillBar(ammo.barFill, aUsed, ammo.total, BAR_W)
+			ammo.text:Show(); ammo.barBg:Show(); ammo.barFill:Show()
+		else
+			ammo.text:Hide(); ammo.barBg:Hide(); ammo.barFill:Hide()
 		end
 	end
 
@@ -895,9 +931,10 @@ end
 function ns.MinColumns()
 	local w = 4 + max(BAR_W, slotsText:GetStringWidth() or 0)
 	if reagentTotal > 0 then w = w + BAR_GAP + max(BAR_W, reagentText:GetStringWidth() or 0) end
+	if ammo.total > 0 then w = w + BAR_GAP + max(BAR_W, ammo.text:GetStringWidth() or 0) end
 	w = w + 12 + (money:GetStringWidth() or 0) + 4
-	if ahRow and ahRow:IsShown() then
-		local ahW = 4 + (ahValueText:GetStringWidth() or 0) + 12 + (ahTimeText:GetStringWidth() or 0) + 4
+	if ah.row and ah.row:IsShown() then
+		local ahW = 4 + (ah.valueText:GetStringWidth() or 0) + 12 + (ah.timeText:GetStringWidth() or 0) + 4
 		if ahW > w then w = ahW end
 	end
 	return max(MIN_COLS, min(ns.MaxColumns(), ceil((w + GAP) / (SLOT + GAP))))
@@ -940,12 +977,16 @@ local function ShowFreeCount()
 	if ns.db.oneBag then return end
 	ShowCount(freeButton, freeCount, TRIM)
 	ShowCount(freeReagentButton, reagentFree, REAGENT_TRIM)
+	ShowCount(ammo.freeBtn, ammo.free, ammo.trim)
 end
 
--- "12" alone, or "12 bag, 8 reagent" while a reagent bag is equipped.
+-- "12" alone, or "12 bag, 8 reagent, 4 ammo" while reagent / ammo bags are equipped.
 local function FreeHeaderText()
-	if reagentTotal > 0 then return format("%d bag, %d reagent", freeCount, reagentFree) end
-	return freeCount
+	if reagentTotal <= 0 and ammo.total <= 0 then return freeCount end
+	local s = format("%d bag", freeCount)
+	if reagentTotal > 0 then s = s .. format(", %d reagent", reagentFree) end
+	if ammo.total > 0 then s = s .. format(", %d ammo", ammo.free) end
+	return s
 end
 
 local function ApplySearch()
@@ -967,6 +1008,7 @@ Layout = function()
 	for i = 1, FREE_CAT do wipe(sections[i]) end
 	freeButton, freeCount, totalSlots = nil, 0, 0
 	freeReagentButton, reagentFree, reagentTotal = nil, 0, 0
+	ammo.freeBtn, ammo.free, ammo.total = nil, 0, 0
 
 	local oneBag = ns.db.oneBag
 	local allSlots = sections[1]
@@ -974,8 +1016,10 @@ Layout = function()
 	for _, bag in ipairs(bagList) do
 		local list = buttons[bag]
 		local n = list and list.n or 0
-		local general, reagent = generalBag[bag], reagentBag[bag]
-		if general then totalSlots = totalSlots + n elseif reagent then reagentTotal = reagentTotal + n end
+		local general, reagent, isAmmo = generalBag[bag], reagentBag[bag], ammo.bag[bag]
+		if general then totalSlots = totalSlots + n
+		elseif reagent then reagentTotal = reagentTotal + n
+		elseif isAmmo then ammo.total = ammo.total + n end
 		for slot = 1, n do
 			local b = list[slot]
 			if not b.fbCat then
@@ -985,6 +1029,9 @@ Layout = function()
 				elseif reagent then
 					reagentFree = reagentFree + 1
 					if not oneBag and not freeReagentButton then freeReagentButton = b end
+				elseif isAmmo then
+					ammo.free = ammo.free + 1
+					if not oneBag and not ammo.freeBtn then ammo.freeBtn = b end
 				end
 			end
 			if oneBag then
@@ -997,7 +1044,7 @@ Layout = function()
 				end
 			elseif b.fbCat then
 				local s = sections[b.fbCat]; s[#s + 1] = b
-			elseif b ~= freeButton and b ~= freeReagentButton then
+			elseif b ~= freeButton and b ~= freeReagentButton and b ~= ammo.freeBtn then
 				b:Hide()
 			end
 		end
@@ -1005,11 +1052,12 @@ Layout = function()
 	if not oneBag then
 		-- Every item has a category (Miscellaneous catches the rest), so the Free
 		-- Space tiles hold no items: they're the empty slots you drop onto (e.g.
-		-- the other half of a split stack): one for your bags and, when a reagent
-		-- bag is equipped, one for it. On by default; can be hidden.
+		-- the other half of a split stack): one for your bags, and when equipped,
+		-- one for the reagent bag and one for your quiver / ammo pouch.
 		local freeS, show = sections[FREE_CAT], ns.db.showFreeSpace
 		if freeButton then if show then freeS[#freeS + 1] = freeButton else freeButton:Hide() end end
 		if freeReagentButton then if show then freeS[#freeS + 1] = freeReagentButton else freeReagentButton:Hide() end end
+		if ammo.freeBtn then if show then freeS[#freeS + 1] = ammo.freeBtn else ammo.freeBtn:Hide() end end
 	end
 
 	UpdateFooter()                                 -- strings first: the minimum width is measured from them
@@ -1160,11 +1208,14 @@ do
 			-- Re-sort right away unless gaps are being held (see HoldGaps), and
 			-- always just after Sort or when the Free Space tile itself got filled.
 			if force or ns.db.oneBag or GetTime() < (ns.sortingUntil or 0) or not HoldGaps()
-				or (freeButton and freeButton.fbRec.id) or (freeReagentButton and freeReagentButton.fbRec.id) then Layout()
+				or (freeButton and freeButton.fbRec.id) or (freeReagentButton and freeReagentButton.fbRec.id)
+				or (ammo.freeBtn and ammo.freeBtn.fbRec.id) then Layout()
 			else
-				freeCount, reagentFree = 0, 0
+				freeCount, reagentFree, ammo.free = 0, 0, 0
 				for bag in pairs(generalBag) do if generalBag[bag] then freeCount = freeCount + (GetFreeSlots(bag) or 0) end end
 				for bag in pairs(reagentBag) do if reagentBag[bag] then reagentFree = reagentFree + (GetFreeSlots(bag) or 0) end end
+				for bag in pairs(ammo.bag) do if ammo.bag[bag] then ammo.free = ammo.free + (GetFreeSlots(bag) or 0) end end
+				if headers[FREE_CAT] and headers[FREE_CAT]:IsShown() then headers[FREE_CAT].count:SetText(FreeHeaderText()) end
 				ShowFreeCount(); UpdateFooter(); ns.SyncItemSetLocks()
 				if not reflowWaiting then reflowWaiting = true; C_Timer.After(0.3, ReflowLater) end
 			end
@@ -1222,7 +1273,7 @@ local function UpdatePixels()
 	local s = frame:GetEffectiveScale()
 	px = (h and h > 0 and s and s > 0) and (768 / h / s) or 1
 	for i = 1, #hairlines do PlaceHairline(hairlines[i]) end
-	if barFill then barFill:SetHeight(Snap(4)); reagentBarFill:SetHeight(Snap(4)) end
+	if barFill then barFill:SetHeight(Snap(4)); reagentBarFill:SetHeight(Snap(4)); ammo.barFill:SetHeight(Snap(4)) end
 end
 ns.UpdatePixels = UpdatePixels
 
@@ -1230,6 +1281,7 @@ function ns.ApplyScale()
 	refitHeight = true
 	frame:SetScale(ns.db.scale)
 	if ns.marketFrame then ns.marketFrame:SetScale(ns.db.scale) end
+	if ns.SyncSnipeAlertScale then ns.SyncSnipeAlertScale() end
 	UpdatePixels()
 	ns.ResetPosition()
 	-- A bigger scale can push the columns past the screen: the limits win.
@@ -1397,16 +1449,13 @@ end
 do
 	local PickupContainerItem = C_Container.PickupContainerItem
 	local GetContainerItemID = C_Container.GetContainerItemID
+	local GetSlotInfo = C_Container.GetContainerItemInfo
+	local GetMaxStack = C_Item and C_Item.GetItemMaxStackSizeByID
+	local GetItemInfo = C_Item and C_Item.GetItemInfo
 
-	local function DropIntoBag(bag, needFit)
+	local function DropIntoPlainBag(bag)
 		local free, family = GetFreeSlots(bag)                -- live: catches bag swaps too
-		if (free or 0) == 0 then return false end
-		if needFit then
-			local kind, itemID = GetCursorInfo()
-			if (family or 0) == 0 or kind ~= "item" or not ns.FitsBagFamily(itemID, family) then return false end
-		elseif (family or 0) ~= 0 then
-			return false
-		end
+		if (free or 0) == 0 or (family or 0) ~= 0 or ns.IsAmmoBag(bag, family) then return false end
 		for slot = 1, (GetNumSlots(bag) or 0) do
 			if not GetContainerItemID(bag, slot) then
 				PickupContainerItem(bag, slot)
@@ -1416,16 +1465,209 @@ do
 		return false
 	end
 
+	local function DropIntoReagentBag()
+		if not (ns.REAGENT_BAG and GetCursorInfo) then return false end
+		local free, family = GetFreeSlots(ns.REAGENT_BAG)
+		if (free or 0) <= 0 then return false end
+		local kind, itemID = GetCursorInfo()
+		if kind ~= "item" or not ns.FitsReagentBag(itemID, family) then return false end
+		for slot = 1, (GetNumSlots(ns.REAGENT_BAG) or 0) do
+			if not GetContainerItemID(ns.REAGENT_BAG, slot) then
+				PickupContainerItem(ns.REAGENT_BAG, slot)
+				return true
+			end
+		end
+		return false
+	end
+
+	local function DropIntoAmmoBags()
+		if not GetCursorInfo then return false end
+		local kind, itemID = GetCursorInfo()
+		if kind ~= "item" or not ns.IsAmmoItem(itemID) then return false end
+		for bag = 1, (NUM_BAG_SLOTS or 4) do
+			local free, family = GetFreeSlots(bag)
+			if (free or 0) > 0 and ns.IsAmmoBag(bag, family) and ns.FitsAmmoBag(itemID, bag, family) then
+				for slot = 1, (GetNumSlots(bag) or 0) do
+					if not GetContainerItemID(bag, slot) then
+						PickupContainerItem(bag, slot)
+						return true
+					end
+				end
+			end
+		end
+		return false
+	end
+
 	function ns.StoreCursorItem()
 		if not (CursorHasItem and CursorHasItem() and PickupContainerItem) then return end
-		if ns.REAGENT_BAG and ns.db.preferReagentBag ~= false and GetCursorInfo then
-			if DropIntoBag(ns.REAGENT_BAG, true) then return end
-		end
+		if ns.db.preferAmmoBag ~= false and DropIntoAmmoBags() then return end
+		if ns.db.preferReagentBag ~= false and DropIntoReagentBag() then return end
 		for bag = 0, (NUM_BAG_SLOTS or 4) do
-			if DropIntoBag(bag) then return end
+			if DropIntoPlainBag(bag) then return end
 		end
+		if ns.db.preferAmmoBag == false and DropIntoAmmoBags() then return end
+		if ns.db.preferReagentBag == false and DropIntoReagentBag() then return end
 		if UIErrorsFrame and ERR_INV_FULL then UIErrorsFrame:AddMessage(ERR_INV_FULL, 1, 0.1, 0.1) end
 	end
+
+	-- Blizzard's C_Container.SortBags() does not always pull loose arrows/bullets or
+	-- reagents out of plain bags into an equipped quiver, ammo pouch, or reagent bag.
+	-- When "Prefer ammo bag" / "Prefer the reagent bag" is enabled, run a clean
+	-- post-sort sweep once server item locks settle.
+	local sweepToken = 0
+
+	local function AnyTransferLocked(normal)
+		if not GetSlotInfo then return false end
+		for bag = 0, normal do
+			for slot = 1, (GetNumSlots(bag) or 0) do
+				local info = GetSlotInfo(bag, slot)
+				if info and info.isLocked and not (ns.IsSlotAddonLocked and ns.IsSlotAddonLocked(bag, slot)) then
+					return true
+				end
+			end
+		end
+		if ns.REAGENT_BAG then
+			for slot = 1, (GetNumSlots(ns.REAGENT_BAG) or 0) do
+				local info = GetSlotInfo(ns.REAGENT_BAG, slot)
+				if info and info.isLocked and not (ns.IsSlotAddonLocked and ns.IsSlotAddonLocked(ns.REAGENT_BAG, slot)) then
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	local function FindAmmoTarget(itemID, normal, usedTarget)
+		local maxStack = (GetMaxStack and GetMaxStack(itemID)) or (GetItemInfo and select(8, GetItemInfo(itemID))) or 0
+		if maxStack > 1 and GetSlotInfo then
+			for bag = 1, normal do
+				local _, family = GetFreeSlots(bag)
+				if ns.IsAmmoBag(bag, family) and ns.FitsAmmoBag(itemID, bag, family) then
+					for slot = 1, (GetNumSlots(bag) or 0) do
+						local key = bag * 100 + slot
+						if not usedTarget[key] then
+							local info = GetSlotInfo(bag, slot)
+							if info and not info.isLocked and info.itemID == itemID and (info.stackCount or 0) < maxStack then
+								return bag, slot
+							end
+						end
+					end
+				end
+			end
+		end
+		for bag = 1, normal do
+			local free, family = GetFreeSlots(bag)
+			if (free or 0) > 0 and ns.IsAmmoBag(bag, family) and ns.FitsAmmoBag(itemID, bag, family) then
+				for slot = 1, (GetNumSlots(bag) or 0) do
+					local key = bag * 100 + slot
+					if not usedTarget[key] and not GetContainerItemID(bag, slot) then
+						return bag, slot
+					end
+				end
+			end
+		end
+		return nil, nil
+	end
+
+	local function FindReagentTarget(itemID, rFamily, usedTarget)
+		local rBag = ns.REAGENT_BAG
+		if not (rBag and ns.FitsReagentBag(itemID, rFamily)) then return nil, nil end
+		local rSlots = GetNumSlots(rBag) or 0
+		if rSlots <= 0 then return nil, nil end
+		local maxStack = (GetMaxStack and GetMaxStack(itemID)) or (GetItemInfo and select(8, GetItemInfo(itemID))) or 0
+		if maxStack > 1 and GetSlotInfo then
+			for slot = 1, rSlots do
+				local key = rBag * 100 + slot
+				if not usedTarget[key] then
+					local info = GetSlotInfo(rBag, slot)
+					if info and not info.isLocked and info.itemID == itemID and (info.stackCount or 0) < maxStack then
+						return rBag, slot
+					end
+				end
+			end
+		end
+		if (GetFreeSlots(rBag) or 0) > 0 then
+			for slot = 1, rSlots do
+				local key = rBag * 100 + slot
+				if not usedTarget[key] and not GetContainerItemID(rBag, slot) then
+					return rBag, slot
+				end
+			end
+		end
+		return nil, nil
+	end
+
+	function ns.QueueSpecialtySweepAfterSort()
+		if not (PickupContainerItem and GetSlotInfo and ns.db) then return end
+		local normal = NUM_BAG_SLOTS or 4
+		local wantAmmo, wantReagent = ns.db.preferAmmoBag ~= false, ns.db.preferReagentBag ~= false
+		local hasAmmoBag = false
+		if wantAmmo then
+			for bag = 1, normal do
+				local _, family = GetFreeSlots(bag)
+				if ns.IsAmmoBag(bag, family) then hasAmmoBag = true; break end
+			end
+		end
+		local hasReagentBag = wantReagent and ns.REAGENT_BAG and (GetNumSlots(ns.REAGENT_BAG) or 0) > 0
+		if not (hasAmmoBag or hasReagentBag) then return end
+
+		sweepToken = sweepToken + 1
+		local myToken, waits, passes = sweepToken, 0, 0
+		local usedTarget = {}
+
+		local function Step()
+			if myToken ~= sweepToken or not ns.db or InCombatLockdown() then return end
+			if (CursorHasItem and CursorHasItem()) or (_G.TradeFrame and _G.TradeFrame.IsShown and _G.TradeFrame:IsShown()) then return end
+			local doAmmo = ns.db.preferAmmoBag ~= false
+			local doReagent = ns.db.preferReagentBag ~= false and ns.REAGENT_BAG and (GetNumSlots(ns.REAGENT_BAG) or 0) > 0
+			if not (doAmmo or doReagent) then return end
+			if AnyTransferLocked(normal) then
+				waits = waits + 1
+				if waits <= 15 then C_Timer.After(0.2, Step) end
+				return
+			end
+			waits = 0
+			wipe(usedTarget)
+			local _, rFamily = nil, nil
+			if doReagent then _, rFamily = GetFreeSlots(ns.REAGENT_BAG) end
+			local moved = 0
+			for bag = 0, normal do
+				local _, family = GetFreeSlots(bag)
+				if not ns.IsAmmoBag(bag, family) then
+					for slot = 1, (GetNumSlots(bag) or 0) do
+						local info = GetSlotInfo(bag, slot)
+						local id = info and info.itemID
+						if id and not info.isLocked and (info.stackCount or 0) > 0 then
+							local tBag, tSlot
+							if doAmmo and ns.IsAmmoItem(id) then
+								tBag, tSlot = FindAmmoTarget(id, normal, usedTarget)
+							elseif doReagent then
+								tBag, tSlot = FindReagentTarget(id, rFamily, usedTarget)
+							end
+							if tBag then
+								usedTarget[tBag * 100 + tSlot] = true
+								PickupContainerItem(bag, slot)
+								PickupContainerItem(tBag, tSlot)
+								if CursorHasItem and CursorHasItem() then
+									if ClearCursor then ClearCursor() end
+								else
+									moved = moved + 1
+								end
+							end
+						end
+					end
+				end
+			end
+			if moved > 0 then
+				ns.sortingUntil = GetTime() + 2
+				passes = passes + 1
+				if passes < 6 then C_Timer.After(0.25, Step) end
+			end
+		end
+
+		C_Timer.After(0.35, Step)
+	end
+	ns.QueueAmmoSweepAfterSort = ns.QueueSpecialtySweepAfterSort
 
 	---------------------------------------------------------------------------
 	-- Backpack currencies: whatever you ticked "Show on Backpack" in the Currency
@@ -1552,6 +1794,9 @@ do
 		local leftW = max(BAR_W, slotsText:GetStringWidth() or 0)
 		if reagentTotal > 0 then
 			leftW = leftW + BAR_GAP + max(BAR_W, reagentText:GetStringWidth() or 0)
+		end
+		if ammo.total > 0 then
+			leftW = leftW + BAR_GAP + max(BAR_W, ammo.text:GetStringWidth() or 0)
 		end
 		local moneyW = money:GetStringWidth() or 0
 
@@ -1969,7 +2214,178 @@ do
 	end
 end
 
-local function Build()
+local Build
+do
+	-- Split out of Build() so Build stays well below Lua 5.1's 60-upvalue limit.
+	local function BuildFooter()
+		FOOT_H = FOOT_BASE + AhRowOffset()
+		footLine = Rule(frame, "ARTWORK", 0, LINE)
+		PlaceFooterLine()
+
+		local ahOff = AhRowOffset()
+		slotsText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+		slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24 + ahOff)
+		barBg = Tex(frame, "ARTWORK", 0, LINE)
+		barBg:SetSize(BAR_W, 4); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14 + ahOff)
+		barFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
+		barFill:SetHeight(4); barFill:SetPoint("LEFT", barBg, "LEFT")
+		-- The reagent bag's counter sits to the right of the bag counter; any equipped
+		-- quiver or ammo pouch adds an ammo counter beside it.
+		reagentText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+		reagentText:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 10)
+		reagentBarBg = Tex(frame, "ARTWORK", 0, LINE)
+		reagentBarBg:SetSize(BAR_W, 4); reagentBarBg:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 0)
+		reagentBarFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
+		reagentBarFill:SetHeight(4); reagentBarFill:SetPoint("LEFT", reagentBarBg, "LEFT")
+		reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
+
+		ammo.text = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+		ammo.text:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 10)
+		ammo.barBg = Tex(frame, "ARTWORK", 0, LINE)
+		ammo.barBg:SetSize(BAR_W, 4); ammo.barBg:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 0)
+		ammo.barFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
+		ammo.barFill:SetHeight(4); ammo.barFill:SetPoint("LEFT", ammo.barBg, "LEFT")
+		ammo.text:Hide(); ammo.barBg:Hide(); ammo.barFill:Hide()
+
+		money = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+		money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + ahOff)
+
+		local row = CreateFrame("Button", nil, frame)
+		row:SetHeight(14)
+		row:SetPoint("BOTTOMLEFT", PAD + 4, 15)
+		row:SetPoint("BOTTOMRIGHT", -PAD - 4, 15)
+		row:SetFrameLevel(frame:GetFrameLevel() + 6)
+		ah.row = row
+		ah.valueText = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+		ah.valueText:SetPoint("LEFT", row, "LEFT", 0, 0)
+		ah.timeText = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+		ah.timeText:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+		ah.scanBarBg = Tex(row, "ARTWORK", 0, LINE)
+		ah.scanBarBg:SetHeight(3)
+		ah.scanBarBg:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 0, -4)
+		ah.scanBarBg:SetPoint("BOTTOMRIGHT", row, "BOTTOMRIGHT", 0, -4)
+		ah.scanBarFill = Tex(row, "ARTWORK", 1, { 0.85, 0.68, 0.25, 1 })
+		ah.scanBarFill:SetHeight(3)
+		ah.scanBarFill:SetPoint("LEFT", ah.scanBarBg, "LEFT")
+		ah.scanBarBg:Hide(); ah.scanBarFill:Hide()
+		row:RegisterForClicks("LeftButtonUp")
+		row:SetScript("OnClick", function()
+			if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
+			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+			if ns.ToggleMarket then ns.ToggleMarket() end
+		end)
+		row:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
+		row:SetScript("OnMouseUp", function(_, btn) if btn == "LeftButton" and CursorHasItem and CursorHasItem() then ns.StoreCursorItem() end end)
+		row:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip:SetText("Auction House Price Cache")
+			local cached = ns.ahCachedCount or 0
+			if (ns.db and ns.db.ahUpdated) or cached > 0 then
+				GameTooltip:AddDoubleLine("Tradeable Bag AH Value", MoneyString(ah.value), 1, 0.82, 0, 1, 1, 1)
+				GameTooltip:AddDoubleLine("Priced Bag Stacks", format("%d / %d", ah.priced, ah.tradeable), 1, 0.82, 0, 1, 1, 1)
+				GameTooltip:AddDoubleLine("Cached Items", Group(cached), 1, 0.82, 0, 1, 1, 1)
+				if ns.db and ns.db.ahUpdated then
+					local age = (ns.FormatAge and ns.FormatAge(ns.db.ahUpdated)) or ""
+					local stamp = date and date("%b %d, %H:%M", ns.db.ahUpdated) or nil
+					GameTooltip:AddDoubleLine("Last Updated", stamp and (age .. " (" .. stamp .. ")") or age, 1, 0.82, 0, 1, 1, 1)
+				end
+				if ns.db and ns.db.ahLastReplicate then
+					local dAge = (ns.FormatAge and ns.FormatAge(ns.db.ahLastReplicate)) or ""
+					local dStamp = date and date("%b %d, %H:%M", ns.db.ahLastReplicate) or nil
+					GameTooltip:AddDoubleLine("Last Deep Scan", dStamp and (dAge .. " (" .. dStamp .. ")") or dAge, 1, 0.82, 0, 1, 1, 1)
+				else
+					GameTooltip:AddDoubleLine("Last Deep Scan", "Pending (complete AH scan)", 1, 0.82, 0, 0.7, 0.7, 0.7)
+				end
+			else
+				GameTooltip:AddLine("No Auction House prices cached yet.", 0.7, 0.7, 0.7, true)
+			end
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine("Prices update automatically when you open or browse the Auction House.", 0.65, 0.65, 0.65, true)
+			GameTooltip:AddLine("Click to open Market Analysis & Insights.", 0.25, 0.9, 0.45, true)
+			GameTooltip:Show()
+		end)
+		row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		local ahTick = 0
+		row:SetScript("OnUpdate", function(_, elapsed)
+			ahTick = ahTick + (elapsed or 0)
+			if ahTick < 15 then return end
+			ahTick = 0
+			if not ns.ahScanning and ns.db and ns.db.ahUpdated and ns.FormatAge then
+				local age = ns.FormatAge(ns.db.ahUpdated)
+				ah.timeText:SetText(age and ("Updated " .. age) or "")
+			end
+		end)
+	end
+
+	-- Resize grips in the bottom corners (the top corners hold the gear and
+	-- close buttons). Width snaps to whole columns; height is free and sticks.
+	local function BuildResizeGrips()
+		local rs = {}
+		local resizer = CreateFrame("Frame"); resizer:Hide()
+		resizer:SetScript("OnUpdate", function()
+			if not rs.x then return end
+			if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then rs.stop() return end
+			local sc = frame:GetEffectiveScale()
+			local cx, cy = GetCursorPosition()
+			local dx, dy = cx / sc - rs.x, cy / sc - rs.y
+			local w = min(rs.right and (rs.w + dx) or (rs.w - dx), rs.maxW)
+			local cols = ns.ClampColumns(floor((w - PAD * 2 + GAP) / (SLOT + GAP) + 0.5))
+			local vh = ns.db.viewHeight
+			if vh or abs(dy) > 3 then                -- a sideways drag keeps "fit height" on
+				vh = ns.ClampViewHeight(min(rs.maxH, rs.h - dy))
+			end
+			if cols ~= ns.db.columns then
+				ns.db.columns, ns.db.viewHeight = cols, vh
+				Layout()
+			elseif vh ~= ns.db.viewHeight then
+				ns.db.viewHeight = vh
+				ns.ApplyView()
+			else
+				return
+			end
+			if ns.RefreshOptions then ns.RefreshOptions() end
+		end)
+		local function StartResize(right)
+			local left, rightX, top = frame:GetLeft(), frame:GetRight(), frame:GetTop()
+			if not (left and top) then return end
+			local sc = frame:GetEffectiveScale()
+			local cx, cy = GetCursorPosition()
+			rs.right, rs.x, rs.y, rs.w, rs.h = right, cx / sc, cy / sc, frame:GetWidth(), scroll:GetHeight()
+			-- never grow past the screen edge on the dragged side, or below the bottom
+			local screenW = UIParent:GetWidth() * UIParent:GetEffectiveScale() / sc
+			rs.maxW = right and (screenW - left) or rightX
+			rs.maxH = top - TOP_H - FOOT_H - 4
+			frame:ClearAllPoints()                  -- pin the top corner opposite the grip
+			if right then frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
+			else frame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", rightX, top) end
+			resizer:Show()
+		end
+		local function StopResize()
+			if not resizer:IsShown() then return end
+			resizer:Hide()
+			rs.x = nil
+			SavePosition()
+		end
+		rs.stop = StopResize
+		for _, right in ipairs({ true, false }) do
+			local g = CreateFrame("Button", nil, frame)
+			g:SetSize(16, 16)
+			g:SetPoint(right and "BOTTOMRIGHT" or "BOTTOMLEFT", right and -3 or 3, 3)
+			g:SetFrameLevel(frame:GetFrameLevel() + 20)
+			local t = g:CreateTexture(nil, "OVERLAY"); t:SetTexture(M .. "grip"); t:SetAllPoints(); t:SetAlpha(0.55)
+			local hl = g:CreateTexture(nil, "HIGHLIGHT"); hl:SetTexture(M .. "grip"); hl:SetAllPoints(); hl:SetBlendMode("ADD")
+			if not right then t:SetTexCoord(1, 0, 0, 1); hl:SetTexCoord(1, 0, 0, 1) end
+			g:SetScript("OnMouseDown", function(_, btn) if btn == "LeftButton" then StartResize(right) end end)
+			g:SetScript("OnMouseUp", StopResize)
+			g:SetScript("OnHide", StopResize)
+			g:SetScript("OnEnter", function(self)
+				GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("Drag to resize"); GameTooltip:Show()
+			end)
+			g:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		end
+	end
+
+Build = function()
 	frame = CreateFrame("Frame", "DavesSackFrame", UIParent)
 	ns.frame = frame
 	frame:SetScale(ns.db.scale)
@@ -2114,6 +2530,7 @@ local function Build()
 			if ns.HoldSetLocksForSort then ns.HoldSetLocksForSort() end
 			ns.sortingUntil = GetTime() + 5          -- show sorted results even while hovering
 			ns.SortBags()
+			if ns.QueueSpecialtySweepAfterSort then ns.QueueSpecialtySweepAfterSort() end
 		end)
 		sortBtn:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
 		sortBtn:SetScript("OnEnter", function(self)
@@ -2361,153 +2778,8 @@ local function Build()
 		thumb:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
 	end
 
-	-- Footer: divider, slot usage, gold, and bottom Auction House cache status.
-	FOOT_H = FOOT_BASE + AhRowOffset()
-	footLine = Rule(frame, "ARTWORK", 0, LINE)
-	PlaceFooterLine()
-
-	local ahOff = AhRowOffset()
-	slotsText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	slotsText:SetPoint("BOTTOMLEFT", PAD + 4, 24 + ahOff)
-	barBg = Tex(frame, "ARTWORK", 0, LINE)
-	barBg:SetSize(BAR_W, 4); barBg:SetPoint("BOTTOMLEFT", PAD + 4, 14 + ahOff)
-	barFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
-	barFill:SetHeight(4); barFill:SetPoint("LEFT", barBg, "LEFT")
-	-- The reagent bag's counter sits to the right of the bag counter.
-	reagentText = frame:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-	reagentText:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 10)
-	reagentBarBg = Tex(frame, "ARTWORK", 0, LINE)
-	reagentBarBg:SetSize(BAR_W, 4); reagentBarBg:SetPoint("BOTTOMLEFT", barBg, "BOTTOMRIGHT", BAR_GAP, 0)
-	reagentBarFill = Tex(frame, "ARTWORK", 1, { 0.85, 0.85, 0.85, 1 })
-	reagentBarFill:SetHeight(4); reagentBarFill:SetPoint("LEFT", reagentBarBg, "LEFT")
-	reagentText:Hide(); reagentBarBg:Hide(); reagentBarFill:Hide()
-
-	money = frame:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-	money:SetPoint("BOTTOMRIGHT", -PAD - 4, 17 + ahOff)
-
-	ahRow = CreateFrame("Button", nil, frame)
-	ahRow:SetHeight(14)
-	ahRow:SetPoint("BOTTOMLEFT", PAD + 4, 15)
-	ahRow:SetPoint("BOTTOMRIGHT", -PAD - 4, 15)
-	ahRow:SetFrameLevel(frame:GetFrameLevel() + 6)
-	ahValueText = ahRow:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-	ahValueText:SetPoint("LEFT", ahRow, "LEFT", 0, 0)
-	ahTimeText = ahRow:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
-	ahTimeText:SetPoint("RIGHT", ahRow, "RIGHT", 0, 0)
-	ahScanBarBg = Tex(ahRow, "ARTWORK", 0, LINE)
-	ahScanBarBg:SetHeight(3)
-	ahScanBarBg:SetPoint("BOTTOMLEFT", ahRow, "BOTTOMLEFT", 0, -4)
-	ahScanBarBg:SetPoint("BOTTOMRIGHT", ahRow, "BOTTOMRIGHT", 0, -4)
-	ahScanBarFill = Tex(ahRow, "ARTWORK", 1, { 0.85, 0.68, 0.25, 1 })
-	ahScanBarFill:SetHeight(3)
-	ahScanBarFill:SetPoint("LEFT", ahScanBarBg, "LEFT")
-	ahScanBarBg:Hide(); ahScanBarFill:Hide()
-	ahRow:RegisterForClicks("LeftButtonUp")
-	ahRow:SetScript("OnClick", function()
-		if CursorHasItem and CursorHasItem() then ns.StoreCursorItem() return end
-		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		if ns.ToggleMarket then ns.ToggleMarket() end
-	end)
-	ahRow:SetScript("OnReceiveDrag", function() ns.StoreCursorItem() end)
-	ahRow:SetScript("OnMouseUp", function(_, btn) if btn == "LeftButton" and CursorHasItem and CursorHasItem() then ns.StoreCursorItem() end end)
-	ahRow:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip:SetText("Auction House Price Cache")
-		local cached = ns.ahCachedCount or 0
-		if (ns.db and ns.db.ahUpdated) or cached > 0 then
-			GameTooltip:AddDoubleLine("Tradeable Bag AH Value", MoneyString(ahBagValue), 1, 0.82, 0, 1, 1, 1)
-			GameTooltip:AddDoubleLine("Priced Bag Stacks", format("%d / %d", ahPricedStacks, ahTradeableStacks), 1, 0.82, 0, 1, 1, 1)
-			GameTooltip:AddDoubleLine("Cached Items", Group(cached), 1, 0.82, 0, 1, 1, 1)
-			if ns.db and ns.db.ahUpdated then
-				local age = (ns.FormatAge and ns.FormatAge(ns.db.ahUpdated)) or ""
-				local stamp = date and date("%b %d, %H:%M", ns.db.ahUpdated) or nil
-				GameTooltip:AddDoubleLine("Last Updated", stamp and (age .. " (" .. stamp .. ")") or age, 1, 0.82, 0, 1, 1, 1)
-			end
-		else
-			GameTooltip:AddLine("No Auction House prices cached yet.", 0.7, 0.7, 0.7, true)
-		end
-		GameTooltip:AddLine(" ")
-		GameTooltip:AddLine("Prices update automatically when you open or browse the Auction House.", 0.65, 0.65, 0.65, true)
-		GameTooltip:AddLine("Click to open Market Analysis & Insights.", 0.25, 0.9, 0.45, true)
-		GameTooltip:Show()
-	end)
-	ahRow:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	local ahTick = 0
-	ahRow:SetScript("OnUpdate", function(_, elapsed)
-		ahTick = ahTick + (elapsed or 0)
-		if ahTick < 15 then return end
-		ahTick = 0
-		if not ns.ahScanning and ns.db and ns.db.ahUpdated and ns.FormatAge then
-			local age = ns.FormatAge(ns.db.ahUpdated)
-			ahTimeText:SetText(age and ("Updated " .. age) or "")
-		end
-	end)
-
-	-- Resize grips in the bottom corners (the top corners hold the gear and
-	-- close buttons). Width snaps to whole columns; height is free and sticks.
-	local rs = {}
-	local resizer = CreateFrame("Frame"); resizer:Hide()
-	resizer:SetScript("OnUpdate", function(self)
-		if not rs.x then return end
-		if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then rs.stop() return end
-		local sc = frame:GetEffectiveScale()
-		local cx, cy = GetCursorPosition()
-		local dx, dy = cx / sc - rs.x, cy / sc - rs.y
-		local w = min(rs.right and (rs.w + dx) or (rs.w - dx), rs.maxW)
-		local cols = ns.ClampColumns(floor((w - PAD * 2 + GAP) / (SLOT + GAP) + 0.5))
-		local vh = ns.db.viewHeight
-		if vh or abs(dy) > 3 then                -- a sideways drag keeps "fit height" on
-			vh = ns.ClampViewHeight(min(rs.maxH, rs.h - dy))
-		end
-		if cols ~= ns.db.columns then
-			ns.db.columns, ns.db.viewHeight = cols, vh
-			Layout()
-		elseif vh ~= ns.db.viewHeight then
-			ns.db.viewHeight = vh
-			ns.ApplyView()
-		else
-			return
-		end
-		if ns.RefreshOptions then ns.RefreshOptions() end
-	end)
-	local function StartResize(right)
-		local left, rightX, top = frame:GetLeft(), frame:GetRight(), frame:GetTop()
-		if not (left and top) then return end
-		local sc = frame:GetEffectiveScale()
-		local cx, cy = GetCursorPosition()
-		rs.right, rs.x, rs.y, rs.w, rs.h = right, cx / sc, cy / sc, frame:GetWidth(), scroll:GetHeight()
-		-- never grow past the screen edge on the dragged side, or below the bottom
-		local screenW = UIParent:GetWidth() * UIParent:GetEffectiveScale() / sc
-		rs.maxW = right and (screenW - left) or rightX
-		rs.maxH = top - TOP_H - FOOT_H - 4
-		frame:ClearAllPoints()                  -- pin the top corner opposite the grip
-		if right then frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", left, top)
-		else frame:SetPoint("TOPRIGHT", UIParent, "BOTTOMLEFT", rightX, top) end
-		resizer:Show()
-	end
-	local function StopResize()
-		if not resizer:IsShown() then return end
-		resizer:Hide()
-		rs.x = nil
-		SavePosition()
-	end
-	rs.stop = StopResize
-	for _, right in ipairs({ true, false }) do
-		local g = CreateFrame("Button", nil, frame)
-		g:SetSize(16, 16)
-		g:SetPoint(right and "BOTTOMRIGHT" or "BOTTOMLEFT", right and -3 or 3, 3)
-		g:SetFrameLevel(frame:GetFrameLevel() + 20)
-		local t = g:CreateTexture(nil, "OVERLAY"); t:SetTexture(M .. "grip"); t:SetAllPoints(); t:SetAlpha(0.55)
-		local hl = g:CreateTexture(nil, "HIGHLIGHT"); hl:SetTexture(M .. "grip"); hl:SetAllPoints(); hl:SetBlendMode("ADD")
-		if not right then t:SetTexCoord(1, 0, 0, 1); hl:SetTexCoord(1, 0, 0, 1) end
-		g:SetScript("OnMouseDown", function(_, btn) if btn == "LeftButton" then StartResize(right) end end)
-		g:SetScript("OnMouseUp", StopResize)
-		g:SetScript("OnHide", StopResize)
-		g:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_TOP"); GameTooltip:SetText("Drag to resize"); GameTooltip:Show()
-		end)
-		g:SetScript("OnLeave", function() GameTooltip:Hide() end)
-	end
+	BuildFooter()
+	BuildResizeGrips()
 
 	frame:SetScript("OnShow", function()
 		ns.BagSound("IG_BACKPACK_OPEN")
@@ -2534,6 +2806,7 @@ local function Build()
 		if ns.HideMarket then ns.HideMarket() end
 		ns.BagSound("IG_BACKPACK_CLOSE")
 	end)
+end
 end
 
 ---------------------------------------------------------------------------
@@ -2738,7 +3011,7 @@ function ns.OnLoad()
 	end
 	local function OnSplit(bag)
 		if splitPending or ns.db.autoPlaceSplit == false or not inList[bag] then return end
-		if InteractionWindowOpen() then return end
+		if ns.InteractionWindowOpen and ns.InteractionWindowOpen() then return end
 		splitPending = true
 		C_Timer.After(0, PlaceSplit)              -- next frame, once the stack is on the cursor
 	end
