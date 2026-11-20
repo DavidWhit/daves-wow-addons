@@ -8,6 +8,16 @@
 
 local ADDON, ns = ...
 
+local syncingSetting = false
+
+function ns:NotifyOptionSetting(key)
+	if not (key and Settings and Settings.NotifyUpdate and SettingsPanel and SettingsPanel:IsShown()) then return end
+	local was = syncingSetting
+	syncingSetting = true
+	pcall(Settings.NotifyUpdate, ADDON .. "_" .. key)
+	syncingSetting = was
+end
+
 function ns:InitOptions()
 	if not (Settings and Settings.RegisterVerticalLayoutCategory) then return end
 
@@ -30,9 +40,81 @@ function ns:InitOptions()
 	Settings.CreateDropdown(category, textMode, TextOptions, "What to show inside both orbs. Click an orb in Edit Mode to set each one separately.")
 	textMode:SetValueChangedCallback(function() ns:SetAllOrbText(ns.db.textMode) end)
 
+	local holder = Settings.RegisterAddOnSetting(category, ADDON .. "_holder", "holder", ns.db,
+		Settings.VarType.String, "Orb holder", "none")
+	local function HolderOptions()
+		local container = Settings.CreateControlTextContainer()
+		for _, key in ipairs(ns.HOLDER_ORDER) do
+			local cfg = ns.HOLDER_STYLES[key]
+			container:Add(key, cfg.label, cfg.desc)
+		end
+		return container:GetData()
+	end
+	Settings.CreateDropdown(category, holder, HolderOptions, "Optional bottom cradle holding both orbs. Click an orb in Edit Mode to pick a different holder per orb.")
+	holder:SetValueChangedCallback(function()
+		if syncingSetting then return end
+		ns:SetAllOrbHolders(ns.db.holder, true)
+	end)
+
+	local bobEnabled = Settings.RegisterAddOnSetting(category, ADDON .. "_bobEnabled", "bobEnabled", ns.db,
+		Settings.VarType.Boolean, "Orb bobbing", false)
+	Settings.CreateCheckbox(category, bobEnabled, "Gently float both orbs up and down inside their holders. Adjust per-orb intensity by clicking an orb in Edit Mode.")
+	bobEnabled:SetValueChangedCallback(function()
+		if syncingSetting then return end
+		ns:SetAllOrbBobEnabled(ns.db.bobEnabled, true)
+	end)
+
+	local castShadow = Settings.RegisterAddOnSetting(category, ADDON .. "_castShadow", "castShadow", ns.db,
+		Settings.VarType.Boolean, "Cast shadow", false)
+	Settings.CreateCheckbox(category, castShadow, "Cast a soft shadow underneath each orb whose angle and depth follow the light hitting it and its bob height.")
+	castShadow:SetValueChangedCallback(function()
+		if syncingSetting then return end
+		ns:SetAllOrbShadowEnabled(ns.db.castShadow, true)
+	end)
+
+	local dustEnabled = Settings.RegisterAddOnSetting(category, ADDON .. "_dustEnabled", "dustEnabled", ns.db,
+		Settings.VarType.Boolean, "Swirling dust", false)
+	Settings.CreateCheckbox(category, dustEnabled, "3D orbiting dust motes wrapping behind and in front of both orbs with true sphere-rim occlusion. Pick an orbit pattern and tune count, speed, and trail style per orb in Edit Mode.")
+	dustEnabled:SetValueChangedCallback(function()
+		if syncingSetting then return end
+		ns:SetAllOrbDustEnabled(ns.db.dustEnabled, true)
+	end)
+
+	local dustPattern = Settings.RegisterAddOnSetting(category, ADDON .. "_dustPattern", "dustPattern", ns.db,
+		Settings.VarType.String, "Orbit pattern", "auto")
+	local function DustPatternOptions()
+		local container = Settings.CreateControlTextContainer()
+		for _, key in ipairs(ns.DUST_PATTERN_ORDER) do
+			local cfg = ns.DUST_PATTERNS[key]
+			container:Add(key, cfg.label, cfg.desc)
+		end
+		return container:GetData()
+	end
+	Settings.CreateDropdown(category, dustPattern, DustPatternOptions, "3D orbital formation for both orbs (Auto cycles cleanly between formations; Chaos mixes them freely). Click an orb in Edit Mode to pick a different pattern per orb.")
+	dustPattern:SetValueChangedCallback(function()
+		if syncingSetting then return end
+		ns:SetAllOrbDustPattern(ns.db.dustPattern, true)
+	end)
+
+	local dustTails = Settings.RegisterAddOnSetting(category, ADDON .. "_dustTails", "dustTails", ns.db,
+		Settings.VarType.Boolean, "Particle tails", true)
+	Settings.CreateCheckbox(category, dustTails, "Add curved glowing comet tails trailing behind orbiting dust particles on both orbs (works with or without shimmering dust trails). Adjust trail style and length per orb in Edit Mode.")
+	dustTails:SetValueChangedCallback(function()
+		if syncingSetting then return end
+		ns:SetAllOrbDustTails(ns.db.dustTails, true)
+	end)
+
+	local dustTrails = Settings.RegisterAddOnSetting(category, ADDON .. "_dustTrails", "dustTrails", ns.db,
+		Settings.VarType.Boolean, "Shimmering dust trails", true)
+	Settings.CreateCheckbox(category, dustTrails, "Shed a sparkling, shimmering stardust wake behind orbiting particles (works with or without comet tails).")
+	dustTrails:SetValueChangedCallback(function()
+		if syncingSetting then return end
+		ns:SetAllOrbDustTrails(ns.db.dustTrails, true)
+	end)
+
 	local locked = Settings.RegisterAddOnSetting(category, ADDON .. "_locked", "locked", ns.db,
 		Settings.VarType.Boolean, "Lock orbs", true)
-	Settings.CreateCheckbox(category, locked, "Untick to drag the orbs anywhere (right-click one to reset it). They can always be moved in Edit Mode.")
+	Settings.CreateCheckbox(category, locked, "Untick to drag the orbs anywhere (left- or right-click one for its settings). They can always be moved in Edit Mode.")
 
 	local hidePlayer = Settings.RegisterAddOnSetting(category, ADDON .. "_hidePlayerFrame", "hidePlayerFrame", ns.db,
 		Settings.VarType.Boolean, "Hide Blizzard player frame", false)
@@ -45,7 +127,7 @@ function ns:InitOptions()
 
 	local glare = Settings.RegisterAddOnSetting(category, ADDON .. "_glare", "glare", ns.db,
 		Settings.VarType.Boolean, "Cursor glare", true)
-	Settings.CreateCheckbox(category, glare, "The glass highlight faces your cursor and brightens as the cursor gets closer.")
+	Settings.CreateCheckbox(category, glare, "The glass highlight faces your cursor and brightens as the cursor gets closer, also driving the cast shadow and holder sheen.")
 
 	local scale = Settings.RegisterAddOnSetting(category, ADDON .. "_scale", "scale", ns.db,
 		Settings.VarType.Number, "Scale", 1.0)

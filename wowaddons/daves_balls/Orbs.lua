@@ -61,6 +61,8 @@ function ns:RefreshOrbColors(orb)
 	orb.veins2.tex:SetVertexColor(a[1], a[2], a[3])
 	orb.veins3.tex:SetVertexColor(a[1], a[2], a[3])
 	orb.core:SetVertexColor(a[1], a[2], a[3])
+	if ns.RefreshOrbHolderColors then ns:RefreshOrbHolderColors(orb) end
+	if ns.RefreshOrbDustColors then ns:RefreshOrbDustColors(orb) end
 end
 
 local orbs = {}
@@ -86,15 +88,37 @@ local function CreateOrb(key, label)
 	local pos = ns.db.orbs[key]
 	orb:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
 	orb:SetScale(ns.db.scale)
+	orb:SetShown(ns.db.enabled)
 
-	local back = orb:CreateTexture(nil, "BACKGROUND")
+	-- Unprotected visual root on UIParent so bobbing, light-driven cast shadows, and
+	-- 3D swirling dust can animate via SetPoint/SetSize even during InCombatLockdown().
+	local visual = CreateFrame("Frame", nil, UIParent)
+	visual:SetSize(ORB_SIZE, ORB_SIZE)
+	visual:SetFrameStrata("MEDIUM")
+	visual:SetFrameLevel(2)
+	visual:SetClampedToScreen(true)
+	visual:SetClampRectInsets(margin, -margin, -margin, margin)
+	visual:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+	visual:SetScale(ns.db.scale)
+	visual:SetShown(ns.db.enabled)
+	orb.visual = visual
+
+	-- Bobbing inner container: moves gently up and down inside the stationary holder.
+	local bobFrame = CreateFrame("Frame", nil, visual)
+	bobFrame:SetSize(ORB_SIZE, ORB_SIZE)
+	bobFrame:SetFrameLevel(3)
+	bobFrame:SetPoint("CENTER", visual, "CENTER", 0, 0)
+	orb.bobFrame = bobFrame
+
+	local back = bobFrame:CreateTexture(nil, "BACKGROUND")
 	back:SetAllPoints()
 	back:SetTexture(MEDIA .. "OrbBack")
 
 	-- Level: an invisible vertical StatusBar. Its fill texture's top edge marks the liquid
 	-- level; we only anchor to that edge and never read its size, so secret values are fine.
-	local fill = CreateFrame("StatusBar", nil, orb)
-	fill:SetAllPoints()
+	local fill = CreateFrame("StatusBar", nil, bobFrame)
+	fill:SetAllPoints(bobFrame)
+	fill:SetFrameLevel(4)
 	fill:SetOrientation("VERTICAL")
 	fill:SetStatusBarTexture("Interface\\Buttons\\WHITE8x8")
 	fill:SetStatusBarColor(0, 0, 0, 0)
@@ -107,9 +131,10 @@ local function CreateOrb(key, label)
 	-- mask whose edge sits on the bar's top and rotates when the liquid sloshes, so the whole
 	-- body of liquid tilts (not just the foam line). Masks live in the frame they mask.
 	local liquid = CreateFrame("Frame", nil, fill)
-	liquid:SetAllPoints(orb)
+	liquid:SetAllPoints(bobFrame)
+	liquid:SetFrameLevel(5)
 	local circleMask = liquid:CreateMaskTexture()
-	circleMask:SetAllPoints(orb)
+	circleMask:SetAllPoints(bobFrame)
 	circleMask:SetTexture(MEDIA .. "OrbMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 	local levelMask = liquid:CreateMaskTexture()
 	levelMask:SetSize(ORB_SIZE * 2.2, ORB_SIZE * 2.2)
@@ -122,7 +147,7 @@ local function CreateOrb(key, label)
 	-- core. Every layer is cut by both masks.
 	local function Layer(subLevel, blend, alpha)
 		local t = liquid:CreateTexture(nil, "ARTWORK", nil, subLevel)
-		t:SetAllPoints(orb)
+		t:SetAllPoints(bobFrame)
 		t:SetBlendMode(blend)
 		t:SetAlpha(alpha)
 		t:AddMaskTexture(circleMask)
@@ -157,8 +182,8 @@ local function CreateOrb(key, label)
 	core:SetTexture(MEDIA .. "OrbCore")
 	orb.core = core
 
-	-- Soft glow just outside the glass, behind everything.
-	local halo = orb:CreateTexture(nil, "BACKGROUND", nil, -1)
+	-- Soft glow just outside the glass, behind the sphere body.
+	local halo = bobFrame:CreateTexture(nil, "BACKGROUND", nil, -1)
 	halo:SetAllPoints()
 	halo:SetTexture(MEDIA .. "OrbHalo")
 	halo:SetBlendMode("ADD")
@@ -168,10 +193,10 @@ local function CreateOrb(key, label)
 	-- tilts with SetRotation, both driven from OnUpdate (see AnimateSurface) so speed and
 	-- slosh ease in and out instead of restarting.
 	local surface = CreateFrame("Frame", nil, fill)
-	surface:SetAllPoints(orb)
-	surface:SetFrameLevel(liquid:GetFrameLevel() + 1)
+	surface:SetAllPoints(bobFrame)
+	surface:SetFrameLevel(6)
 	local surfaceMask = surface:CreateMaskTexture()
-	surfaceMask:SetAllPoints(orb)
+	surfaceMask:SetAllPoints(bobFrame)
 	surfaceMask:SetTexture(MEDIA .. "OrbMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
 
 	local wave = surface:CreateTexture(nil, "ARTWORK")
@@ -185,9 +210,9 @@ local function CreateOrb(key, label)
 	orb.scroll, orb.phase, orb.slosh = 0, 0, 0
 
 	-- Art on top of the liquid, in its own frame so it sits above the bar.
-	local art = CreateFrame("Frame", nil, orb)
-	art:SetAllPoints()
-	art:SetFrameLevel(fill:GetFrameLevel() + 2)
+	local art = CreateFrame("Frame", nil, bobFrame)
+	art:SetAllPoints(bobFrame)
+	art:SetFrameLevel(7)
 
 	local shade = art:CreateTexture(nil, "ARTWORK", nil, 1)
 	shade:SetAllPoints()
@@ -203,10 +228,26 @@ local function CreateOrb(key, label)
 	glass:SetAllPoints()
 	glass:SetTexture(MEDIA .. "OrbGlass")
 
-	local text = art:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+	-- Stationary foreground holder & front dust plane sit above the bobbing glass.
+	local holderFront = CreateFrame("Frame", nil, visual)
+	holderFront:SetAllPoints(visual)
+	holderFront:SetFrameLevel(8)
+
+	if ns.AttachOrbHolder then ns:AttachOrbHolder(orb, visual, holderFront, ORB_SIZE) end
+	if ns.AttachOrbDust then ns:AttachOrbDust(orb, visual, holderFront, ORB_SIZE) end
+
+	-- Numbers bob cleanly with the sphere and always stay above the front holder & dust.
+	local textFrame = CreateFrame("Frame", nil, bobFrame)
+	textFrame:SetAllPoints(bobFrame)
+	textFrame:SetFrameLevel(9)
+
+	local text = textFrame:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
 	text:SetPoint("CENTER", 0, -4)
 	text:SetShadowOffset(1, -1)
 	orb.text = text
+
+	-- Keep protected interaction frame (Edit Mode selection & secure click button) above visual.
+	orb:SetFrameLevel(12)
 
 	-- Edit Mode's selection art (the kit's EditModeDialog.lua), shown while the orb can be moved.
 	local sel = ns.EditMode.CreateSelection(orb, label .. " Orb")
@@ -231,8 +272,7 @@ local function CreateOrb(key, label)
 	click:SetScript("OnLeave", function() GameTooltip:Hide() end)
 	orb.clickButton = click
 
-	-- While movable (Edit Mode or unlocked): drag to move, click for the orb's settings,
-	-- right-click to reset the position.
+	-- While movable (Edit Mode or unlocked): drag to move, left- or right-click for the orb's settings.
 	-- Dragging is done by hand (not StartMoving) so the orb can snap to Edit Mode's grid
 	-- live while it moves. Everything is in screen pixels.
 	orb:SetScript("OnDragStart", function(self)
@@ -254,17 +294,15 @@ local function CreateOrb(key, label)
 		if not ns:CanMoveOrbs() then return end
 		if self.dragged then
 			self.dragged = nil
-		elseif button == "LeftButton" then
+		elseif button == "LeftButton" or button == "RightButton" then
 			ns:OpenOrbSettings(self)
-		elseif button == "RightButton" then
-			ns:ResetOrbPosition(self)
 		end
 	end)
 	orb:SetScript("OnEnter", function(self)
 		if not ns:CanMoveOrbs() then return end
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
 		GameTooltip:SetText(self.label .. " Orb")
-		GameTooltip:AddLine("Click for colours. Drag to move (with Snap on in Edit Mode it pulls onto the grid, screen edges and nearby frames; hold Shift to place freely). Right-click to reset position.", 1, 1, 1, true)
+		GameTooltip:AddLine("Left- or right-click for settings. Drag to move (with Snap on in Edit Mode it pulls onto the grid, screen edges and nearby frames; hold Shift to place freely).", 1, 1, 1, true)
 		GameTooltip:Show()
 	end)
 	orb:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -359,6 +397,10 @@ function ns.DragUpdate(orb)
 	end
 	orb:ClearAllPoints()
 	orb:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x * ui / scale, y * ui / scale)
+	if orb.visual then
+		orb.visual:ClearAllPoints()
+		orb.visual:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x * ui / scale, y * ui / scale)
+	end
 end
 
 function ns:SaveOrbPosition(orb)
@@ -380,14 +422,25 @@ function ns:ApplyOrb(orb)
 		ns.pendingApply = true
 		ns.events:RegisterEvent("PLAYER_REGEN_ENABLED")
 		orb.text:SetShown(ns:OrbTextShown(orb))
+		if ns.ApplyOrbHolder then ns:ApplyOrbHolder(orb) end
+		if ns.ApplyOrbDust then ns:ApplyOrbDust(orb) end
 		return
 	end
 	local pos = ns.db.orbs[orb.key]
+	local shown = ns.db.enabled or ns.inEditMode
 	orb:ClearAllPoints()
 	orb:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
 	orb:SetScale(ns.db.scale)
+	if orb.visual then
+		orb.visual:ClearAllPoints()
+		orb.visual:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
+		orb.visual:SetScale(ns.db.scale)
+		orb.visual:SetShown(shown)
+	end
 	orb.text:SetShown(ns:OrbTextShown(orb))
-	orb:SetShown(ns.db.enabled or ns.inEditMode)
+	if ns.ApplyOrbHolder then ns:ApplyOrbHolder(orb) end
+	if ns.ApplyOrbDust then ns:ApplyOrbDust(orb) end
+	orb:SetShown(shown)
 
 	-- Movable in Edit Mode, or any time when unlocked; click-through otherwise.
 	local movable = ns:CanMoveOrbs()
@@ -498,9 +551,7 @@ local function AnimateAccent(orb, elapsed, flicker, s)
 end
 
 local function AnimateSurface(orb, elapsed)
-	local target = ns.moving and 1 or 0
-	orb.slosh = orb.slosh + (target - orb.slosh) * math.min(1, elapsed * 2.5)
-	local s = orb.slosh
+	local s = orb.slosh or 0
 
 	orb.scroll = (orb.scroll + elapsed * (0.12 + 0.22 * s)) % 1
 	orb.phase = (orb.phase + elapsed * (2.2 + 2.0 * s)) % (2 * math.pi)
@@ -521,11 +572,12 @@ local function AnimateSurface(orb, elapsed)
 	end
 
 	-- Energy: the core breathes, the veins flicker a little, both livelier while moving.
-	orb.time = (orb.time or math.random() * 10) + elapsed
-	local t = orb.time
+	local t = orb.time or 0
 	orb.core:SetAlpha(math.min(1, 0.65 + (0.15 + 0.1 * s) * math.sin(t * 2.1) + 0.35 * (orb.accentFlash or 0)))
 	orb.veins.tex:SetAlpha(orb.veins.alpha * (0.85 + 0.15 * math.sin(t * 7.3) * math.sin(t * 3.1)))
-	AnimateAccent(orb, elapsed, 0.85 + 0.15 * math.sin(t * 5.7 + 1) * math.sin(t * 2.3), s)
+	local accentFlicker = 0.85 + 0.15 * math.sin(t * 5.7 + 1) * math.sin(t * 2.3)
+	AnimateAccent(orb, elapsed, accentFlicker, s)
+	if ns.AnimateOrbHolder then ns:AnimateOrbHolder(orb, elapsed, s, t, accentFlicker) end
 end
 
 ---------------------------------------------------------------------------
@@ -539,9 +591,10 @@ local GLARE_MIN = 0.15             -- brightness when the cursor is far away
 local GLARE_FALLOFF = 250          -- pixels beyond the rim over which it fades
 
 local function AnimateGlare(orb, elapsed)
-	local ox, oy = orb:GetCenter()
+	local targetFrame = orb.bobFrame or orb
+	local ox, oy = targetFrame:GetCenter()
 	if issecretvalue(ox) or issecretvalue(oy) or not ox then return end
-	local scale = orb:GetEffectiveScale()
+	local scale = targetFrame:GetEffectiveScale()
 	ox, oy = ox * scale, oy * scale
 	local cx, cy = GetCursorPosition()          -- already in screen pixels
 	local dx, dy = cx - ox, cy - oy
@@ -560,32 +613,51 @@ local function AnimateGlare(orb, elapsed)
 
 	orb.gloss:SetRotation(orb.glareAngle)
 	orb.gloss:SetAlpha(orb.glareBright)
+	if ns.AnimateOrbHolderGlare then ns:AnimateOrbHolderGlare(orb) end
 end
 
 local driver = CreateFrame("Frame")
 driver:SetScript("OnUpdate", function(_, elapsed)
 	local db = ns.db
+	local sloshTarget = ns.moving and 1 or 0
+	local sloshK = math.min(1, elapsed * 2.5)
 	for _, orb in pairs(orbs) do
 		if orb:IsVisible() then
-			if db.animate then AnimateSurface(orb, elapsed) end
+			orb.slosh = (orb.slosh or 0) + (sloshTarget - (orb.slosh or 0)) * sloshK
+			orb.time = (orb.time or math.random() * 10) + elapsed
 			if db.glare then AnimateGlare(orb, elapsed) end
+			if ns.AnimateOrbBob then ns:AnimateOrbBob(orb, elapsed, orb.slosh) end
+			if db.animate then AnimateSurface(orb, elapsed) end
+			if ns.AnimateOrbShadow then ns:AnimateOrbShadow(orb) end
+			if ns.AnimateOrbDust then ns:AnimateOrbDust(orb, elapsed, orb.slosh, orb.time) end
 		end
 	end
 end)
 driver:Hide()
+
+function ns:UpdateDriverState()
+	local need = ns.db.animate or ns.db.glare
+		or (ns.AnyOrbBobEnabled and ns:AnyOrbBobEnabled())
+		or (ns.AnyOrbDustEnabled and ns:AnyOrbDustEnabled())
+	driver:SetShown(need and true or false)
+end
 
 local function SetMoving(moving)
 	ns.moving = moving
 	local animate = ns.db.animate
 	for _, orb in pairs(orbs) do
 		orb.wave:SetShown(animate)   -- the liquid layers stay, frozen, when animation is off
-		if not animate then orb.levelMask:SetRotation(0) end
+		if not animate then
+			orb.levelMask:SetRotation(0)
+			orb.accentFlash = 0
+		end
 		if not ns.db.glare then
 			orb.gloss:SetRotation(0)
 			orb.gloss:SetAlpha(1)
 		end
+		if ns.ResetOrbHolderAnim then ns:ResetOrbHolderAnim(orb) end
 	end
-	driver:SetShown(animate or ns.db.glare)
+	ns:UpdateDriverState()
 end
 ns.SetMoving = SetMoving
 
@@ -606,12 +678,22 @@ function ns:InitOrbs()
 	ns.db.orbs = ns.db.orbs or {}
 	ns.db.colors = ns.db.colors or {}
 	ns.db.orbText = ns.db.orbText or {}
+	ns.db.orbHolder = ns.db.orbHolder or {}
+	ns.db.orbBob = ns.db.orbBob or {}
+	ns.db.orbShadow = ns.db.orbShadow or {}
+	ns.db.orbDust = ns.db.orbDust or {}
 	ns.db.accentRandom = ns.db.accentRandom or {}
 	local startText = TEXT_MODES[ns.db.textMode] or TEXT_MODES.numbers
+	local startHolder = ns.NormalizeHolderStyle and ns.NormalizeHolderStyle(ns.db.holder) or "none"
 	for key, d in pairs(ns.ORB_DEFAULTS) do
 		ns.db.orbs[key] = ns.db.orbs[key] or { point = d.point, x = d.x, y = d.y }
 		ns.db.colors[key] = ns.db.colors[key] or {}
 		ns.db.orbText[key] = ns.db.orbText[key] or { number = startText.number, percent = startText.percent }
+		if ns.db.orbHolder[key] == nil then
+			ns.db.orbHolder[key] = startHolder
+		elseif ns.NormalizeHolderStyle then
+			ns.db.orbHolder[key] = ns.NormalizeHolderStyle(ns.db.orbHolder[key])
+		end
 	end
 
 	local health = CreateOrb("health", "Health")

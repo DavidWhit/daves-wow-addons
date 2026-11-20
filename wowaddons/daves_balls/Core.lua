@@ -9,6 +9,19 @@ local DEFAULTS = {
 	enabled = true,
 	scale = 1.0,
 	textMode = "numbers",   -- "numbers", "percent", "both" or "none"
+	holder = "none",        -- "none", "chalice", "arcane" or "sanctum"
+	bobEnabled = false,
+	bobIntensity = 35,
+	castShadow = false,
+	dustEnabled = false,
+	dustPattern = "auto",   -- "auto", "ring", "helix", "figure8", "vortex", "atom", "chaos"
+	dustCount = 20,
+	dustSpeed = 1.0,
+	dustRotation = 0,
+	dustSpread = 25,
+	dustTails = true,
+	dustTrails = true,
+	dustTailLength = 60,
 	animate = true,
 	glare = true,
 	locked = true,          -- unlocked: drag the orbs any time, not just in Edit Mode
@@ -42,6 +55,9 @@ function ns:ADDON_LOADED(name)
 		DavesBallsDB.textMode = "none"   -- carry over the old on/off numbers setting
 	end
 	DavesBallsDB.showText = nil
+	if DavesBallsDB.holder == "claws" then
+		DavesBallsDB.holder = "sanctum"
+	end
 	for k, v in pairs(DEFAULTS) do
 		if DavesBallsDB[k] == nil then DavesBallsDB[k] = v end
 	end
@@ -67,14 +83,26 @@ SlashCmdList["DAVESBALLS"] = function(msg)
 	elseif msg == "unlock" or msg == "lock" then
 		ns.db.locked = (msg == "lock")
 		ns:Apply()
-		ns.Print(ns.db.locked and "orbs locked." or "orbs unlocked: drag to move, right-click to reset. /balls lock when done.")
+		ns.Print(ns.db.locked and "orbs locked." or "orbs unlocked: drag to move, left- or right-click for settings. /balls lock when done.")
 	elseif msg == "reset" then
 		for _, orb in pairs(ns.orbs) do ns:ResetOrbPosition(orb) end
 		ns.Print("orb positions reset.")
+	elseif msg == "holder" or msg:match("^holder%s+") then
+		local arg = msg:match("^holder%s+(%S+)$")
+		local norm = arg and ns.NormalizeHolderStyle and (arg == "none" or ns.NormalizeHolderStyle(arg) ~= "none") and ns.NormalizeHolderStyle(arg) or nil
+		if norm and ns.HOLDER_STYLES and ns.HOLDER_STYLES[norm] then
+			ns:SetAllOrbHolders(norm)
+			ns.Print("orb holder set to " .. ns.HOLDER_STYLES[norm].label .. ".")
+		else
+			local hCur = ns.orbs and ns.orbs.health and ns:GetOrbHolder(ns.orbs.health) or ns.db.holder or "none"
+			local pCur = ns.orbs and ns.orbs.power and ns:GetOrbHolder(ns.orbs.power) or hCur
+			local cur = (hCur == pCur) and hCur or ("health: " .. hCur .. ", power: " .. pCur)
+			ns.Print("holder variants: none, chalice, arcane, sanctum (current: " .. cur .. "). Usage: /balls holder <variant>")
+		end
 	elseif msg == "version" then
 		ns.Print(ns.VERSION)
 	else
-		ns.Print("commands: /balls [options | unlock | lock | reset | version]. The orbs can also be moved in Edit Mode.")
+		ns.Print("commands: /balls [options | holder <none|chalice|arcane|sanctum> | unlock | lock | reset | version]. The orbs can also be moved in Edit Mode.")
 	end
 end
 

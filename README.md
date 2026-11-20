@@ -6,7 +6,7 @@ World of Warcraft addons for **WoW: Forever** (Interface `16001`), plus the tool
 
 | Folder | What it is |
 | --- | --- |
-| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs with sloshing liquid and cursor glare (`v0.1.5`) |
+| [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs with sloshing liquid, cursor glare, optional animated bottom holders, orb bobbing, light-driven cast shadows, and 3D swirling dust motes with selectable orbit patterns (`Auto`, `Halo Ring`, `Twin Helix`, `Figure-8`, `Vortex`, `Atom Shells`, `Chaos`), rotation, spread, true sphere-rim occlusion, curved comet tails, and independent shimmering dust trails (`v0.2.5`) |
 | [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 21 looks — 7 elements, 4 gathering & 7 crafting professions, Disenchant, First Aid, and Plain (`v0.6.1`) |
 | [`wowaddons/daves_chat`](wowaddons/daves_chat) | **Dave's Chat**: movable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with an auto-closing collapsible left tab list, bordered inner chat pane, `Text direction`, and frosted-glass `Faint` mode (`v0.3.11`) |
 | [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: windowed, opaque tracked/focused-objectives-only default world map layer with optional zoom-faded POI layers and tab-driven `Zone` & `Dungeon` marker layers, movable & resizable (`min width 588px`) HUD Edit Mode styled slim icon-rail **`Base` / `Tracker` / `Zone` / `Dungeon`** sidebar that opens/closes with the map and docks flush beside it (native right-side `MinimalScrollBar`, 3-sliced brass pill buttons, skill-style brass icon tabs & gold toolbar icons, **Window Style** dialog, strict per-character completion with `/dmap check`, sortable 4-column `Quest \| Starter \| Lvl \| XP` grids with starter-grouped chains & item-only reward tooltips, and origin-frozen search), Ready-to-Turn-In & zone quest tracker, and OpenMap seamless world & dungeon maps (`v0.8.40`; companion addons `daves_map_data` & `daves_map_textures`) |
@@ -42,11 +42,12 @@ Diablo-style health and power orbs, with swirling liquid that sloshes while you 
 
 ```text
 /balls                   options (/davesballs alias)
-/balls unlock            drag the orbs anywhere; right-click one to reset it (/balls lock when done)
+/balls holder <variant>  set bottom holder for both orbs (none, chalice, arcane, sanctum)
+/balls unlock            drag the orbs anywhere; left- or right-click one for settings (/balls lock when done)
 /balls reset             put both orbs back
 ```
 
-In Edit Mode, click an orb for its own settings: liquid and accent colours, number and percent text, and the accent pattern. The orbs can also hide Blizzard's player frame and work like it: left-click targets you, right-click opens your menu. More in [its README](wowaddons/daves_balls/README.md).
+In Edit Mode, left- or right-click an orb for its own settings: liquid and accent colours, compact **Orb text** (`Off`, `Numbers`, `Percent`, `Both`), the accent pattern, optional per-orb bottom holder (**Gilded Chalice**, **Arcane Cradle**, or **Sanctum Lotus**), **Bob intensity** (`Off` / `5%`–`100%`), **Cast shadow** (driven by the cursor light hitting the orb), and 3D **Swirling dust** with true sphere-rim occlusion (**Orbit pattern**: `Auto`, `Halo Ring`, `Twin Helix`, `Figure-8`, `Vortex`, `Atom Shells`, `Chaos`; **Particle count** `Off` / `2`–`40`, **Dust speed**, **Pattern rotation** `-180` to `+180 deg`, **Particle spread** `0%`–`100%`, **Trail style** `Off` / `Tails` / `Dust` / `Both` for independent curved comet tails and shimmering **Dust trails**, and **Tail length**). The orbs can also hide Blizzard's player frame and work like it: left-click targets you, right-click opens your menu. More in [its README](wowaddons/daves_balls/README.md).
 
 ### Dave's Chat (`daves_chat`)
 
