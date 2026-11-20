@@ -2299,6 +2299,12 @@ do
 			else
 				GameTooltip:AddLine("No Auction House prices cached yet.", 0.7, 0.7, 0.7, true)
 			end
+			if ns.GetDeepScanStatus then
+				local stText, sr, sg, sb = ns.GetDeepScanStatus()
+				if stText then
+					GameTooltip:AddDoubleLine("Next Deep Scan", stText, 1, 0.82, 0, sr or 0.8, sg or 0.8, sb or 0.8)
+				end
+			end
 			GameTooltip:AddLine(" ")
 			GameTooltip:AddLine("Prices update automatically when you open or browse the Auction House.", 0.65, 0.65, 0.65, true)
 			GameTooltip:AddLine("Click to open Market Analysis & Insights.", 0.25, 0.9, 0.45, true)

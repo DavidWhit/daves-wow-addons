@@ -8,16 +8,12 @@ __pycache__/
 *.py[cod]
 
 # Local CLI / OS / editor
-.grok/
 Thumbs.db
 .DS_Store
 desktop.ini
 
 # Local copy of Blizzard UI source (rebuild with Update-WowUiSource.py)
 wow-addon-kit/plugins/wow-forever-addons/data/ui-source/
-
-# ForeverLoot: never committed (user rule)
-wowaddons/ForeverLoot/
 
 # OpenMap release, downloaded locally as the source for wowaddons/daves_map/tools/Update-MapTextures.py
 OpenMap/

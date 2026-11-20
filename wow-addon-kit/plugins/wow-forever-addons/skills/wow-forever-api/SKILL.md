@@ -1,6 +1,6 @@
 ---
 name: wow-forever-api
-description: Facts and rules for writing World of Warcraft addon Lua that works on WoW Forever (internal game type "camelot", client 1.60.x, Interface 16001). Covers secret values, combat-log removal, addon-comms lockdown, TOC game-type rules, API lookups, and the shared Edit Mode settings dialog every movable addon frame must use. Use whenever writing, reviewing or debugging WoW addon code, choosing a WoW API, or answering "does X exist / work on Forever".
+description: Facts, architecture-first modularity rules, Lua 5.1 conventions, and API rules for writing World of Warcraft addon Lua that works on WoW Forever (internal game type "camelot", client 1.60.x, Interface 16001). Covers pre-code architecture design, modular code splitting, standard WoW Lua conventions, secret values, combat-log removal, addon-comms lockdown, TOC game-type rules, API lookups, and the shared Edit Mode settings dialog every movable addon frame must use. Use whenever planning, writing, reviewing or debugging WoW addon code, choosing a WoW API, or answering "does X exist / work on Forever".
 ---
 
 # WoW: Forever addon API
@@ -30,6 +30,35 @@ py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowApi.py" ContainerFrameItemButton_On
 ```
 
 On Forever only `Mainline`, `Camelot`, `Shared` and unsuffixed folders load; `Vanilla`/`TBC`/`Wrath`/`Cata`/`Mists` copies don't (the addon's TOC decides). If the folder is missing or older than the installed build (`SOURCE.txt` has the commit and date), run `scripts/Update-WowUiSource.py` (about a minute). Also see the API pages on https://warcraft.wiki.gg. See [sources.md](sources.md) for what each source is good for.
+
+## Rule one: design architecture & module boundaries before writing code
+
+Never jump straight into adding flags, hooks, or UI code inside an existing file without mapping how the addon fits together first. Skipping this step causes modules to step on each other's state and creates sprawling multi-thousand-line files that are hard to read and debug.
+
+### 1. Pre-code architecture pass (mandatory before any edit)
+- **Read `<addon>/NOTES.md`, `<addon>/README.md`, and `<addon>.toc` first.** The `.toc` file order is the addon's dependency graph. Check existing `hooksecurefunc` hooks, events, `SavedVariables` keys, and skipped/settled review decisions before touching Lua.
+- **One owner per state:** Every mutable concept (current selection, active filter, navigation history, cache table) must have **one owning module** and one clear mutation path (`ns.Set*` / `ns.Clear*` notifying views). Never mirror overlapping flags across files (for example, separate selection variables in a map canvas and a sidebar that can drift out of sync, or tying a `"Clear"` button to `"< Back"` history).
+- **Separate pure queries from side-effecting commands:** Data/query functions (`Get*`, `Is*`, `Format*`, list/subtitle builders) must be side-effect-free — never trigger C++/server preload requests (`RequestLoadQuestByID`, `RequestPreloadRewardData`), mutate UI state, or rebuild views inside a read getter, or list refreshes at login will hit `script ran too long`. Run preloads and camera/UI transitions only from explicit user actions or hovered elements.
+- **Check interaction boundaries:** Before hooking a Blizzard frame or modifying shared callbacks, trace every existing caller of the touched `ns.*` functions so the new behaviour composes cleanly instead of stepping on an existing flow (such as pinning, zone filtering, or Edit Mode dragging).
+
+### 2. Modularity & code splitting
+- **Single-responsibility `.lua` files:** Give each file one clear job (~`150–900` lines). Split proactively when a handwritten file approaches `~800–1,000` lines or mixes data/graph logic, controller state, and widget rendering (`Test-WowAddon.py` emits `[file-size]` at `>1200` lines and `Prepare-WowReview.py` reports `ModuleHealth` on every review).
+- **Layer `.toc` files top-to-bottom (lower layers never call upper layers at load time):**
+  1. `Core.lua` — `local ADDON, ns = ...`, `SavedVariables` defaults on `ADDON_LOADED`, `PLAYER_LOGIN` version print, slash commands, thin client wrappers.
+  2. `EditModeDialog.lua` + `EditMode.lua` *(when movable in Edit Mode)* — unmodified kit copy right after `Core.lua`.
+  3. **Domain / data modules** (`Calibrate.lua`, `Quests.lua`, `Elements.lua`) — pure lookups, caches, math/graph queries, and data-invalidation events; no frames or widgets.
+  4. **Controller / state modules** (`Focus.lua`, `PanelNav.lua`) — selection, navigation stack, camera/waypoint actions, and change notifications.
+  5. **View / UI modules** (`Layer.lua`, `PanelData.lua`, `Panel.lua`, `Tracker.lua`, `Effects_*.lua`) — frames, pooled rows/pins, tooltips, and input scripts calling controller/domain APIs.
+  6. `Options.lua` — Blizzard Settings category or companion settings dialog.
+- **Respect Lua 5.1's compiler limits:** Lua 5.1 hard-fails compilation above **200 active locals** per file/function and **60 upvalues** per function. Keep file-level locals comfortably under `~120` and upvalues under `~40` by grouping module-private state and widgets into a single `local state = { ... }` or `local ui = { ... }` table instead of dozens of loose file-level `local`s.
+- **Remember `.toc` reload rules:** Editing existing `.lua` files reloads with `/reload`; adding, renaming, or reordering `.lua` files in `.toc` requires a **full game client restart** once.
+
+### 3. Standard WoW Lua 5.1 conventions
+- **Header & scope:** Start every file with `local ADDON, ns = ...` (or `local _, ns = ...`). Keep every helper, constant, and state table `local`; expose cross-file contracts intentionally as `ns.PascalCase`. Zero accidental globals (`luacheck` W111/W112).
+- **Naming & style:** Indent with tabs (matching existing files); `UPPER_SNAKE_CASE` for constants, `PascalCase` for `ns.*` APIs and major local functions, `camelCase` for local variables, parameters, and table fields. Prefer guard-clause early `return`s over deeply nested `if` blocks.
+- **Never use `cond and a or b` when `a` can be `false` or `nil`:** In Lua, `cond and false or true` evaluates to `true`. Write explicit `if v == nil then v = default end` for boolean settings and nullable lookups.
+- **Reset pooled widgets completely:** Whenever reusing a pooled frame, button, texture, fontstring, or line, reset all mutable properties (`ClearAllPoints`, `SetSize`, `SetTexCoord(0, 1, 0, 1)`, `SetVertexColor(1, 1, 1, 1)`, `SetDesaturated(false)`, `SetAlpha(1)`, scripts) before configuring the new item so state never bleeds across pool reuses.
+- **Defer hidden UI work:** Never build large lists, pin layouts, or preload loops during `ADDON_LOADED` while the parent window is hidden; mark a dirty flag and build on `OnShow` / `PLAYER_LOGIN`.
 
 ## Facts (verified 2026-10-03)
 
@@ -187,6 +216,10 @@ To change the look or behaviour, edit the kit's file, then copy it into every ad
 
 - Keep everything `local` and share state through the addon namespace (`local ADDON, ns = ...`). Accidental globals cause taint and name clashes.
 - Bag replacements: hide Blizzard's container frames (`ContainerFrameN`, `ContainerFrameCombinedBags`) by parking them on a hidden parent, and **leave their events alone** (verified in game 2026-10-21, daves_sack 1.7.14). daves_sack also `UnregisterEvent`ed them from addon code, while showing its own window from `hooksecurefunc` hooks on the bag functions. Together those two tainted every window whose OnShow calls `OpenAllBags`, which means the bank and the mailbox. The bank's free first tab was blocked (`C_Bank.PurchaseBankTab`). Every item used from the bags in combat after a bank visit was blocked too (`UseContainerItem`), because Blizzard's item click reads `BankPanel.bankType` even with the bank closed (Forever's `BankPanel` never hides). Either piece alone left no taint.
-- Use plain color textures or your own `.tga` files for art. Blizzard texture paths move between clients.
+- Use plain color textures, verified Forever atlases (`OptionsIcon-Brown`, `Minimal_SliderBar_Button`, `common-button-list-plus`, `common-icon-backarrow`), or your own `.tga` files for art. Blizzard loose texture paths move between clients, and verified atlases work immediately on `/reload` without a client restart.
+- Keep `GameFont*` / `FRIZQT__.TTF` strings pure 7-bit ASCII (no `●`, `▸`, `▾`, `•`, `—`, `–`, `…`, `×`, which render as `[]` tofu boxes) and keep string truncation UTF-8 and `|c...|r` color-escape safe.
+- On `DialogBorderTranslucentTemplate` backgrounds, reset `bg:SetVertexColor(1, 1, 1, 1)` after `bg:SetColorTexture(0, 0, 0, a)` (prevents `a * a` double-alpha after textured styles), anchor settings dialogs to `UIParent` rather than the frame they scale, guard `MinimalScrollBar` `OnScroll` callbacks with a `syncingScroll` flag, and guard `Settings.NotifyUpdate` calls with a `syncingSettings` re-entrancy flag.
+- Never call `WorldMapFrame:Minimize()` or `WorldMapFrame.BorderFrame.MaximizeMinimizeFrame:Minimize()` from addon code (taints `WorldMapFrame.isMaximized` and blocks closing the map in combat); set `miniWorldMap = "1"` / `mapFade = "0"` via `C_CVar.SetCVar` at `ADDON_LOADED`/`PLAYER_LOGIN` instead.
+- See `.claude/skills/wow-forever-pitfalls/SKILL.md` for the full checklist of one-off Forever UI, font, scrollbar, dialog, and map-layer lessons.
 - Initialise SavedVariables in your own `ADDON_LOADED` (when `name == ADDON`).
-- Run the **wow-addon-test** skill after every change to addon code. It builds the `Prepare-WowReview.py` packet (static validation plus diff, `NOTES.md`, and Forever API annotations), then runs the **wow-addon-reviewer** advisor review (inline for small clean diffs, or subagent with the packet). Show the user its findings and wait for their go-ahead before applying any.
+- Run the **wow-addon-test** skill after every change to addon code. It builds the `Prepare-WowReview.py` packet (static validation, `ModuleHealth`, diff, `NOTES.md`, and Forever API annotations), then runs the **wow-addon-reviewer** review (inline for small clean diffs, or subagent with the packet): auto-apply clear, unambiguous `Confirmed` fixes right away, re-validate, and list what was fixed — prompting the user only when a finding genuinely needs design/direction input (`Needs Direction`).

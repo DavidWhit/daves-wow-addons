@@ -460,6 +460,15 @@ def main(argv):
         assert_that(any("EditModeDialog.lua" in s for s in pkt["SkippedFiles"]), "Prepare-WowReview skips unmodified EditModeDialog.lua")
         assert_that(any("Never reparent ChatFrame1" in n for n in pkt["NotesSummary"]), "Prepare-WowReview extracts NOTES.md hard rules")
         assert_that(any("UnitHealth" in a for a in pkt["ApiAnnotations"]), "Prepare-WowReview pre-annotates secret APIs")
+        assert_that(any("Core.lua" in m and "/200 locals" in m for m in pkt.get("ModuleMetrics") or []), "Prepare-WowReview reports ModuleMetrics (lines/locals/upvals)")
+
+        # Large handwritten module emits file-size info (omitted under -NoInfo)
+        big_lua = os.path.join(rules_dir, "Monolith.lua")
+        with open(big_lua, "w", encoding="utf-8") as bh:
+            bh.write("local _, ns = ...\n" + ("\n" * 1210))
+        append_ascii(os.path.join(rules_dir, "KitRules.toc"), "Monolith.lua")
+        _rc_big, big_check = invoke_check(rules_dir)
+        assert_that(has(big_check, "file-size", "info"), "flags >1200-line handwritten module with file-size info note")
 
         # Prepare-WowReview inside a git repo: small clean diff -> inline, taint diff -> subagent-diff
         if shutil.which("git"):

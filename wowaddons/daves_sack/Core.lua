@@ -395,8 +395,12 @@ do
 	local BATCH_SIZE = 50               -- max ItemKeys per C_AuctionHouse.SearchForItemKeys call
 	local REPLICATE_COOLDOWN = 7200     -- 2-hour cooldown between completed full AH deep caches (fast bag cache runs every time)
 	local REPLICATE_RETRY_QUIET = 900   -- Blizzard's ~15m server throttle window on C_AuctionHouse.ReplicateItems
-	local REPLICATE_SLICE = 240         -- max auctions inspected per background tick
-	local REPLICATE_BUDGET_MS = 1.8     -- max CPU milliseconds spent per background tick (prevents frame stutter)
+	local REPLICATE_SLICE = 500         -- max auctions inspected per background tick
+	local REPLICATE_BUDGET_MS = 2.5     -- max CPU milliseconds spent per background tick (prevents frame stutter)
+	local REPLICATE_TICK_SEC = 0.02     -- 50 Hz local RAM slicing (~10-18s for 166k+ listings, survives closing AH)
+	local REPLICATE_WAIT_UI = 35        -- seconds to display 20% progress while awaiting server replicate payload
+	local REPLICATE_WAIT_BG = 60        -- seconds to keep REPLICATE_ITEM_LIST_UPDATE registered for late arrivals
+	local REPLICATE_MAX_DROP_RETRIES = 3
 
 	function ns.FormatAge(ts)
 		if not (ts and Now) then return nil end
@@ -407,12 +411,46 @@ do
 		return format("%dd ago", floor(d / 86400))
 	end
 
-	local ahEvents, StepAutoScan
-	local ahOpen, wantReplicate, awaitingReplicate, userSearchedThisVisit = false, false, false, false
-	local pendingBatches, batchIndex = nil, 0
-	local replicateTicker = nil
-	local scanSeq = 0
-	local lastReplicateReqAt, lastReplicateListAt, replicateConsumed = nil, nil, false
+	local function FormatDurationShort(sec)
+		sec = max(1, floor((sec or 0) + 0.5))
+		if sec < 60 then return format("%ds", sec) end
+		if sec < 3600 then return format("%dm", floor((sec + 59) / 60)) end
+		local h = floor(sec / 3600)
+		local m = floor((sec % 3600) / 60)
+		return m > 0 and format("%dh %dm", h, m) or format("%dh", h)
+	end
+
+	local function PlayerCharKey()
+		local name = UnitName and UnitName("player")
+		local realm = GetRealmName and GetRealmName()
+		if name and name ~= "" then
+			return realm and realm ~= "" and (name .. "-" .. realm) or name
+		end
+		return nil
+	end
+
+	local ahEvents, StepAutoScan, QueueFastBagScan, ScheduleCooldownRetry
+	local scan = {
+		ahOpen = false,
+		wantReplicate = false,
+		forceReplicate = false,
+		lastWasManual = false,
+		awaitingReplicate = false,
+		inReplicateCall = false,
+		userSearchedThisVisit = false,
+		pendingBatches = nil,
+		batchIndex = 0,
+		batchInFlight = false,
+		batchSeq = 0,
+		replicateTicker = nil,
+		cooldownTimer = nil,
+		scanSeq = 0,
+		repWaitSeq = 0,
+		replicateDropRetries = 0,
+		replicateConsumed = false,
+		prevReqTs = nil,
+		prevReqChar = nil,
+	}
 	local batchMin, batchQty = {}, {}
 	local repBuyMin, repBuyMin2, repMinQty, repBidMin = {}, {}, {}, {}
 	local repQty, repListings, repBids, repBidQty, repName, repQual = {}, {}, {}, {}, {}, {}
@@ -420,6 +458,34 @@ do
 	local function IsDeepScanDue()
 		if not (ns.db and ns.db.showAuctionPrices ~= false) then return false end
 		return not Now or (Now() - (ns.db.ahLastReplicate or 0)) >= REPLICATE_COOLDOWN
+	end
+
+	local function GetCharReqTime()
+		if not ns.db then return nil end
+		local reqTs = ns.db.ahLastReplicateReq
+		if not (reqTs and reqTs > 0) then return nil end
+		local reqChar = ns.db.ahLastReplicateReqChar
+		local curChar = PlayerCharKey()
+		if reqChar and curChar and reqChar ~= curChar then return nil end
+		return reqTs
+	end
+
+	local function ServerThrottleRemaining()
+		if not Now then return 0 end
+		local reqTs = GetCharReqTime()
+		if not reqTs then return 0 end
+		local rem = REPLICATE_RETRY_QUIET - (Now() - reqTs)
+		return rem > 0 and rem or 0
+	end
+
+	local function HasUnconsumedFreshSnapshot()
+		local A = C_AuctionHouse
+		if scan.replicateConsumed or not (A and A.GetNumReplicateItems and Now) then return false end
+		if (A.GetNumReplicateItems() or 0) <= 0 then return false end
+		local reqTs = GetCharReqTime()
+		if not reqTs then return false end
+		if reqTs <= (ns.db.ahLastReplicate or 0) then return false end
+		return (Now() - reqTs) < REPLICATE_RETRY_QUIET
 	end
 
 	local function WipeReplicateScratch()
@@ -455,6 +521,38 @@ do
 			ns.ahScanProgress = nil
 			NotifyUpdated(changed)
 		end
+	end
+
+	local function CancelCooldownTimer()
+		if scan.cooldownTimer then
+			scan.cooldownTimer:Cancel()
+			scan.cooldownTimer = nil
+		end
+	end
+
+	local function HasPendingBatches()
+		return scan.pendingBatches ~= nil and scan.batchIndex <= #scan.pendingBatches
+	end
+
+	local function ClearPendingBatches()
+		scan.pendingBatches, scan.batchIndex, scan.batchInFlight = nil, 0, false
+		scan.batchSeq = scan.batchSeq + 1
+	end
+
+	local function StopReplicateTicker(keepEvent)
+		scan.awaitingReplicate = false
+		scan.inReplicateCall = false
+		scan.repWaitSeq = scan.repWaitSeq + 1
+		if ahEvents and not keepEvent then
+			pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
+		end
+		if scan.replicateTicker then
+			scan.replicateTicker:Cancel()
+			scan.replicateTicker = nil
+		end
+		WipeReplicateScratch()
+		ns.ahScanProgress = nil
+		ns.ahScanDoneUntil = nil
 	end
 
 	local function SetCachedPrice(prices, id, price)
@@ -589,34 +687,13 @@ do
 		return any
 	end
 
-	local function HasPendingBatches()
-		return pendingBatches ~= nil and batchIndex <= #pendingBatches
-	end
-
-	local function ClearPendingBatches()
-		pendingBatches, batchIndex = nil, 0
-	end
-
-	local function StopReplicateTicker()
-		awaitingReplicate = false
-		if ahEvents then
-			pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
-		end
-		if replicateTicker then
-			replicateTicker:Cancel()
-			replicateTicker = nil
-		end
-		WipeReplicateScratch()
-		ns.ahScanProgress = nil
-		ns.ahScanDoneUntil = nil
-	end
-
 	local function RecordBrowseList(list)
 		if not (list and ns.db and ns.db.ahPrices) then return end
-		if not ns.ahScanning and not HasPendingBatches()
+		if not ns.ahScanning and not HasPendingBatches() and not scan.batchInFlight
 			and ns.OnCounterSnipeBrowseResults and ns.OnCounterSnipeBrowseResults(list) then
 			return
 		end
+		scan.batchInFlight = false
 		wipe(batchMin); wipe(batchQty)
 		for i = 1, #list do
 			local r = list[i]
@@ -632,21 +709,22 @@ do
 		end
 		local changed = CommitBatch(ns.db.ahPrices, batchMin, nil, batchQty)
 		wipe(batchQty)
-		if not HasPendingBatches() and not wantReplicate and not awaitingReplicate and not replicateTicker then
+		if not HasPendingBatches() and not scan.wantReplicate and not scan.awaitingReplicate and not scan.replicateTicker then
 			if ns.ahScanning then
 				FinishScan(changed, true)
 				return
 			end
-		elseif not HasPendingBatches() and wantReplicate and not awaitingReplicate and not replicateTicker then
-			local seq = scanSeq
+		elseif (HasPendingBatches() or scan.wantReplicate) and not scan.awaitingReplicate and not scan.replicateTicker then
+			local seq = scan.scanSeq
 			C_Timer.After(0.15, function()
-				if seq == scanSeq and wantReplicate and not awaitingReplicate and not replicateTicker then
+				if seq == scan.scanSeq and not scan.batchInFlight and not scan.awaitingReplicate and not scan.replicateTicker then
 					StepAutoScan()
 				end
 			end)
-		elseif ns.ahScanning and pendingBatches and #pendingBatches > 0 then
-			local done = max(1, batchIndex - 1)
-			local totalSteps = #pendingBatches + (wantReplicate and 4 or 0)
+		end
+		if ns.ahScanning and scan.pendingBatches and #scan.pendingBatches > 0 then
+			local done = max(1, scan.batchIndex - 1)
+			local totalSteps = #scan.pendingBatches + (scan.wantReplicate and 4 or 0)
 			ns.ahScanProgress = floor((done / totalSteps) * 100 + 0.5)
 		end
 		if changed or not ns.ahScanning then NotifyUpdated(changed) end
@@ -733,16 +811,15 @@ do
 		end
 	end
 
-	-- Slices GetReplicateItemInfo across background ticks after unregistering
-	-- REPLICATE_ITEM_LIST_UPDATE so uncached-item callbacks never re-trigger the scan.
-	-- Uses a per-tick millisecond budget (REPLICATE_BUDGET_MS) and lightweight progress-only
-	-- widget updates so even 160,000+ active auctions scan with zero frame stutter.
+	-- Slices GetReplicateItemInfo (0-indexed: 0 .. n-1) across background ticks after
+	-- unregistering REPLICATE_ITEM_LIST_UPDATE so uncached-item callbacks never re-trigger.
+	-- Because the replicate buffer is local client memory, slicing continues safely even if
+	-- the player closes the Auction House (pausing cleanly during combat, stopping only if
+	-- GetNumReplicateItems drops to 0).
 	local function StartReplicateSlice()
 		local A = C_AuctionHouse
-		if not (ahOpen and A and A.GetNumReplicateItems and A.GetReplicateItemInfo and ns.db and ns.db.ahPrices) then
-			awaitingReplicate = false
-			if ahEvents then pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE") end
-			ns.ahScanProgress = nil
+		if not (A and A.GetNumReplicateItems and A.GetReplicateItemInfo and ns.db and ns.db.ahPrices and ns.db.showAuctionPrices ~= false) then
+			StopReplicateTicker()
 			ns.ahScanning = false
 			NotifyUpdated(false)
 			return
@@ -751,15 +828,20 @@ do
 		if total <= 0 then
 			return   -- keep REPLICATE_ITEM_LIST_UPDATE registered until the list is populated
 		end
-		awaitingReplicate = false
+		if scan.replicateTicker then return end   -- already slicing this snapshot
+		scan.awaitingReplicate = false
+		scan.inReplicateCall = false
+		scan.wantReplicate = false
+		scan.forceReplicate = false
+		scan.repWaitSeq = scan.repWaitSeq + 1
+		ClearPendingBatches()
+		CancelCooldownTimer()
 		if ahEvents then
 			pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
 		end
-		replicateConsumed = false
-		if GetTime then lastReplicateListAt = GetTime() end
-		if replicateTicker then replicateTicker:Cancel() end
+		scan.replicateConsumed = false
 		WipeReplicateScratch()
-		local idx = 1
+		local idx = 0
 		ns.ahScanning = true
 		ns.ahScanDoneUntil = nil
 		ns.ahScanProgress = 25
@@ -767,22 +849,23 @@ do
 
 		local GetRepInfo = A.GetReplicateItemInfo
 		local GetNumRep = A.GetNumReplicateItems
-		replicateTicker = C_Timer.NewTicker(0.04, function()
-			if not (ahOpen and A and ns.db and ns.db.ahPrices and ns.db.showAuctionPrices ~= false)
-				or (AuctionHouseFrame and not AuctionHouseFrame:IsShown()) then
+		scan.replicateTicker = C_Timer.NewTicker(REPLICATE_TICK_SEC, function()
+			if not (A and ns.db and ns.db.ahPrices and ns.db.showAuctionPrices ~= false) then
 				StopReplicateTicker()
 				FinishScan(false, false)
 				return
 			end
+			if InCombatLockdown and InCombatLockdown() then
+				return   -- pause smoothly during combat without discarding progress
+			end
 			local n = GetNumRep() or 0
 			if n <= 0 then
-				lastReplicateListAt = nil
 				StopReplicateTicker()
 				FinishScan(false, false)
 				return
 			end
 			local t0 = Clock and Clock() or nil
-			local stop = min(n, idx + REPLICATE_SLICE - 1)
+			local stop = min(n - 1, idx + REPLICATE_SLICE - 1)
 			local done = idx - 1
 			for i = idx, stop do
 				local name, _, count, qualityID, _, _, _, minBid, _, buyoutPrice, bidAmount, _, _, _, _, saleStatus, itemID = GetRepInfo(i)
@@ -835,10 +918,9 @@ do
 				end
 			end
 			idx = done + 1
-			if idx > n then
-				if replicateTicker then replicateTicker:Cancel(); replicateTicker = nil end
-				lastReplicateListAt = nil
-				replicateConsumed = true
+			if idx >= n then
+				if scan.replicateTicker then scan.replicateTicker:Cancel(); scan.replicateTicker = nil end
+				scan.replicateConsumed = true
 				local changed = CommitReplicateBatch(ns.db.ahPrices)
 				WipeReplicateScratch()
 				if Now then
@@ -848,7 +930,7 @@ do
 				end
 				FinishScan(changed, true)
 			else
-				local pct = 25 + floor((done / max(1, n)) * 75 + 0.5)
+				local pct = 25 + floor(((done + 1) / max(1, n)) * 75 + 0.5)
 				if abs(pct - (ns.ahScanProgress or 0)) >= 2 then
 					ns.ahScanProgress = pct
 					if ns.UpdateAhScanProgressOnly then
@@ -859,135 +941,249 @@ do
 		end)
 	end
 
-	StepAutoScan = function()
-		local A = C_AuctionHouse
-		if not (ahOpen and A and ns.db and ns.db.showAuctionPrices ~= false) then
-			ClearPendingBatches()
-			wantReplicate = false
-			StopReplicateTicker()
-			if ns.ahScanning then
-				ns.ahScanning = false
-				NotifyUpdated(false)
-			end
-			return
-		end
-
-		if HasPendingBatches() then
-			if (A.HasFavorites and A.HasFavorites()) or userSearchedThisVisit or not A.SearchForItemKeys then
-				ClearPendingBatches()
-			else
-				if A.IsThrottledMessageSystemReady and not A.IsThrottledMessageSystemReady() then return end
-				local totalBatches = #pendingBatches
-				local curBatch = batchIndex
-				local batch = pendingBatches[batchIndex]
-				batchIndex = batchIndex + 1
-				if not HasPendingBatches() then
-					ClearPendingBatches()
-				end
-				if batch and #batch > 0 then
-					ns.ahScanning = true
-					ns.ahScanDoneUntil = nil
-					local totalSteps = totalBatches + (wantReplicate and 4 or 0)
-					ns.ahScanProgress = max(10, floor(((curBatch - 0.5) / max(1, totalSteps)) * 100 + 0.5))
-					NotifyUpdated(false)
-					local sortOrder = Enum and Enum.AuctionHouseSortOrder and Enum.AuctionHouseSortOrder.Price or 0
-					pcall(A.SearchForItemKeys, batch, { { sortOrder = sortOrder, reverseSort = false } })
-					local seq = scanSeq
-					C_Timer.After(5, function()
-						if seq ~= scanSeq then return end
-						if HasPendingBatches() or wantReplicate then
-							StepAutoScan()
-						elseif ns.ahScanning and not awaitingReplicate and not replicateTicker then
-							FinishScan(false, true)
-						end
-					end)
-					return   -- AUCTION_HOUSE_THROTTLED_SYSTEM_READY or RecordBrowseList will advance to next batch or wantReplicate
-				end
-			end
-		end
-
-		if wantReplicate then
-			wantReplicate = false
-			-- If an earlier visit in this session already downloaded the replicate list (even if closed
-			-- while in flight) and closed before finishing, reuse the in-memory list immediately.
-			local lastRep = (not replicateConsumed and (lastReplicateListAt or lastReplicateReqAt)) or nil
-			if lastRep and GetTime and (GetTime() - lastRep) < REPLICATE_RETRY_QUIET
-				and A.GetNumReplicateItems and (A.GetNumReplicateItems() or 0) > 0 then
-				StartReplicateSlice()
-				return
-			end
-			if A.ReplicateItems and ahEvents then
-				local recentAttempt = lastReplicateReqAt and GetTime and (GetTime() - lastReplicateReqAt) < REPLICATE_RETRY_QUIET
-				if not recentAttempt then
-					replicateConsumed = false
-					if GetTime then lastReplicateReqAt = GetTime() end
-				end
-				awaitingReplicate = true
-				ns.ahScanning = true
-				ns.ahScanDoneUntil = nil
-				ns.ahScanProgress = 20
-				NotifyUpdated(false)
-				-- Keep REPLICATE_ITEM_LIST_UPDATE registered for the entire AH visit until StartReplicateSlice
-				-- receives total > 0 (or AUCTION_HOUSE_CLOSED runs): downloading 166k+ auctions at peak hours
-				-- can take 10-25s+, so never unregister the event on a timeout while the AH stays open.
-				pcall(ahEvents.RegisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
-				pcall(A.ReplicateItems)
-				local seq = scanSeq
-				C_Timer.After(recentAttempt and 4 or 25, function()
-					if seq ~= scanSeq then return end
-					if not replicateTicker and not HasPendingBatches() then
-						awaitingReplicate = false
-						if ns.ahScanning then
-							FinishScan(false, false)
-						end
-					end
-				end)
-				return
-			end
-		end
-
-		if ns.ahScanning and not awaitingReplicate and not replicateTicker then
-			FinishScan(false, true)
-		end
+	ScheduleCooldownRetry = function()
+		CancelCooldownTimer()
+		if not (scan.ahOpen and IsDeepScanDue()) then return end
+		local rem = ServerThrottleRemaining()
+		if rem <= 0 then return end
+		local seq = scan.scanSeq
+		scan.cooldownTimer = C_Timer.NewTimer(rem + 2, function()
+			scan.cooldownTimer = nil
+			if seq ~= scan.scanSeq or not scan.ahOpen then return end
+			if scan.replicateTicker or scan.awaitingReplicate or not IsDeepScanDue() then return end
+			scan.wantReplicate = true
+			scan.forceReplicate = false
+			scan.replicateDropRetries = 0
+			StepAutoScan()
+		end)
 	end
 
-	local function StartAutoScan()
+	QueueFastBagScan = function()
 		local A = C_AuctionHouse
-		if not (ahOpen and A and ns.db and ns.db.showAuctionPrices ~= false) then return end
-		if not (A.HasFavorites and A.HasFavorites()) and not userSearchedThisVisit
+		if not (scan.ahOpen and A and ns.db and ns.db.showAuctionPrices ~= false) then return end
+		if scan.replicateTicker or scan.awaitingReplicate or scan.wantReplicate then return end
+		if not (A.HasFavorites and A.HasFavorites()) and not scan.userSearchedThisVisit
 			and A.SearchForItemKeys and A.MakeItemKey and ns.BuildTradeableItemKeys then
 			local keys = ns.BuildTradeableItemKeys(A.MakeItemKey)
 			if keys and #keys > 0 then
-				pendingBatches = {}
+				scan.pendingBatches = {}
 				for i = 1, #keys, BATCH_SIZE do
 					local b = {}
 					for j = i, min(#keys, i + BATCH_SIZE - 1) do
 						b[#b + 1] = keys[j]
 					end
-					pendingBatches[#pendingBatches + 1] = b
+					scan.pendingBatches[#scan.pendingBatches + 1] = b
 				end
-				batchIndex = 1
+				scan.batchIndex = 1
 			end
 		end
 		StepAutoScan()
 	end
 
+	local function DispatchReplicate(isManual)
+		local A = C_AuctionHouse
+		if not (scan.ahOpen and A and A.ReplicateItems and ahEvents and ns.db) then return false end
+		if HasUnconsumedFreshSnapshot() then
+			StartReplicateSlice()
+			return true
+		end
+		if A.IsThrottledMessageSystemReady and not A.IsThrottledMessageSystemReady() then
+			-- Wait for AUCTION_HOUSE_THROTTLED_SYSTEM_READY (plus safety fallback timer) instead
+			-- of firing into a busy throttle and letting C++ drop ReplicateItems().
+			local seq = scan.scanSeq
+			C_Timer.After(1.2, function()
+				if seq == scan.scanSeq and scan.ahOpen and scan.wantReplicate and not scan.awaitingReplicate and not scan.replicateTicker then
+					StepAutoScan()
+				end
+			end)
+			return false
+		end
+		local wasThrottled = ServerThrottleRemaining() > 0
+		scan.wantReplicate = false
+		scan.forceReplicate = false
+		scan.lastWasManual = isManual and true or false
+		scan.prevReqTs = ns.db.ahLastReplicateReq
+		scan.prevReqChar = ns.db.ahLastReplicateReqChar
+		if Now and not wasThrottled then
+			ns.db.ahLastReplicateReq = Now()
+			ns.db.ahLastReplicateReqChar = PlayerCharKey()
+		end
+		scan.replicateConsumed = false
+		scan.awaitingReplicate = true
+		scan.repWaitSeq = scan.repWaitSeq + 1
+		local myRepSeq = scan.repWaitSeq
+		ns.ahScanning = true
+		ns.ahScanDoneUntil = nil
+		ns.ahScanProgress = 20
+		NotifyUpdated(false)
+		pcall(ahEvents.RegisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
+		scan.inReplicateCall = true
+		pcall(A.ReplicateItems)
+		scan.inReplicateCall = false
+		if not scan.awaitingReplicate then
+			-- AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED fired synchronously inside ReplicateItems().
+			return false
+		end
+
+		local uiWait = (isManual and wasThrottled) and 6 or REPLICATE_WAIT_UI
+		C_Timer.After(uiWait, function()
+			if myRepSeq ~= scan.repWaitSeq or scan.replicateTicker then return end
+			scan.awaitingReplicate = false
+			if ns.ahScanning then
+				FinishScan(false, false)
+			end
+			if scan.ahOpen and not scan.userSearchedThisVisit and not HasPendingBatches() then
+				QueueFastBagScan()
+			end
+			if scan.ahOpen and IsDeepScanDue() then
+				ScheduleCooldownRetry()
+			end
+		end)
+		C_Timer.After(REPLICATE_WAIT_BG, function()
+			if myRepSeq ~= scan.repWaitSeq or scan.replicateTicker then return end
+			if ahEvents then
+				pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
+			end
+		end)
+		return true
+	end
+
+	StepAutoScan = function()
+		local A = C_AuctionHouse
+		if not (scan.ahOpen and A and ns.db and ns.db.showAuctionPrices ~= false) then
+			ClearPendingBatches()
+			scan.wantReplicate = false
+			scan.forceReplicate = false
+			if not scan.replicateTicker and not scan.awaitingReplicate and ns.ahScanning then
+				ns.ahScanning = false
+				NotifyUpdated(false)
+			end
+			return
+		end
+		if scan.replicateTicker or scan.awaitingReplicate then return end
+
+		if scan.wantReplicate then
+			-- Run deep scan BEFORE any SearchForItemKeys bag query so bag browse requests
+			-- never collide with ReplicateItems() or consume the AH throttle first.
+			if not scan.forceReplicate and not HasUnconsumedFreshSnapshot() and ServerThrottleRemaining() > 0 then
+				scan.wantReplicate = false
+				ScheduleCooldownRetry()
+				QueueFastBagScan()
+				return
+			end
+			DispatchReplicate(scan.forceReplicate)
+			return
+		end
+
+		if HasPendingBatches() then
+			if scan.batchInFlight then return end
+			if (A.HasFavorites and A.HasFavorites()) or scan.userSearchedThisVisit or not A.SearchForItemKeys then
+				ClearPendingBatches()
+			else
+				if A.IsThrottledMessageSystemReady and not A.IsThrottledMessageSystemReady() then return end
+				local totalBatches = #scan.pendingBatches
+				local curBatch = scan.batchIndex
+				local batch = scan.pendingBatches[scan.batchIndex]
+				scan.batchIndex = scan.batchIndex + 1
+				if not HasPendingBatches() then
+					ClearPendingBatches()
+				end
+				if batch and #batch > 0 then
+					scan.batchInFlight = true
+					scan.batchSeq = scan.batchSeq + 1
+					local bSeq = scan.batchSeq
+					ns.ahScanning = true
+					ns.ahScanDoneUntil = nil
+					ns.ahScanProgress = max(10, floor(((curBatch - 0.5) / max(1, totalBatches)) * 100 + 0.5))
+					NotifyUpdated(false)
+					local sortOrder = Enum and Enum.AuctionHouseSortOrder and Enum.AuctionHouseSortOrder.Price or 0
+					pcall(A.SearchForItemKeys, batch, { { sortOrder = sortOrder, reverseSort = false } })
+					local seq = scan.scanSeq
+					C_Timer.After(5, function()
+						if seq ~= scan.scanSeq or bSeq ~= scan.batchSeq then return end
+						scan.batchInFlight = false
+						if HasPendingBatches() or scan.wantReplicate then
+							StepAutoScan()
+						elseif ns.ahScanning and not scan.awaitingReplicate and not scan.replicateTicker then
+							FinishScan(false, true)
+						end
+					end)
+					return
+				end
+			end
+		end
+
+		if ns.ahScanning and not scan.awaitingReplicate and not scan.replicateTicker then
+			FinishScan(false, true)
+		end
+	end
+
 	function ns.IsAuctionHouseOpen()
-		return ahOpen and true or false
+		return scan.ahOpen and true or false
+	end
+
+	function ns.IsAuctionScanBusy()
+		return (ns.ahScanning or scan.wantReplicate or scan.awaitingReplicate
+			or scan.replicateTicker ~= nil or scan.batchInFlight or HasPendingBatches()) and true or false
+	end
+
+	function ns.GetDeepScanStatus()
+		if not (ns.db and ns.db.showAuctionPrices ~= false) then return nil end
+		if scan.replicateTicker then
+			return format("Scanning now (%d%%)...", ns.ahScanProgress or 25), 0.95, 0.80, 0.30
+		end
+		if scan.awaitingReplicate or scan.wantReplicate then
+			return "Downloading AH snapshot...", 0.95, 0.80, 0.30
+		end
+		if HasUnconsumedFreshSnapshot() then
+			return "Cached snapshot ready (open AH to finish)", 0.35, 0.90, 0.50
+		end
+		if IsDeepScanDue() then
+			local rem = ServerThrottleRemaining()
+			if rem > 0 then
+				return format("Server cooldown (ready in %s)", FormatDurationShort(rem)), 1.0, 0.65, 0.25
+			end
+			return "Due now (open Auction House)", 0.35, 0.90, 0.50
+		end
+		if Now and ns.db.ahLastReplicate then
+			local rem = REPLICATE_COOLDOWN - max(0, Now() - ns.db.ahLastReplicate)
+			if rem > 0 then
+				return format("Ready in %s", FormatDurationShort(rem)), 0.72, 0.72, 0.72
+			end
+		end
+		return nil
 	end
 
 	function ns.ForceAuctionScan()
-		if not ahOpen then
+		if not scan.ahOpen then
 			print("|cffd4a94eDave's Sack:|r Open the Auction House first, then type |cffffd200/sack scan|r.")
 			return
 		end
-		userSearchedThisVisit = false
-		scanSeq = scanSeq + 1
+		if scan.replicateTicker then
+			print(format("|cffd4a94eDave's Sack:|r Deep scan is already running (%d%%)...", ns.ahScanProgress or 25))
+			return
+		end
+		if HasUnconsumedFreshSnapshot() then
+			local n = (C_AuctionHouse and C_AuctionHouse.GetNumReplicateItems and C_AuctionHouse.GetNumReplicateItems()) or 0
+			print(format("|cffd4a94eDave's Sack:|r Resuming Auction House deep scan from cached snapshot (%d listings)...", n))
+			StartReplicateSlice()
+			return
+		end
+		scan.userSearchedThisVisit = false
+		scan.scanSeq = scan.scanSeq + 1
+		scan.replicateDropRetries = 0
 		ClearPendingBatches()
+		CancelCooldownTimer()
 		StopReplicateTicker()
-		wantReplicate = true
-		print("|cffd4a94eDave's Sack:|r Requesting full Auction House deep scan… (Note: WoW's server limits full replication to once every ~15 minutes.)")
-		StartAutoScan()
+		scan.wantReplicate = true
+		scan.forceReplicate = true
+		local rem = ServerThrottleRemaining()
+		if rem > 0 then
+			print(format("|cffd4a94eDave's Sack:|r Requesting full Auction House deep scan... (Note: WoW's ~15m server cooldown may have %s left.)", FormatDurationShort(rem)))
+		else
+			print("|cffd4a94eDave's Sack:|r Requesting full Auction House deep scan... (Note: WoW's server limits full replication to once every ~15 minutes.)")
+		end
+		StepAutoScan()
 	end
 
 	local function TooltipStackCount(tooltip, itemID)
@@ -1139,6 +1335,7 @@ do
 			"COMMODITY_SEARCH_RESULTS_UPDATED",
 			"ITEM_SEARCH_RESULTS_UPDATED",
 			"AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
+			"AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED",
 			"TRADE_SKILL_SHOW",
 			"TRADE_SKILL_LIST_UPDATE",
 		}) do
@@ -1146,41 +1343,130 @@ do
 		end
 		ahEvents:SetScript("OnEvent", function(_, event, arg1)
 			if event == "AUCTION_HOUSE_SHOW" then
-				scanSeq = scanSeq + 1
-				local seq = scanSeq
-				ahOpen = true
-				userSearchedThisVisit = false
+				scan.scanSeq = scan.scanSeq + 1
+				local seq = scan.scanSeq
+				scan.ahOpen = true
+				scan.userSearchedThisVisit = false
+				scan.replicateDropRetries = 0
 				ClearPendingBatches()
-				StopReplicateTicker()
-				wantReplicate = IsDeepScanDue()
-				C_Timer.After(0.25, function()
-					if seq == scanSeq then StartAutoScan() end
-				end)
+				CancelCooldownTimer()
+				if scan.replicateTicker then
+					-- Already finishing a downloaded snapshot in memory; never restart it.
+					return
+				end
+				if HasUnconsumedFreshSnapshot() then
+					StartReplicateSlice()
+					return
+				end
+				if scan.awaitingReplicate then
+					ns.ahScanning = true
+					ns.ahScanDoneUntil = nil
+					ns.ahScanProgress = 20
+					NotifyUpdated(false)
+					return
+				end
+				if IsDeepScanDue() then
+					if ServerThrottleRemaining() == 0 then
+						-- Claim busy state immediately so Market Bait/Counter-Snipe yields,
+						-- then send ReplicateItems() once Blizzard's OnShow queries settle.
+						scan.wantReplicate = true
+						scan.forceReplicate = false
+						ns.ahScanning = true
+						ns.ahScanDoneUntil = nil
+						ns.ahScanProgress = 10
+						NotifyUpdated(false)
+						C_Timer.After(0.35, function()
+							if seq == scan.scanSeq then StepAutoScan() end
+						end)
+					else
+						-- Server ~15m throttle still active from an earlier interrupted request:
+						-- run fast bag scan right away and auto-start deep scan once cooldown ends.
+						scan.wantReplicate = false
+						ScheduleCooldownRetry()
+						C_Timer.After(0.25, function()
+							if seq == scan.scanSeq then QueueFastBagScan() end
+						end)
+					end
+				else
+					scan.wantReplicate = false
+					C_Timer.After(0.25, function()
+						if seq == scan.scanSeq then QueueFastBagScan() end
+					end)
+				end
 			elseif event == "AUCTION_HOUSE_CLOSED" then
-				scanSeq = scanSeq + 1
-				ahOpen = false
-				userSearchedThisVisit = false
-				wantReplicate = false
+				scan.scanSeq = scan.scanSeq + 1
+				scan.ahOpen = false
+				scan.userSearchedThisVisit = false
+				scan.wantReplicate = false
+				scan.forceReplicate = false
 				ClearPendingBatches()
-				StopReplicateTicker()
+				CancelCooldownTimer()
+				if scan.replicateTicker then
+					-- Keep slicing local RAM snapshot in background to 100% completion.
+					return
+				end
+				if scan.awaitingReplicate then
+					-- Keep REPLICATE_ITEM_LIST_UPDATE registered in case the server payload finishes
+					-- arriving right after closing; hide the 20% bar after a brief 4s grace window.
+					local myRepSeq = scan.repWaitSeq
+					C_Timer.After(4, function()
+						if myRepSeq == scan.repWaitSeq and not scan.ahOpen and not scan.replicateTicker then
+							scan.awaitingReplicate = false
+							if ns.ahScanning then
+								FinishScan(false, false)
+							end
+						end
+					end)
+					return
+				end
 				if ns.ahScanning then
 					ns.ahScanning = false
+					ns.ahScanProgress = nil
+					ns.ahScanDoneUntil = nil
 					NotifyUpdated(false)
 				end
 			elseif event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
-				if ahOpen and (HasPendingBatches() or wantReplicate) then
+				if scan.ahOpen and not scan.batchInFlight and (HasPendingBatches() or scan.wantReplicate) then
 					StepAutoScan()
+				end
+			elseif event == "AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED" then
+				if scan.inReplicateCall and scan.awaitingReplicate then
+					-- Synchronous C++ throttle drop inside ReplicateItems() before reaching the server:
+					-- roll back the req timestamp and retry automatically once throttle clears.
+					if ns.db then
+						ns.db.ahLastReplicateReq = scan.prevReqTs
+						ns.db.ahLastReplicateReqChar = scan.prevReqChar
+					end
+					scan.awaitingReplicate = false
+					scan.repWaitSeq = scan.repWaitSeq + 1
+					pcall(ahEvents.UnregisterEvent, ahEvents, "REPLICATE_ITEM_LIST_UPDATE")
+					if scan.ahOpen and scan.replicateDropRetries < REPLICATE_MAX_DROP_RETRIES then
+						scan.replicateDropRetries = scan.replicateDropRetries + 1
+						scan.wantReplicate = true
+						scan.forceReplicate = scan.lastWasManual
+						local seq = scan.scanSeq
+						C_Timer.After(1.0, function()
+							if seq == scan.scanSeq and scan.ahOpen and scan.wantReplicate and not scan.awaitingReplicate and not scan.replicateTicker then
+								StepAutoScan()
+							end
+						end)
+					else
+						if ns.ahScanning then FinishScan(false, false) end
+						if scan.ahOpen and not scan.userSearchedThisVisit then
+							QueueFastBagScan()
+						end
+					end
 				end
 			elseif event == "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED" or event == "AUCTION_HOUSE_BROWSE_RESULTS_ADDED" then
 				local list = (C_AuctionHouse and C_AuctionHouse.GetBrowseResults and C_AuctionHouse.GetBrowseResults()) or arg1
 				RecordBrowseList(list)
 			elseif event == "COMMODITY_SEARCH_RESULTS_UPDATED" then
-				if ahOpen and not (ns.IsBaitInternalQuery and ns.IsBaitInternalQuery(arg1)) then
-					userSearchedThisVisit = true
+				if scan.ahOpen and not (ns.IsBaitInternalQuery and ns.IsBaitInternalQuery(arg1)) then
+					scan.userSearchedThisVisit = true
 				end
 				RecordCommodityResults(arg1)
 			elseif event == "ITEM_SEARCH_RESULTS_UPDATED" then
-				if ahOpen then userSearchedThisVisit = true end
+				if scan.ahOpen then scan.userSearchedThisVisit = true end
 				RecordItemResults(arg1)
 			elseif event == "REPLICATE_ITEM_LIST_UPDATE" then
 				StartReplicateSlice()

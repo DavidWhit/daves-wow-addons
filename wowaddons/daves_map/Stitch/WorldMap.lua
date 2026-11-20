@@ -453,6 +453,7 @@ local function FlyTo(u, v, zoom)
 	a.time = Clamp(math.abs(a.S) * a.rho * FLY_PACE, FLY_TIME[1], FLY_TIME[2])
 	anim = a
 	userMoved = true
+	mod.userDraggedAt = nil
 end
 
 -- one frame of a flight, t 0..1 (eased): the view's centre (world, normalized) and zoom
@@ -606,6 +607,7 @@ local switchView                  -- the view a switch is for, while the new map
 local function Switch(target)
 	local u, v, zoom = View()
 	switching = true
+	mod.lastSwitchAt = GetTime()
 	switchView = { u, v, zoom }
 	local g = Before()
 	local ok, err = KeepPadCursor(pcall, map.SetMapID, map, target)
@@ -790,7 +792,11 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
 	RaisePlayer()
 
 	stillFor = Settled() and stillFor + 0.1 or 0
-	if mod.db.autoSwitch and userMoved and stillFor >= SWITCH_AFTER and not InCombatLockdown() and not mod.benching then
+	-- (daves_map: don't switch the host map while QuestMapFrame.DetailsFrame is open or while referencing a pinned Zone/Dungeon sidebar link)
+	local detailsOpen = QuestMapFrame and QuestMapFrame.DetailsFrame and QuestMapFrame.DetailsFrame:IsShown()
+	if mod.suspendAutoSwitch then
+		stillFor = 0
+	elseif mod.db.autoSwitch and userMoved and stillFor >= SWITCH_AFTER and not detailsOpen and not InCombatLockdown() and not mod.benching then
 		local u, v, zoom = View()
 		local target = PickMap(u, v, zoom, mapID)
 		if target ~= mapID then Switch(target) end
@@ -1269,10 +1275,17 @@ local function PressDown(_, button)
 	press.moved = false
 end
 local function PressTrack()
-	if press.moved or not press.x or not sc.mouseButtonInfo.LeftButton.down then return end
+	if not press.x or not sc.mouseButtonInfo.LeftButton.down then return end
+	if press.moved then
+		mod.userDraggedAt = GetTime()
+		return
+	end
 	local x, y = sc:GetCursorPosition()
 	local dx, dy = x - press.x, y - press.y
-	if dx * dx + dy * dy > PRESS_SLOP_SQ then press.moved = true end
+	if dx * dx + dy * dy > PRESS_SLOP_SQ then
+		press.moved = true
+		mod.userDraggedAt = GetTime()
+	end
 end
 local function WasDrag() return press.moved end
 
@@ -1292,14 +1305,23 @@ local function OnCanvasClick(from, button)
 	if from and button == "LeftButton" and IsControlKeyDown() and mod.db.ctrlClickPin == false then return false end
 	if from and button == "LeftButton" and WasDrag() then return true end
 	local u, v = mod.CursorWorld()
-	local _, _, zoom = View()
+	local vu, vv, zoom = View()
 	local chain = S.ChainAt(u, v)
 	if button == "LeftButton" then
+		local zoomed = false
 		for _, id in ipairs(chain) do
 			if id ~= WORLD and Stitchable(id) and FitZoom(id) > zoom * 1.05 then
 				local l, r, t, b = S.Rect(id)
 				GlideTo((l + r) / 2, (t + b) / 2, FitZoom(id))
+				if mod.onUserMapNav then mod.onUserMapNav(id) end
+				zoomed = true
 				break
+			end
+		end
+		if not zoomed and u and v then
+			local maxZ = MaxZoomAt(u, v)
+			if maxZ and zoom < maxZ * 0.98 then
+				GlideTo(u, v, math.min(maxZ, zoom * 1.85))
 			end
 		end
 	elseif button == "RightButton" then
@@ -1310,11 +1332,21 @@ local function OnCanvasClick(from, button)
 		local zone = ns.MapCityZones and ns.MapCityZones[chain[#chain]]
 		if zone and chain[#chain - 1] ~= zone then tinsert(chain, #chain, zone) end
 		local target = WORLD
+		local deepestFit = FitZoom(WORLD)
 		for _, id in ipairs(chain) do
-			if id ~= WORLD and Stitchable(id) and FitZoom(id) < zoom * 0.95 then target = id end
+			if id ~= WORLD and Stitchable(id) then
+				local fz = FitZoom(id)
+				if fz > deepestFit then deepestFit = fz end
+				if fz < zoom * 0.95 then target = id end
+			end
 		end
-		local l, r, t, b = S.Rect(target)
-		GlideTo((l + r) / 2, (t + b) / 2, FitZoom(target))
+		if zoom > deepestFit * 1.95 then
+			GlideTo(vu or u, vv or v, math.max(deepestFit, zoom / 1.85))
+		else
+			local l, r, t, b = S.Rect(target)
+			GlideTo((l + r) / 2, (t + b) / 2, FitZoom(target))
+			if mod.onUserMapNav then mod.onUserMapNav(target) end
+		end
 	end
 	return true
 end
@@ -2091,6 +2123,33 @@ do
 	end
 
 	function mod.ClearPin() ClearPin() end
+
+	function mod:FindMe(keepZoom)
+		if not mod.IsStitched() then return false end
+		local best = Safe.Call(C_Map.GetBestMapForUnit, "player")
+		local u, v
+		if best and S.Rect(best) then
+			local pos = Safe.Call(C_Map.GetPlayerMapPosition, best, "player")
+			local x, y = Safe.XY(pos)
+			if not Safe.IsSecret(x) and not Safe.IsSecret(y) and x and y and (x ~= 0 or y ~= 0) then
+				u, v = ToWorld(best, x, y)
+			end
+		end
+		if not u then
+			local host = mod.HostMap and mod.HostMap()
+			local pos = host and Safe.Call(C_Map.GetPlayerMapPosition, host, "player")
+			local x, y = Safe.XY(pos)
+			if not Safe.IsSecret(x) and not Safe.IsSecret(y) and x and y and (x ~= 0 or y ~= 0) then
+				u, v = ToWorld(host, x, y)
+				best = host
+			end
+		end
+		if not u then return false end
+		local _, _, zoom = mod.ViewNow()
+		mod.Glide(u, v, keepZoom and zoom or math.max(zoom or 1, mod.FitZoom(best)))
+		if mod.onUserMapNav then mod.onUserMapNav(best) end
+		return true
+	end
 
 	function mod:BuildNav()
 		wpSet = S.PinSet("waypoint", 0, 20)

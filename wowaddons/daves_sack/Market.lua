@@ -2417,7 +2417,7 @@ do
 		if not (cs.enabled and ns.IsAuctionHouseOpen and ns.IsAuctionHouseOpen() and A and A.SearchForItemKeys) then
 			return false
 		end
-		if ns.ahScanning or bait.pendingBuy or bait.pendingPost or bait.postingItemID then
+		if (ns.IsAuctionScanBusy and ns.IsAuctionScanBusy()) or ns.ahScanning or bait.pendingBuy or bait.pendingPost or bait.postingItemID then
 			return false
 		end
 		local now = (GetTime and GetTime()) or 0
@@ -3409,7 +3409,7 @@ do
 			EnsureCounterWatchlist()
 			SetStatus(nil)
 			if StartBaitWatch then StartBaitWatch() end
-			if ns.IsAuctionHouseOpen and ns.IsAuctionHouseOpen() and not ns.ahScanning then
+			if ns.IsAuctionHouseOpen and ns.IsAuctionHouseOpen() and not (ns.IsAuctionScanBusy and ns.IsAuctionScanBusy()) and not ns.ahScanning then
 				RunCounterSweep()
 			end
 		else
@@ -3837,7 +3837,7 @@ do
 				SetStatus("Locked quote expired — watching live order book…", 1, 0.68, 0.25)
 				RefreshBaitUI()
 			end
-			if ahOpen and not ns.ahScanning and not bait.pendingBuy and not bait.pendingPost then
+			if ahOpen and not (ns.IsAuctionScanBusy and ns.IsAuctionScanBusy()) and not ns.ahScanning and not bait.pendingBuy and not bait.pendingPost then
 				local cs = bait.cs
 				local watchSingle = bait.itemID and (panelShown or bait.ownQty > 0 or bait.postedByUs[bait.itemID] == true or cs.isCounterHit or bait.snipeQty > 0)
 				cs.tickParity = (cs.tickParity + 1) % 2
@@ -4290,7 +4290,7 @@ do
 					StartBaitWatch()
 					if bait.itemID then
 						C_Timer.After(0.6, function()
-							if bait.itemID and not ns.ahScanning then QueryLiveItem(bait.itemID, false) end
+							if bait.itemID and not (ns.IsAuctionScanBusy and ns.IsAuctionScanBusy()) and not ns.ahScanning then QueryLiveItem(bait.itemID, false) end
 							RefreshBaitUI()
 						end)
 					else
@@ -4368,7 +4368,7 @@ do
 		bait.lastOrderSig = nil
 		bait.panel:Show()
 		StartBaitWatch()
-		if bait.itemID and ns.IsAuctionHouseOpen and ns.IsAuctionHouseOpen() and not ns.ahScanning then
+		if bait.itemID and ns.IsAuctionHouseOpen and ns.IsAuctionHouseOpen() and not (ns.IsAuctionScanBusy and ns.IsAuctionScanBusy()) and not ns.ahScanning then
 			QueryLiveItem(bait.itemID, false)
 		end
 		RefreshBaitUI(true)

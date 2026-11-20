@@ -396,6 +396,29 @@ local function CraftElement(spellID)
 	end
 end
 
+-- Strips internal DBC placeholder tags such as " - No Text" (e.g. Spell 22810 "Opening - No Text")
+-- while keeping the rest of the label intact, or returning "" when the whole label is "No Text".
+function ns.CleanCastLabel(s)
+	if type(s) ~= "string" or issecretvalue(s) then return s end
+	if not s:lower():find("no%s+text") then return s end
+	local out = s
+	out = out:gsub("\226\128\147(%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt])", "-%1")
+	out = out:gsub("\226\128\148(%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt])", "-%1")
+	out = out:gsub("([Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*)\226\128\147", "%1-")
+	out = out:gsub("([Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*)\226\128\148", "%1-")
+	out = out:gsub("^%s*%(%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*%)[%s%-:/|,;]*", "")
+	out = out:gsub("^%s*%[%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*%][%s%-:/|,;]*", "")
+	out = out:gsub("[%s%-:/|,;]*%(%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*%)", "")
+	out = out:gsub("[%s%-:/|,;]*%[%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*%]", "")
+	out = out:gsub("[%s%-:/|,;]+[Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*$", "")
+	out = out:gsub("^%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt][%s%-:/|,;]+", "")
+	out = out:gsub("([%(%[])%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt][%s%-:/|,;]+", "%1")
+	out = out:gsub("[%s%-:/|,;]+[Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*([%)%]])", "%1")
+	out = out:gsub("[%s%-:/|,;]+[Nn][Oo]%s+[Tt][Ee][Xx][Tt][%s%-:/|,;]+", " ")
+	if out:match("^%s*[Nn][Oo]%s+[Tt][Ee][Xx][Tt]%s*$") then return "" end
+	return out:match("^%s*(.-)%s*$")
+end
+
 -- The "Other casts" setting decides every cast nothing above placed: a look, or "class" for your class's element.
 -- The setting always wins (it used to lose to the class guess, so a mage's Hearthstone was always arcane).
 local function Fallback()
@@ -407,12 +430,13 @@ end
 function ns:ResolveElement(spellID, name, isTradeskill)
 	local own = spellID and not issecretvalue(spellID) and ns.db.spellElements[spellID]
 	if own and ns.ELEMENTS[own] then return own end
-	local plain = type(name) == "string" and not issecretvalue(name)
-	if plain and GATHERING[name:lower()] then return GATHERING[name:lower()] end
-	if plain and name:lower():find("^smelt ") then return "smelting" end   -- Smelt Copper, Smelt Iron, ...
+	local clean = ns.CleanCastLabel(name)
+	local plain = type(clean) == "string" and not issecretvalue(clean) and clean ~= ""
+	if plain and GATHERING[clean:lower()] then return GATHERING[clean:lower()] end
+	if plain and clean:lower():find("^smelt ") then return "smelting" end   -- Smelt Copper, Smelt Iron, ...
 	if not issecretvalue(isTradeskill) and isTradeskill then return CraftElement(spellID) or Fallback() end
-	if type(name) == "string" and not issecretvalue(name) then
-		local lower = name:lower()
+	if plain then
+		local lower = clean:lower()
 		if NAMES[lower] then return NAMES[lower] end
 		lower = lower .. " "
 		for _, w in ipairs(WORDS) do

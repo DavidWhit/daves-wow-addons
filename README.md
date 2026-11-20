@@ -7,13 +7,13 @@ World of Warcraft addons for **WoW: Forever** (Interface `16001`), plus the tool
 | Folder | What it is |
 | --- | --- |
 | [`wowaddons/daves_balls`](wowaddons/daves_balls) | **Dave's Balls**: Diablo-style health and power orbs with sloshing liquid and cursor glare (`v0.1.5`) |
-| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 21 looks — 7 elements, 4 gathering & 7 crafting professions, Disenchant, First Aid, and Plain (`v0.6.0`) |
+| [`wowaddons/daves_castbar`](wowaddons/daves_castbar) | **Dave's Cast Bar**: animated player cast bar with 21 looks — 7 elements, 4 gathering & 7 crafting professions, Disenchant, First Aid, and Plain (`v0.6.1`) |
 | [`wowaddons/daves_chat`](wowaddons/daves_chat) | **Dave's Chat**: movable wide-screen chat dock (`Chat`, `Combat Log`, `General`) with an auto-closing collapsible left tab list, bordered inner chat pane, `Text direction`, and frosted-glass `Faint` mode (`v0.3.11`) |
-| [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: QuestieDB Forever quests, objectives, turn-ins, quest chain links, townsfolk & rares, search/filter sidebar, Ready-to-Turn-In & zone quest tracker, quest focus, and OpenMap seamless world & dungeon maps (`v0.6.0`; companion addons `daves_map_data` & `daves_map_textures`) |
-| [`wowaddons/daves_map_data`](wowaddons/daves_map_data) | **Dave's Map (data)**: QuestieDB Forever pins, objectives, turn-ins, and quest chains for `daves_map` (`Update-MapData.py`) |
+| [`wowaddons/daves_map`](wowaddons/daves_map) | **Dave's Map**: windowed, opaque tracked/focused-objectives-only default world map layer with optional zoom-faded POI layers and tab-driven `Zone` & `Dungeon` marker layers, movable & resizable (`min width 588px`) HUD Edit Mode styled slim icon-rail **`Base` / `Tracker` / `Zone` / `Dungeon`** sidebar that opens/closes with the map and docks flush beside it (native right-side `MinimalScrollBar`, 3-sliced brass pill buttons, skill-style brass icon tabs & gold toolbar icons, **Window Style** dialog, strict per-character completion with `/dmap check`, sortable 4-column `Quest \| Starter \| Lvl \| XP` grids with starter-grouped chains & item-only reward tooltips, and origin-frozen search), Ready-to-Turn-In & zone quest tracker, and OpenMap seamless world & dungeon maps (`v0.8.39`; companion addons `daves_map_data` & `daves_map_textures`) |
+| [`wowaddons/daves_map_data`](wowaddons/daves_map_data) | **Dave's Map (data)**: QuestieDB Forever pins, objectives, turn-ins, quest item rewards, dungeons, and quest chains for `daves_map` (`Update-MapData.py`) |
 | [`wowaddons/daves_map_textures`](wowaddons/daves_map_textures) | **Dave's Map (textures)**: OpenMap `v0.8.10` seamless world & dungeon map art and data tables for `daves_map` (`Update-MapTextures.py`) |
 | [`wowaddons/daves_outofmyway`](wowaddons/daves_outofmyway) | **Dave's Out Of My Way**: Edit Mode Need/Greed loot-roll mover and never-collapsed buff frame (`v0.1.5`) |
-| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories or an optional "One big bag" slot grid, reagent-bag & ammo-bag routing + post-Sort sweep, matching gold toolbar icons (sort, settings gear, trash/delete, and auction gavel), local Auction House price cache & companion **Market Analysis & Insights** window (global search bar + **Margin**, **Scarce**, **Professions**, **Bag Advisor**, and **Bait & Snipe** with **Counter-Snipe Top 50** radar), and taint-safe secure controls (`v1.7.45`) |
+| [`wowaddons/daves_sack`](wowaddons/daves_sack) | **Dave's Sack**: all-in-one HUD Edit Mode bag replacement with collapsible categories or an optional "One big bag" slot grid, reagent-bag & ammo-bag routing + post-Sort sweep, matching gold toolbar icons (sort, settings gear, trash/delete, and auction gavel), local Auction House price cache & companion **Market Analysis & Insights** window (global search bar + **Margin**, **Scarce**, **Professions**, **Bag Advisor**, and **Bait & Snipe** with **Counter-Snipe Top 50** radar), and taint-safe secure controls (`v1.7.46`) |
 | [`wowaddons/daves_frames/tools`](wowaddons/daves_frames/tools) | Standalone `16:9` UV stencil & layered AI target-frame painting/packing toolkit (`Build-FrameTemplate.py`, `Pack-FrameTemplate.py`, `template/PAINT-LAYERS.md`) |
 | [`wow-addon-kit`](wow-addon-kit) | Plugin (`wow-forever-addons`) and Python CLI toolkit for scaffolding, static API/secret/taint validation, review packets, in-game error/taint inspection, and linking |
 
@@ -63,12 +63,14 @@ More in [its README](wowaddons/daves_chat/README.md) and [NOTES.md](wowaddons/da
 
 ### Dave's Map (`daves_map`)
 
-QuestieDB's WoW: Forever quests, objective spawns, turn-in NPCs, prerequisite quest chains, dungeons, flight masters, townsfolk, rares, and treasures drawn at exact in-game zone coordinates on a taint-free world map layer (via companion addon `daves_map_data`), paired with a search/filter sidebar, a Ready-to-Turn-In & zone quest tracker with quest-focus clicks, and OpenMap `v0.8.10`'s seamless stitched world map and multi-floor dungeon/raid maps (`Stitch/` + companion addon `daves_map_textures`).
+Shows only your tracked/focused quest objectives and ready turn-ins on the World Map by default (via companion addon `daves_map_data`), paired with a movable, resizable (`min width 588px`) slim skill-icon left-rail **`Base` / `Tracker` / `Zone` / `Dungeon`** sidebar that opens and closes with the map (optional zoom-faded POI toggles & Map Settings in `Base`; `Focused`, `Ready to Turn In`, `Pinned`, and `Tracking` quests on the Base map layer in `Tracker`; zone quests & inline starter-grouped chains with `+`/`-` brass pill buttons, clickable Starter links, numbered bullet steps, and item rewards in `Zone`; zone dungeons, floor maps & dungeon quest starters in `Dungeon`; sidebar-link precedence so out-of-zone links never swap your view; and strict per-character quest completion), Ready-to-Turn-In & zone quest tracker, and OpenMap `v0.8.10`'s seamless stitched world map and multi-floor dungeon/raid maps (`Stitch/` + companion addon `daves_map_textures`).
 
 ```text
 /dmap                    toggle the map pin layer (/davesmap alias)
-/dmap panel              toggle the search & filter sidebar
-/dmap options            open Dave's Map settings
+/dmap dock               re-dock beside the World Map at default 588px width (/dmap reset)
+/dmap style              open the Window Style dialog (same sliders & background styles as Dave's Sack)
+/dmap options            open Base & Map Settings
+/dmap check [questID]    verify strict per-character quest completion flags
 /dmap zone               inspect zone quest tracking state (/dmap seamless, /dmap calib)
 ```
 

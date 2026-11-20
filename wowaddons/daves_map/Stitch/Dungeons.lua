@@ -10,7 +10,8 @@
 --------------------------------------------------------------------------------
 
 -- (daves_map: OpenMap's namespace is the drop-in daves_map_textures', handed over in Base.lua; without it, nothing)
-local ns = select(2, ...).OM
+local addonNs = select(2, ...)
+local ns = addonNs.OM
 if not ns then return end
 local S = ns.MapStitch
 local mod = ns:GetModule("worldmap")
@@ -183,7 +184,10 @@ local NEEDROLL_URL = "https://www.curseforge.com/wow/addons/needroll"
 local view
 local QuestList, EnsureQuests, FillSide, Dock, PlaceTabs, PlaceMarks, PlacePins, EndMarkup   -- (below)
 
-local function Sound(name) if PlaySound and SOUNDKIT and SOUNDKIT[name] then PlaySound(SOUNDKIT[name]) end end
+local function Sound(name)
+	if addonNs and addonNs.Sound then addonNs.Sound(name)
+	elseif PlaySound and SOUNDKIT and SOUNDKIT[name] then PlaySound(SOUNDKIT[name]) end
+end
 
 -- one of the game's atlases on a texture, if the client has it: mirrored (left for right), at its own size
 -- `mirrored` true or false: turned or not from the corners the texture was first given for that atlas,
@@ -263,7 +267,7 @@ end
 local function ShowFloor(i, quiet)
 	local floors = view.floors
 	i = ((i - 1) % #floors) + 1
-	if not quiet and i ~= view.floor then Sound("IG_ABILITY_PAGE_TURN") end
+	if not quiet and i ~= view.floor then Sound("IG_MAINMENU_OPTION_CHECKBOX_ON") end
 	view.floor = i
 	local f = floors[i]
 	for k, t in ipairs(view.tiles) do
@@ -290,7 +294,7 @@ end
 local function CloseView()
 	if not view or not view:IsShown() or view.leaving then return end
 	if view.list then view.list:Hide() end
-	Sound("IG_QUEST_LOG_CLOSE")
+	Sound("IG_MAINMENU_OPTION_CHECKBOX_OFF")
 	view:Hide()
 	RefreshCard()
 	-- (opened as the map opened inside the dungeon: under it is the game's map of the instance, not the
@@ -665,6 +669,7 @@ local function BuildView()
 		if view.list then view.list:Hide() end
 		Dock()                                      -- (out of the quest log, if it was in it)
 		if card and card:IsShown() then C_Timer.After(0, RefreshCard) end
+		if addonNs.OnDungeonViewChanged then addonNs.OnDungeonViewChanged(false, nil) end
 	end)
 	-- Escape: back to the world, as a right-click. Escape's own list (UISpecialFrames) closes the game's
 	-- panels in the same go, the map window among them: the whole map shut, and inside a dungeon it then
@@ -1161,7 +1166,7 @@ local function OpenView(inst, pin)
 	Dock()
 	view.floor = nil
 	ShowFloor(first, true)
-	Sound("IG_QUEST_LOG_OPEN")
+	Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 	if (mod.db.dungeonHints or 0) < HINTS then
 		mod.db.dungeonHints = (mod.db.dungeonHints or 0) + 1
 		local hint = L["|cffffd100Right-click|r or |cffffd100Esc|r to go back to the world map"]
@@ -1177,6 +1182,7 @@ local function OpenView(inst, pin)
 		view.hint:Hide()
 	end
 	RefreshCard()                                 -- (fills the side panel too: once, not twice)
+	if addonNs.OnDungeonViewChanged then addonNs.OnDungeonViewChanged(true, S.InstanceName(inst)) end
 	if t0 then mod.dungeonOpenMs = debugprofilestop() - t0 end   -- (/openmap status)
 	return true
 end
@@ -1872,7 +1878,29 @@ FillSide = function()
 			Text(L["NeedRoll lists dungeon quests too: open it and pick this dungeon."])
 			items[#items + 1] = { kind = "button", L["Open NeedRoll"], click = function() OpenNeedRoll() end }
 		elseif not Questie() then
-			Text("|cff998866" .. L["With Questie, Dungeon Journal or NeedRoll, this dungeon's quests are here."] .. "|r")
+			local dmList = addonNs.DungeonQuestEntries and addonNs.DungeonQuestEntries(S.InstanceName(inst))
+			if dmList and #dmList > 0 then
+				for _, q in ipairs(dmList) do
+					local badge = q.done and ("|cff808080" .. L["done"] .. "|r")
+						or (q.state == "ready" and "|cffffd200Ready|r")
+						or (q.inLog and ("|cff80f070" .. L["in your log"] .. "|r"))
+						or (q.xpTxt and ("|cffe8d8a8" .. q.xpTxt .. "|r")) or nil
+					local label = ("%s[%d] %s|r%s"):format(QuestColour(q), q.level, q.name, q.rewShort and ("  " .. q.rewShort) or "")
+					items[#items + 1] = {
+						kind = "row",
+						label,
+						right = badge,
+						click = addonNs.InspectPinFromDungeonView and function()
+							addonNs.InspectPinFromDungeonView(q.pin, S.InstanceName(inst))
+						end,
+						tip = addonNs.ShowTooltip and function(owner)
+							addonNs.ShowTooltip(owner, q.pin)
+						end,
+					}
+				end
+			else
+				Text("|cff998866" .. L["With Questie, Dungeon Journal or NeedRoll, this dungeon's quests are here."] .. "|r")
+			end
 		else
 			EnsureQuests(FillSide)
 			local list = QuestList(nil, inst)
@@ -2245,6 +2273,11 @@ mod.BossPlacing = function() return view and view.placer and true or false end
 mod.BossPlacerClick = function() PlacerClick() end
 
 mod.RefreshDungeonCard = function() Recolour() RefreshCard() FillSide() mod.RedrawBossPins() end   -- (settings changed: mod:Refresh)
+mod.RefreshSideQuests = function()
+	if view and view:IsShown() and view.side and view.side:IsShown() and mod.db.dungeonTab == "quests" then
+		FillSide()
+	end
+end
 
 -- /openmap dungeons: which map each entrance opens (none: the client has no map of it by that name)
 function mod:DungeonDiag()
@@ -2304,8 +2337,36 @@ end
 -- matched first by world-map proximity to OpenMap's entrance pins, then by normalized name.
 function mod.OpenInstanceNear(title, u, v, anchor)
 	if not MapsOn() then return false end
-	local best, bestD
-	if u and v then
+	local best, bestD, matched
+	if title then
+		local want = Plain(title):gsub("[^%w]+", "")
+		for _, pin in ipairs(entrancePins) do
+			for _, inst in ipairs(pin.instances or {}) do
+				local have = Plain(inst[2]):gsub("[^%w]+", "")
+				if have == want then
+					best, matched = pin, { inst }
+					break
+				end
+			end
+			if best then break end
+		end
+		if not best then
+			for _, pin in ipairs(entrancePins) do
+				local hits = {}
+				for _, inst in ipairs(pin.instances or {}) do
+					local have = Plain(inst[2]):gsub("[^%w]+", "")
+					if have:find(want, 1, true) or want:find(have, 1, true) then
+						hits[#hits + 1] = inst
+					end
+				end
+				if #hits > 0 then
+					best, matched = pin, hits
+					break
+				end
+			end
+		end
+	end
+	if not best and u and v then
 		for _, pin in ipairs(entrancePins) do
 			if pin.u and pin.v then
 				local d2 = (pin.u - u) ^ 2 + (pin.v - v) ^ 2
@@ -2315,23 +2376,11 @@ function mod.OpenInstanceNear(title, u, v, anchor)
 			end
 		end
 	end
-	if not best and title then
-		local want = Plain(title):gsub("[^%w]+", "")
-		for _, pin in ipairs(entrancePins) do
-			for _, inst in ipairs(pin.instances or {}) do
-				local have = Plain(inst[2]):gsub("[^%w]+", "")
-				if have == want or have:find(want, 1, true) or want:find(have, 1, true) then
-					best = pin
-					break
-				end
-			end
-			if best then break end
-		end
-	end
 	if not best then return false end
 	GameTooltip:Hide()
-	if #best.instances == 1 then
-		Open(best.instances[1], best)
+	local list = matched or best.instances
+	if #list == 1 then
+		Open(list[1], best)
 	else
 		Choose(best)
 		if anchor and chooser then

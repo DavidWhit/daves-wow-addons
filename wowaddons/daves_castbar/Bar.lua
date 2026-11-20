@@ -580,9 +580,21 @@ function ns:StartCast(kind)
 	cast.kind, cast.channel = kind, kind == "channel"
 	cast.start, cast.finish, cast.castID, cast.test, cast.loop = start, finish, castID, nil, nil
 	cast.state, cast.t, cast.shown, cast.easeT = "cast", 0, nil, nil
-	if spellID and not issecretvalue(spellID) then ns.lastSpell = { id = spellID, name = name } end
+	local cleanName = ns.CleanCastLabel(name)
+	local cleanText = ns.CleanCastLabel(text)
+	if spellID and not issecretvalue(spellID) then
+		local spellLabel = name
+		if type(cleanName) == "string" and not issecretvalue(cleanName) and cleanName ~= "" then
+			spellLabel = cleanName
+		end
+		ns.lastSpell = { id = spellID, name = spellLabel }
+	end
 	ActivateElement(key)
-	ShowText((text and not issecretvalue(text) and text ~= "" and text) or name, texture)
+	local label = cleanName
+	if cleanText and not issecretvalue(cleanText) and cleanText ~= "" then
+		label = cleanText
+	end
+	ShowText(label, texture)
 	bar:SetAlpha(1)
 	bar:Show()
 end

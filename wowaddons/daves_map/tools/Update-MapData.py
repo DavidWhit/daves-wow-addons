@@ -665,10 +665,84 @@ def quest_faction(required_races: int | None, starter_fac: int) -> int:
     return starter_fac
 
 
+SEASONAL_SORT_KEYS = {-404, -402, -378, -376, -375, -374, -370, -369, -366, -364, -41, -22, -21}
+
+FOREVER_DUNGEONS = (
+    {"name": "Ragefire Chasm", "lo": 13, "hi": 18, "raid": False, "zones": ((1454, 52.6, 49.0),), "zos": (2437,), "phrases": ("ragefire chasm",)},
+    {"name": "The Hall of Thanes", "lo": 13, "hi": 20, "raid": False, "zones": ((1455, 27.7, 47.9),), "zos": (16919,), "phrases": ("hall of thanes",)},
+    {"name": "Ruins of Lordaeron", "lo": 15, "hi": 22, "raid": False, "zones": ((1458, 72.5, 11.4), (1420, 61.8, 65.0)), "zos": (16611,), "phrases": ("ruins of lordaeron",)},
+    {"name": "Wailing Caverns", "lo": 15, "hi": 24, "raid": False, "zones": ((1413, 46.0, 36.5),), "zos": (718,), "phrases": ("wailing caverns",)},
+    {"name": "The Deadmines", "lo": 17, "hi": 26, "raid": False, "zones": ((1436, 42.5, 71.7),), "zos": (1581, 10029), "phrases": ("deadmines",)},
+    {"name": "Shadowfang Keep", "lo": 20, "hi": 30, "raid": False, "zones": ((1421, 44.8, 67.8),), "zos": (209, 10014, 10015, 10016, 10017, 10018, 10019), "phrases": ("shadowfang keep",)},
+    {"name": "Blackfathom Deeps", "lo": 24, "hi": 32, "raid": False, "zones": ((1440, 14.5, 14.2),), "zos": (719, 10020, 10021), "phrases": ("blackfathom deeps",)},
+    {"name": "Stormwind Stockade", "lo": 24, "hi": 32, "raid": False, "zones": ((1453, 52.4, 70.0),), "zos": (717,), "phrases": ("the stockade", "stormwind stockade")},
+    {"name": "Excavation Site: Wetlands", "lo": 26, "hi": 33, "raid": False, "zones": ((1437, 47.8, 56.2),), "zos": (16732,), "phrases": ("excavation site: wetlands", "wetlands excavation site")},
+    {"name": "City of Dalaran", "lo": 28, "hi": 35, "raid": False, "zones": ((1416, 8.5, 59.3),), "zos": (16544,), "phrases": ("inside the city of dalaran", "from the city of dalaran", "in the city of dalaran")},
+    {"name": "Gnomeregan", "lo": 29, "hi": 38, "raid": False, "zones": ((1426, 24.3, 39.8),), "zos": (721, 133, 10030, 10031, 10032), "phrases": ("gnomeregan",)},
+    {"name": "Razorfen Kraul", "lo": 29, "hi": 38, "raid": False, "zones": ((1413, 42.9, 90.2),), "zos": (491, 1717), "phrases": ("razorfen kraul",)},
+    {"name": "Scarlet Monastery", "lo": 30, "hi": 46, "raid": False, "zones": ((1420, 82.6, 33.8),), "zos": (796, 6109, 6386, 10008, 10009, 10010), "phrases": ("scarlet monastery",)},
+    {"name": "The Drowned City", "lo": 35, "hi": 42, "raid": False, "zones": ((1434, 21.3, 27.8),), "zos": (), "phrases": ("drowned city",)},
+    {"name": "Razorfen Downs", "lo": 37, "hi": 46, "raid": False, "zones": ((1413, 49.0, 93.9),), "zos": (722, 1316), "phrases": ("razorfen downs",)},
+    {"name": "Krol'dok Stronghold", "lo": 40, "hi": 47, "raid": False, "zones": ((2548, 37.5, 37.3),), "zos": (), "phrases": ("krol'dok stronghold", "krol'dok no more")},
+    {"name": "Uldaman", "lo": 41, "hi": 51, "raid": False, "zones": ((1418, 44.6, 12.1),), "zos": (1337, 1517, 10033), "phrases": ("uldaman",)},
+    {"name": "Zul'Farrak", "lo": 44, "hi": 54, "raid": False, "zones": ((1446, 38.7, 20.1),), "zos": (1176, 978), "phrases": ("zul'farrak",)},
+    {"name": "Maraudon", "lo": 46, "hi": 55, "raid": False, "zones": ((1443, 29.1, 62.5),), "zos": (2100, 10000), "phrases": ("maraudon",)},
+    {"name": "Alcaz Prison", "lo": 48, "hi": 55, "raid": False, "zones": ((1445, 75.3, 14.1),), "zos": (), "phrases": ("alcaz prison",)},
+    {"name": "Sunken Temple", "lo": 50, "hi": 60, "raid": False, "zones": ((1435, 69.9, 53.5),), "zos": (1477, 1417), "phrases": ("temple of atal'hakkar", "sunken temple")},
+    {"name": "Blackrock Depths", "lo": 52, "hi": 60, "raid": False, "zones": ((1427, 34.8, 85.3), (1428, 29.4, 38.3)), "zos": (1584, 1585), "phrases": ("blackrock depths",)},
+    {"name": "Dire Maul", "lo": 54, "hi": 60, "raid": False, "zones": ((1444, 59.2, 45.1),), "zos": (2557, 10022, 10023, 10024, 10025, 10026, 10027), "phrases": ("dire maul",)},
+    {"name": "Blackmaw Hold", "lo": 55, "hi": 60, "raid": False, "zones": ((1447, 38.6, 33.2),), "zos": (), "phrases": ("blackmaw hold", "varrox bleakhoof")},
+    {"name": "Blackrock Spire", "lo": 55, "hi": 60, "raid": False, "zones": ((1427, 34.8, 85.3), (1428, 29.4, 38.3)), "zos": (1583, 10003, 10004, 10005, 10006, 10007), "phrases": ("blackrock spire",)},
+    {"name": "Scholomance", "lo": 58, "hi": 60, "raid": False, "zones": ((1422, 69.7, 73.2),), "zos": (2057, 10011, 10012, 10013), "phrases": ("scholomance",)},
+    {"name": "Shaper's Terrace", "lo": 58, "hi": 60, "raid": False, "zones": ((1449, 48.1, 6.1),), "zos": (16985,), "phrases": ("shaper's terrace",)},
+    {"name": "Stratholme", "lo": 58, "hi": 60, "raid": False, "zones": ((1423, 26.5, 10.4),), "zos": (2017, 10001), "phrases": ("stratholme",)},
+    {"name": "Molten Core", "lo": 60, "hi": 60, "raid": True, "zones": ((1427, 34.8, 85.3), (1428, 29.4, 38.3)), "zos": (2717,), "phrases": ("molten core",)},
+    {"name": "Onyxia's Lair", "lo": 60, "hi": 60, "raid": True, "zones": ((1445, 52.6, 76.8),), "zos": (2159,), "phrases": ("onyxia's lair",)},
+    {"name": "Blackwing Lair", "lo": 60, "hi": 60, "raid": True, "zones": ((1427, 34.8, 85.3), (1428, 29.4, 38.3)), "zos": (2677,), "phrases": ("blackwing lair",)},
+    {"name": "Zul'Gurub", "lo": 60, "hi": 60, "raid": True, "zones": ((1434, 53.9, 17.6),), "zos": (1977,), "phrases": ("zul'gurub",)},
+    {"name": "Ruins of Ahn'Qiraj", "lo": 60, "hi": 60, "raid": True, "zones": ((1451, 28.6, 92.3),), "zos": (3429,), "phrases": ("ruins of ahn'qiraj",)},
+    {"name": "Temple of Ahn'Qiraj", "lo": 60, "hi": 60, "raid": True, "zones": ((1451, 28.6, 92.3),), "zos": (3428, 10040, 10041), "phrases": ("temple of ahn'qiraj",)},
+    {"name": "Naxxramas", "lo": 60, "hi": 60, "raid": True, "zones": ((1423, 34.3, 19.5),), "zos": (3456, 10062, 10063, 10064, 10065, 10066), "phrases": ("naxxramas",)},
+)
+
+
 def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
     dungeon_entrance: dict[int, tuple[int, float, float, str]] = {}
-    dungeon_rows: list[tuple[int, str, int, float, float]] = []
+    dungeon_rows: list[tuple[int, str, int, float, float, int, int, bool]] = []
     seen_dungeon_spots: set[tuple[str, int]] = set()
+    dung_by_name: dict[str, dict] = {}
+    zos_to_dung: dict[int, dict] = {}
+
+    def norm_dname(s: str) -> str:
+        s2 = s.strip().lower()
+        if s2 == "the stockade":
+            return "stormwind stockade"
+        if s2 == "the temple of atal'hakkar":
+            return "sunken temple"
+        return s2
+
+    for spec in FOREVER_DUNGEONS:
+        drec = {
+            "name": spec["name"],
+            "lo": spec["lo"],
+            "hi": spec["hi"],
+            "raid": spec["raid"],
+            "zones": list(spec["zones"]),
+            "phrases": spec["phrases"],
+            "pin_by_zone": {},
+            "quests": [],
+        }
+        dung_by_name[norm_dname(spec["name"])] = drec
+        u0, x0, y0 = spec["zones"][0]
+        info0 = (u0, float(x0), float(y0), spec["name"])
+        for z in spec["zos"]:
+            zos_to_dung[z] = drec
+            dungeon_entrance[z] = info0
+        for uimap, ex, ey in spec["zones"]:
+            spot_key = (norm_dname(spec["name"]), uimap)
+            if spot_key not in seen_dungeon_spots:
+                seen_dungeon_spots.add(spot_key)
+                dungeon_rows.append((0, spec["name"], uimap, float(ex), float(ey), spec["lo"], spec["hi"], spec["raid"]))
 
     for d_area, entry in sorted(dungeons.items()):
         dname = entry.get(1)
@@ -688,14 +762,15 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
             continue
         uimap0, ex0, ey0 = mapped_locs[0]
         info = (uimap0, ex0, ey0, dname)
-        dungeon_entrance[d_area] = info
+        if d_area not in dungeon_entrance:
+            dungeon_entrance[d_area] = info
         for a in alts:
-            if isinstance(a, int):
+            if isinstance(a, int) and a not in dungeon_entrance:
                 dungeon_entrance[a] = info
-        spot_key = (dname.lower(), uimap0)
+        spot_key = (norm_dname(dname), uimap0)
         if spot_key not in seen_dungeon_spots:
             seen_dungeon_spots.add(spot_key)
-            dungeon_rows.append((d_area, dname, uimap0, ex0, ey0))
+            dungeon_rows.append((d_area, dname, uimap0, ex0, ey0, 0, 0, False))
 
     def spawns_by_uimap(spawns_tbl) -> list[tuple[int, float, float, int, str | None]]:
         """Return [(uiMapID, med_x_pct, med_y_pct, count, dungeonName), ...] sorted by count desc."""
@@ -748,16 +823,86 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
                     return sp
         return all_sp[0]
 
-    # Reverse quest starts/ends from NPCs, Objects, Items
+    # Reverse quest starts/ends from NPCs, Objects, Items + Rare signature drops
     npc_starts: dict[int, list[int]] = {}
     npc_ends: dict[int, list[int]] = {}
+    rare_nids: set[int] = set()
     for nid, row in npcs.items():
+        if row.get(6) in (2, 4):
+            rare_nids.add(nid)
         for q in dict_to_list(row.get(10, {})):
             if isinstance(q, int):
                 npc_starts.setdefault(q, []).append(nid)
         for q in dict_to_list(row.get(11, {})):
             if isinstance(q, int):
                 npc_ends.setdefault(q, []).append(nid)
+
+    rare_cand_items: dict[int, set[int]] = {}
+    item_dropper_count: dict[int, int] = {}
+    for iid, row in items.items():
+        droppers = [n for n in dict_to_list(row.get(2, {})) if isinstance(n, int)]
+        dr_tbl = item_drops.get(iid)
+        if isinstance(dr_tbl, dict):
+            all_d = set(droppers) | {k for k in dr_tbl.keys() if isinstance(k, int)}
+        else:
+            all_d = set(droppers)
+        if not all_d:
+            continue
+        item_dropper_count[iid] = len(all_d)
+        for nid in all_d:
+            if nid in rare_nids:
+                rare_cand_items.setdefault(nid, set()).add(iid)
+
+    def rare_notable_drops(nid: int) -> list[tuple[int, str, float]]:
+        cands = rare_cand_items.get(nid)
+        if not cands:
+            return []
+        primary: list[tuple[float, int, str, float]] = []
+        fallback: list[tuple[float, int, str, float]] = []
+        for iid in cands:
+            irow = items.get(iid)
+            if not irow:
+                continue
+            iname = irow.get(1)
+            if not isinstance(iname, str) or not iname.strip() or BAD_NAME_RX.search(iname):
+                continue
+            dcnt = item_dropper_count.get(iid, 999)
+            icls = irow.get(12) if isinstance(irow.get(12), int) else -1
+            ilvl = irow.get(9) if isinstance(irow.get(9), int) else 0
+            start_q = irow.get(5) if isinstance(irow.get(5), int) else 0
+            teaches = irow.get(16) if isinstance(irow.get(16), int) else 0
+            dr_tbl = item_drops.get(iid)
+            rate = float(dr_tbl.get(nid, 0.0)) if isinstance(dr_tbl, dict) and isinstance(dr_tbl.get(nid), (int, float)) else 0.0
+            is_gear_or_special = icls in (1, 2, 4, 9) or start_q > 0 or teaches > 0
+            score = (
+                (200.0 if dcnt <= 2 else (100.0 if dcnt <= 6 else (40.0 if dcnt <= 18 else 0.0)))
+                + (80.0 if icls in (2, 4) else (70.0 if icls in (1, 9) or start_q > 0 or teaches > 0 else 0.0))
+                + min(rate, 100.0) * 0.6
+                + ilvl * 0.4
+            )
+            entry = (score, iid, iname.strip(), rate)
+            if (dcnt <= 18 or start_q > 0 or icls == 9 or teaches > 0) and (is_gear_or_special or dcnt <= 3):
+                primary.append(entry)
+            elif (is_gear_or_special and dcnt <= 60) or (rate >= 5.0 and dcnt <= 40):
+                fallback.append(entry)
+        primary.sort(key=lambda x: (-x[0], -x[3], x[2]))
+        fallback.sort(key=lambda x: (-x[0], -x[3], x[2]))
+        out: list[tuple[int, str, float]] = []
+        seen_names: set[str] = set()
+        for _sc, iid, nm, rate in primary:
+            if nm not in seen_names:
+                seen_names.add(nm)
+                out.append((iid, nm, rate))
+                if len(out) >= 8:
+                    return out
+        if len(out) < 4:
+            for _sc, iid, nm, rate in fallback:
+                if nm not in seen_names:
+                    seen_names.add(nm)
+                    out.append((iid, nm, rate))
+                    if len(out) >= 6:
+                        break
+        return out
 
     obj_starts: dict[int, list[int]] = {}
     obj_ends: dict[int, list[int]] = {}
@@ -770,10 +915,36 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
                 obj_ends.setdefault(q, []).append(oid)
 
     item_starts: dict[int, list[int]] = {}
-    for iid, row in items.items():
+    cand_rewards: dict[int, list[tuple[int, int, str, int]]] = {}
+    for iid, row in sorted(items.items()):
         sq = row.get(5)
         if isinstance(sq, int) and sq > 0:
             item_starts.setdefault(sq, []).append(iid)
+        q_rews = [q for q in dict_to_list(row.get(6, {})) if isinstance(q, int) and q > 0]
+        if q_rews:
+            iname = row.get(1)
+            if isinstance(iname, str) and iname.strip() and not BAD_NAME_RX.search(iname):
+                icls = row.get(12) if isinstance(row.get(12), int) else -1
+                ilvl = row.get(9) if isinstance(row.get(9), int) else 0
+                teaches = row.get(16) if isinstance(row.get(16), int) else 0
+                tier = 3 if icls in (2, 4) else (2 if (icls in (1, 9, 13) or teaches > 0) else (1 if icls != 12 else 0))
+                entry = (-tier, -ilvl, iname.strip(), iid)
+                for q in q_rews:
+                    cand_rewards.setdefault(q, []).append(entry)
+
+    quest_rewards_by_qid: dict[int, list[int]] = {}
+    reward_item_names: dict[int, str] = {}
+    for qid_k, cands in cand_rewards.items():
+        cands.sort()
+        picked: list[int] = []
+        for _ntier, _nilvl, nm, iid in cands:
+            if iid not in picked:
+                picked.append(iid)
+                reward_item_names[iid] = nm
+                if len(picked) >= 6:
+                    break
+        if picked:
+            quest_rewards_by_qid[qid_k] = picked
 
     pins: list[dict] = []
     npc_pin_by_map: dict[tuple[int, int], int] = {}   # (npc_id, uimap) -> 1-based pin index
@@ -798,13 +969,21 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
             "title": title.strip(),
             "text": text.strip(),
             "pre": [],
+            "nxt": 0,
             "obj": [],
+            "rew": [],
+            "drops": [],
         })
         return len(pins)
 
     # 1. Dungeon & Raid Entrances
-    for _d_area, dname, uimap, ex, ey in dungeon_rows:
-        add_pin(uimap, ex, ey, "instance", dname, f"{GOLD}Instance:|r {dname}")
+    for _d_area, dname, uimap, ex, ey, lo, hi, is_raid in dungeon_rows:
+        kind_lbl = "Raid" if is_raid else "Instance"
+        lvl_line = f"\n{GOLD}Level:|r {lo}" if (lo > 0 and lo == hi) else (f"\n{GOLD}Level:|r {lo}-{hi}" if lo > 0 else "")
+        pidx = add_pin(uimap, ex, ey, "instance", dname, f"{GOLD}{kind_lbl}:|r {dname}{lvl_line}", lvl=lo)
+        drec = dung_by_name.get(norm_dname(dname))
+        if drec and uimap not in drec["pin_by_zone"]:
+            drec["pin_by_zone"][uimap] = pidx
 
     # 2. Townsfolk, Flight Masters, Spirit Healers & Rare Mobs (from foreverNpcDB)
     for nid, row in sorted(npcs.items()):
@@ -864,11 +1043,23 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
             elif rank == 4:
                 lvl_txt += " (Rare)"
             info_lines.append(f"{GOLD}Level:|r {lvl_txt}")
+        rare_drop_pairs: list[int] = []
+        if cat_key == "rare":
+            drops = rare_notable_drops(nid)
+            if drops:
+                info_lines.append(f"{GOLD}Drops:|r " + ", ".join(nm for _iid, nm, _r in drops[:4]))
+                for diid, dnm, drate in drops:
+                    rare_drop_pairs.append(int(diid))
+                    rare_drop_pairs.append(max(0, min(1000, int(round(drate * 10.0)))))
+                    if diid not in reward_item_names:
+                        reward_item_names[diid] = dnm
         desc = "\n".join(info_lines)
         for uimap, sx, sy, _cnt, dname in sp_list:
             if dname:
                 continue  # skip inside-instance vendors/rares on world layer
             pidx = add_pin(uimap, sx, sy, cat_key, name, desc, fac=fac, lvl=min_lvl, cls=cls_mask)
+            if rare_drop_pairs:
+                pins[pidx - 1]["drops"] = list(rare_drop_pairs)
             npc_pin_by_map[(nid, uimap)] = pidx
 
     # 3. Mailboxes & World Chests / Lore Objects (from foreverObjectDB)
@@ -1076,9 +1267,24 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
                                 break
                 if loc:
                     break
+        zos = q.get(17)
+        is_seasonal = isinstance(zos, int) and zos in SEASONAL_SORT_KEYS
+        obj_texts = [s.strip() for s in dict_to_list(q.get(8, {})) if isinstance(s, str) and s.strip()]
+        matched_dung = zos_to_dung.get(zos) if isinstance(zos, int) else None
+        if not matched_dung and not is_seasonal and loc and loc[4]:
+            matched_dung = dung_by_name.get(norm_dname(loc[4]))
+        if not matched_dung and not is_seasonal:
+            blob = (title + " " + " ".join(obj_texts)).lower()
+            for spec_rec in dung_by_name.values():
+                if any(ph in blob for ph in spec_rec["phrases"]):
+                    matched_dung = spec_rec
+                    break
+
         if not loc:
-            zos = q.get(17)
-            if isinstance(zos, int) and zos > 0 and zos in dungeon_entrance:
+            if matched_dung:
+                du, dx, dy = matched_dung["zones"][0]
+                loc = (du, float(dx), float(dy), 1, matched_dung["name"])
+            elif isinstance(zos, int) and zos > 0 and zos in dungeon_entrance:
                 du, dx, dy, dn = dungeon_entrance[zos]
                 loc = (du, dx, dy, 1, dn)
 
@@ -1086,6 +1292,7 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
             continue
 
         uimap, sx, sy, _cnt, start_dname = loc
+        inst_name = matched_dung["name"] if matched_dung else start_dname
         req_lvl = q.get(4) if isinstance(q.get(4), int) else 0
         q_lvl = q.get(5) if isinstance(q.get(5), int) else req_lvl
         if q_lvl < 0:
@@ -1104,11 +1311,10 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
                 desc_lines.append(f"{GOLD}Level:|r {q_lvl} (requires {req_lvl})")
             else:
                 desc_lines.append(f"{GOLD}Level:|r {q_lvl or req_lvl}")
-        if start_dname:
-            desc_lines.append(f"{GOLD}Instance:|r {start_dname}")
+        if inst_name:
+            desc_lines.append(f"{GOLD}Instance:|r {inst_name}")
         if starter_label:
             desc_lines.append(f"{GOLD}Start:|r {starter_label}")
-        obj_texts = [s.strip() for s in dict_to_list(q.get(8, {})) if isinstance(s, str) and s.strip()]
         if obj_texts:
             joined = " ".join(obj_texts)
             if len(joined) > 260:
@@ -1116,6 +1322,11 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
             desc_lines.append(joined)
 
         pidx = add_pin(uimap, sx, sy, cat_key, title, "\n".join(desc_lines), fac=fac, lvl=q_lvl, cls=cls_mask, qid=qid)
+        q_rew_ids = quest_rewards_by_qid.get(qid)
+        if q_rew_ids:
+            pins[pidx - 1]["rew"] = q_rew_ids
+        if matched_dung:
+            matched_dung["quests"].append(pidx)
         quest_pin_by_qid[qid] = pidx
         quest_raw_links.append((pidx, qid))
 
@@ -1196,14 +1407,20 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
         if obj_pins:
             pins[pidx - 1]["obj"] = obj_pins[:4]
 
-    # 5. Wire prerequisite chains (preQuestGroup, preQuestSingle, parentQuest, and nextQuestInChain)
+    # 5. Wire prerequisite chains (preQuestGroup, small preQuestSingle, parentQuest, and nextQuestInChain)
     pre_qids_of: dict[int, list[int]] = {}
-    for _pidx, qid in quest_raw_links:
+    for pidx, qid in quest_raw_links:
         q = quests[qid]
         pres: list[int] = []
-        for field in (12, 13):  # preQuestGroup, preQuestSingle
-            for pq in dict_to_list(q.get(field, {})):
-                if isinstance(pq, int) and pq > 0 and pq != qid and pq not in pres:
+        grp = [pq for pq in dict_to_list(q.get(12, {})) if isinstance(pq, int) and pq > 0 and pq != qid]
+        if len(grp) <= 4:
+            for pq in grp:
+                if pq not in pres:
+                    pres.append(pq)
+        sgl = [pq for pq in dict_to_list(q.get(13, {})) if isinstance(pq, int) and pq > 0 and pq != qid]
+        if len(sgl) <= 2:
+            for pq in sgl:
+                if pq not in pres:
                     pres.append(pq)
         parent_q = q.get(25)
         if isinstance(parent_q, int) and parent_q > 0 and parent_q != qid and parent_q not in pres:
@@ -1212,6 +1429,8 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
             pre_qids_of[qid] = pres
         nxt = q.get(22)
         if isinstance(nxt, int) and nxt > 0 and nxt != qid:
+            if nxt in quest_pin_by_qid:
+                pins[pidx - 1]["nxt"] = quest_pin_by_qid[nxt]
             nxt_pres = pre_qids_of.setdefault(nxt, [])
             if qid not in nxt_pres:
                 nxt_pres.append(qid)
@@ -1241,6 +1460,31 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
                     pre_links += 1
         pins[pidx - 1]["pre"] = pin_pres
 
+    # Propagate faction across same-zone duplicate-title twin chains (e.g. Zephras Isle Alliance vs Horde campaign twins)
+    twins_by_zone_title: dict[tuple[int, str], list[int]] = {}
+    for pidx, _qid in quest_raw_links:
+        p = pins[pidx - 1]
+        twins_by_zone_title.setdefault((p["map"], p["title"].lower()), []).append(pidx)
+    rev_next: dict[int, list[int]] = {}
+    for pidx, _qid in quest_raw_links:
+        for pr in pins[pidx - 1]["pre"]:
+            rev_next.setdefault(pr, []).append(pidx)
+    for _pass in range(4):
+        for (_z, _tl), tlist in twins_by_zone_title.items():
+            if len(tlist) != 2:
+                continue
+            for ti in tlist:
+                p = pins[ti - 1]
+                if p["fac"] != 3:
+                    continue
+                linked_facs = {
+                    pins[nb - 1]["fac"]
+                    for nb in (list(p["pre"]) + rev_next.get(ti, []))
+                    if pins[nb - 1]["fac"] in (1, 2)
+                }
+                if len(linked_facs) == 1:
+                    p["fac"] = next(iter(linked_facs))
+
     # 6. Gently fan out co-located quest pins on the exact same NPC spot so every quest is hoverable
     spot_quests: dict[tuple[int, int, int], list[int]] = {}
     quest_slots = {CAT_SLOT["quest"], CAT_SLOT["repeatable"]}
@@ -1259,17 +1503,72 @@ def build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons):
             pins[i]["x"] = max(0.001, min(0.999, round(cx + radius * math.cos(angle), 5)))
             pins[i]["y"] = max(0.001, min(0.999, round(cy + radius * math.sin(angle), 5)))
 
+    # 7. Compute clean zone level brackets [uiMapID] = (min_lvl, max_lvl)
+    q_lvls_by_map: dict[int, list[int]] = {}
+    m_lvls_by_map: dict[int, list[int]] = {}
+    for p in pins:
+        lv = p["lvl"]
+        if 1 <= lv <= 60:
+            if p["cat"] in quest_slots:
+                q_lvls_by_map.setdefault(p["map"], []).append(lv)
+            elif p["cat"] in (CAT_SLOT["rare"], CAT_SLOT["objective"]):
+                m_lvls_by_map.setdefault(p["map"], []).append(lv)
+    zone_levels: dict[int, tuple[int, int]] = {}
+    for uimap in sorted(set(q_lvls_by_map.keys()) | set(m_lvls_by_map.keys())):
+        arr = sorted(q_lvls_by_map.get(uimap) or m_lvls_by_map.get(uimap) or [])
+        if not arr:
+            continue
+        if len(arr) >= 8:
+            lo = arr[max(0, int(len(arr) * 0.08))]
+            hi = arr[min(len(arr) - 1, int(len(arr) * 0.92))]
+        else:
+            lo, hi = arr[0], arr[-1]
+        zone_levels[uimap] = (lo, max(lo, hi))
+
+    # 8. Build per-zone dungeon & dungeon-quest index [uiMapID] = { { name, pin, lo, hi, raid, quests = {...} }, ... }
+    zone_dungeons: dict[int, list[dict]] = {}
+    for drec in dung_by_name.values():
+        q_sorted = sorted(
+            drec["quests"],
+            key=lambda pi: (pins[pi - 1]["lvl"] or 999, pins[pi - 1]["title"], pi),
+        )
+        for uimap, _ex, _ey in drec["zones"]:
+            epin = drec["pin_by_zone"].get(uimap, 0)
+            zone_dungeons.setdefault(uimap, []).append({
+                "name": drec["name"],
+                "pin": epin,
+                "lo": drec["lo"],
+                "hi": drec["hi"],
+                "raid": drec["raid"],
+                "quests": q_sorted,
+            })
+    for uimap, dlist in zone_dungeons.items():
+        dlist.sort(key=lambda d: (1 if d["raid"] else 0, d["lo"], d["hi"], d["name"]))
+
     stats = {
         "pins": len(pins),
         "quests": len(quest_pin_by_qid),
         "endp": sum(1 for p in pins if p["endp"] != 0),
         "pre": pre_links,
         "obj": sum(len(p["obj"]) for p in pins),
+        "rew_quests": sum(1 for p in pins if p["rew"]),
+        "rew_items": len(reward_item_names),
+        "rare_with_drops": sum(1 for p in pins if p["cat"] == CAT_SLOT["rare"] and "Drops:|r" in p["text"]),
+        "dungeons": len(dung_by_name),
+        "dungeon_quests": sum(len(d["quests"]) for d in dung_by_name.values()),
     }
-    return pins, stats
+    return pins, zone_levels, zone_dungeons, reward_item_names, stats
 
 
-def render_data_lua(pins: list[dict], stamp: str, ref: str, out_lua: str) -> None:
+def render_data_lua(
+    pins: list[dict],
+    zone_levels: dict[int, tuple[int, int]],
+    zone_dungeons: dict[int, list[dict]],
+    reward_item_names: dict[int, str],
+    stamp: str,
+    ref: str,
+    out_lua: str,
+) -> None:
     lines = [
         "-- daves_map_data / Data.lua -- GENERATED by daves_map/tools/Update-MapData.py from Questie/QuestieDB (Forever).",
         f"-- Built: {stamp} (QuestieDB@{ref}). See NOTICE-QuestieDB.md.",
@@ -1323,10 +1622,53 @@ def render_data_lua(pins: list[dict], stamp: str, ref: str, out_lua: str) -> Non
             lines.append(f"  [{idx}] = {num_list(p['pre'])},")
     lines.append("},")
 
+    lines.append("nxt = {")
+    for idx, p in enumerate(pins, start=1):
+        if p["nxt"]:
+            lines.append(f"  [{idx}] = {p['nxt']},")
+    lines.append("},")
+
     lines.append("obj = {")
     for idx, p in enumerate(pins, start=1):
         if p["obj"]:
             lines.append(f"  [{idx}] = {num_list(p['obj'])},")
+    lines.append("},")
+
+    lines.append("rew = {")
+    for idx, p in enumerate(pins, start=1):
+        if p["rew"]:
+            lines.append(f"  [{idx}] = {num_list(p['rew'])},")
+    lines.append("},")
+
+    lines.append("drops = {")
+    for idx, p in enumerate(pins, start=1):
+        if p["drops"]:
+            lines.append(f"  [{idx}] = {num_list(p['drops'])},")
+    lines.append("},")
+
+    lines.append("iname = {")
+    used_iids = sorted(
+        {iid for p in pins for iid in p["rew"] if iid in reward_item_names}
+        | {p["drops"][k] for p in pins for k in range(0, len(p["drops"]), 2) if p["drops"][k] in reward_item_names}
+    )
+    for iid in used_iids:
+        lines.append(f"  [{iid}] = {lua_str(reward_item_names[iid])},")
+    lines.append("},")
+
+    lines.append("zones = {")
+    for uimap, (lo, hi) in sorted(zone_levels.items()):
+        lines.append(f"  [{uimap}] = {{{lo},{hi}}},")
+    lines.append("},")
+
+    lines.append("dungeons = {")
+    for uimap, dlist in sorted(zone_dungeons.items()):
+        lines.append(f"  [{uimap}] = {{")
+        for d in dlist:
+            rflag = ", raid = true" if d["raid"] else ""
+            lines.append(
+                f"    {{ name = {lua_str(d['name'])}, pin = {d['pin']}, lo = {d['lo']}, hi = {d['hi']}{rflag}, quests = {num_list(d['quests'])} }},"
+            )
+        lines.append("  },")
     lines.append("},")
 
     lines.append("}")
@@ -1445,14 +1787,14 @@ def main(argv: list[str]) -> None:
             f"{n0(len(objs))} objects, {n0(len(items))} items",
             flush=True,
         )
-        pins, stats = build_model(quests, npcs, objs, items, item_drops, area_to_uimap, dungeons)
+        pins, zone_levels, zone_dungeons, reward_item_names, stats = build_model(
+            quests, npcs, objs, items, item_drops, area_to_uimap, dungeons
+        )
         now = datetime.now(timezone.utc)
         stamp = now.strftime("%Y-%m-%d %H:%M UTC")
         ver_date = now.strftime("%Y.%m.%d")
-        if os.path.isdir(out_dir):
-            shutil.rmtree(out_dir)
         os.makedirs(out_dir, exist_ok=True)
-        render_data_lua(pins, stamp, args["Ref"], out_lua)
+        render_data_lua(pins, zone_levels, zone_dungeons, reward_item_names, stamp, args["Ref"], out_lua)
         write_companion_meta(qdb_root, addon_dir, out_dir, ver_date)
 
         # Clean up any temporary bundled Data.lua / NOTICE-QuestieDB.md or loose zip
@@ -1467,7 +1809,10 @@ def main(argv: list[str]) -> None:
         print(
             f"Wrote {out_dir} ({n0(os.path.getsize(out_lua) / 1024)} KB): "
             f"{n0(stats['pins'])} total pins ({n0(stats['quests'])} quests, "
-            f"{n0(stats['endp'])} turn-ins, {n0(stats['pre'])} prereq links, {n0(stats['obj'])} objective links).",
+            f"{n0(stats['rew_quests'])} quests with {n0(stats['rew_items'])} item rewards, "
+            f"{n0(stats['endp'])} turn-ins, {n0(stats['pre'])} prereq links, "
+            f"{n0(stats['obj'])} objective links, {n0(stats['rare_with_drops'])} rares with notable loot, "
+            f"{n0(stats['dungeons'])} dungeons/raids with {n0(stats['dungeon_quests'])} dungeon quests).",
             flush=True,
         )
         for idx, c in enumerate(CATEGORIES, start=1):

@@ -950,19 +950,59 @@ function S.WorldPinsHidden(key)
 end
 
 local function ShowSets()
+	local z = math.max(zoomNow, 1)
 	for key, set in pairs(sets) do
 		local from = set.minZoom
 		local folk = key:sub(1, 3) == "tf_"
-		if places.from and (places.sets[key] or folk) then from = folk and math.max(from, places.from) or places.from end
+		local customFrom = places.from and (places.sets[key] or folk)
+		if customFrom then from = folk and math.max(from, places.from) or places.from end
 		-- (further out than the whole world, on the sea chart: as at the whole world)
+		local fadeTo = (not customFrom) and set.fadeTo or nil
 		local shown = set.on and not S.WorldPinsHidden(key)
-			and math.max(zoomNow, 1) >= from and (not set.maxZoom or zoomNow < set.maxZoom)
+			and (fadeTo and (z > from) or (z >= from)) and (not set.maxZoom or zoomNow < set.maxZoom)
 		if shown and set.build then
 			local build = set.build
 			set.build = nil
 			build(set)
 		end
-		if set.shownNow ~= shown then set.shownNow = shown set.frame:SetShown(shown) end
+		if shown and fadeTo then
+			local t = math.min(1, (z - from) / (fadeTo - from))
+			local a = math.floor(t * t * (3 - 2 * t) * 100 + 0.5) / 100
+			if a <= 0 then
+				shown = false
+			else
+				if set.fadeNow ~= a then
+					set.fadeNow = a
+					set.frame:SetAlpha(a)
+				end
+				local interactive = a >= 0.25
+				if set.mouseNow ~= interactive or set.mouseCount ~= #set.pins then
+					set.mouseNow, set.mouseCount = interactive, #set.pins
+					for _, p in ipairs(set.pins) do
+						p:EnableMouse(interactive)
+						if not interactive and GameTooltip and GameTooltip:GetOwner() == p then GameTooltip:Hide() end
+					end
+				end
+			end
+		elseif shown then
+			if set.fadeNow and set.fadeNow ~= 1 then
+				set.fadeNow = 1
+				set.frame:SetAlpha(1)
+			end
+			if set.mouseNow == false then
+				set.mouseNow = true
+				for _, p in ipairs(set.pins) do p:EnableMouse(true) end
+			end
+		end
+		if set.shownNow ~= shown then
+			if not shown and set.shownNow and GameTooltip and GameTooltip:IsShown() then
+				for _, p in ipairs(set.pins) do
+					if GameTooltip:GetOwner() == p then GameTooltip:Hide(); break end
+				end
+			end
+			set.shownNow = shown
+			set.frame:SetShown(shown)
+		end
 	end
 end
 
@@ -1192,8 +1232,10 @@ end
 
 local function BuildPins()
 	local P = ns.MapPlaces or {}
-	local dungeons = S.PinSet("dungeons", 1.5)
-	local travel = { boat = S.PinSet("boats", 2.5), zeppelin = S.PinSet("zeppelins", 2.5) }   -- (each its own switch)
+	local dungeons = S.PinSet("dungeons", 1.6)
+	dungeons.fadeTo = 2.4
+	local travel = { boat = S.PinSet("boats", 2.4), zeppelin = S.PinSet("zeppelins", 2.4) }   -- (each its own switch)
+	travel.boat.fadeTo, travel.zeppelin.fadeTo = 3.5, 3.5
 	travel.airship = travel.boat
 	if S.BuildDungeonPins then
 		for _, pin in ipairs(S.BuildDungeonPins(dungeons)) do pins[#pins + 1] = pin end   -- (Dungeons.lua)

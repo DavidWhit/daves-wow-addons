@@ -51,10 +51,23 @@ local function ZoneNames()
 	return names, maps
 end
 
-local function QuestInZone(q, maps)
-	local m = ns.QuestUiMapID and ns.QuestUiMapID(q) or 0
-	if m == 0 or issecretvalue(m) then return false end
+local function MapInZone(m, maps)
+	if not m or m == 0 or issecretvalue(m) then return false end
 	return (maps[m] or maps[ZoneOf(m) or 0]) and true or false
+end
+
+local function QuestInZone(q, maps)
+	if MapInZone(ns.QuestUiMapID and ns.QuestUiMapID(q) or 0, maps) then return true end
+	local D = ns.DATA
+	local i = D and D.map and ns.QuestPin and ns.QuestPin(q)
+	if not i then return false end
+	if MapInZone(D.map[i], maps) then return true end
+	local e = D.endp and D.endp[i]
+	if e and e ~= 0 and MapInZone(D.map[e], maps) then return true end
+	for _, o in ipairs(D.obj and D.obj[i] or {}) do
+		if MapInZone(D.map[o], maps) then return true end
+	end
+	return false
 end
 
 local function IsReady(q)
@@ -134,8 +147,8 @@ local function TrackZoneQuests()
 	if not db.trackMyZone or UnitOnTaxi("player") then return end   -- on a flight the landing comes back here
 	if not next(names) then return end                               -- a loading screen: leave the tracker alone
 	for _, q in ipairs(all) do
-		-- the zone tracking ignores ready quests and pinned ones
-		if not isReady[q] and not db.pinned[q] then
+		-- the zone tracking ignores ready quests, pinned ones, and the currently focused quest
+		if not isReady[q] and not db.pinned[q] and not (ns.ClickFocus and ns.ClickFocus() == q) then
 			local watched = Watched(q)
 			if here[q] and not watched then
 				ourAdd[q] = true; C_Timer.After(2, function() ourAdd[q] = nil end)   -- its event, not a later one of yours
@@ -156,22 +169,6 @@ local PIN_ATLAS = (C_Texture.GetAtlasInfo("friendslist-recentallies-pin-yellow")
 	or (C_Texture.GetAtlasInfo("friends-icon-pinned") and "friends-icon-pinned") or nil
 local pinButtons = {}   -- pool, one per quest shown in the tracker
 
-local function PinTooltip(b)
-	GameTooltip:SetOwner(b, "ANCHOR_LEFT")
-	if ns.db.pinned[b.questID] then
-		GameTooltip:AddLine("Pinned", 1, .82, 0)
-		if UnitOnTaxi("player") then
-			GameTooltip:AddLine("Stays tracked when you change zone. You can unpin it once you've landed.", 1, 1, 1, true)
-		else
-			GameTooltip:AddLine("Stays tracked when you change zone. Click to unpin.", 1, 1, 1, true)
-		end
-	else
-		GameTooltip:AddLine("Pin", 1, .82, 0)
-		GameTooltip:AddLine("Keep this quest tracked when you change zone.", 1, 1, 1, true)
-	end
-	GameTooltip:Show()
-end
-
 -- Pinned down: upright, in full colour. Not pinned: tipped over and grey, brighter under the mouse.
 local function PaintPin(b)
 	local on = ns.db.pinned[b.questID]
@@ -189,17 +186,19 @@ local function PinButton(n)
 	b.icon:SetAllPoints()
 	if PIN_ATLAS then b.icon:SetAtlas(PIN_ATLAS) else b.icon:SetTexture("Interface\\Buttons\\UI-CheckBox-Check") end
 	b:SetScript("OnClick", function(self)
-		-- (on a flight the zone check waits for the landing: no unpinning till then)
-		if ns.db.pinned[self.questID] and UnitOnTaxi("player") then return end
 		local q = self.questID
+		if not q then return end
 		ns.db.pinned[q] = not ns.db.pinned[q] or nil
-		-- unpinned: the zone check runs now, so a quest from another zone leaves the tracker straight away (its
-		-- tooltip with it); one from this zone stays, its tooltip saying so
-		if not ns.db.pinned[q] then ns.TrackZoneQuests() end
-		if Watched(q) then PaintPin(self); PinTooltip(self) else GameTooltip:Hide() end
+		if ns.Sound then
+			ns.Sound(ns.db.pinned[q] and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF", true)
+		end
+		if Watched(q) then PaintPin(self) end
+		if ns.db and ns.db.panelTab == "tracker" and ns.OnLayerChanged then
+			ns.OnLayerChanged()
+		end
 	end)
-	b:SetScript("OnEnter", function(self) PaintPin(self); PinTooltip(self) end)
-	b:SetScript("OnLeave", function(self) PaintPin(self); if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
+	b:SetScript("OnEnter", function(self) PaintPin(self) end)
+	b:SetScript("OnLeave", function(self) PaintPin(self) end)
 	pinButtons[n] = b
 	return b
 end
@@ -249,7 +248,7 @@ local function UpdatePins()
 					for id, block in pairs(blocks) do
 						if type(id) == "number" and block:IsVisible() and Watched(id) and not block.cached then
 							RestoreBlockAlpha(block)
-							if ns.db.trackMyZone and not IsReady(id) then
+							if ns.db.trackMyZone then
 								n = n + 1
 								local b = PinButton(n)
 								-- just left of the quest's map icon (its POI button sits left of the title:
@@ -302,8 +301,7 @@ end
 -- Blizzard's tracker does it: focused and its details opened, not in combat (an addon can't open the map then).
 -- Shift-click: our waypoint to the turn-in.
 local function ShowQuest(q)
-	if ns.db.focusQuest then
-		ns.QuestClicked(q, "toggle", true)   -- (its sound too: after combat a second click shows it, not lets go)
+	if ns.QuestClicked and ns.QuestClicked(q, "toggle", true, true) ~= nil then
 		return
 	end
 	ns.SetSuperTrackedQuest(q)
@@ -348,21 +346,9 @@ local function Row(n)
 	r:SetScript("OnClick", OnRowClick)
 	r:SetScript("OnEnter", function(self)
 		self.title:SetTextColor(1, 1, 1)
-		if self.questID then
-			GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-			GameTooltip:AddLine(self.title:GetText(), 1, .82, 0)
-			if ns.db.focusQuest and ns.ClickFocused(self.questID) then
-				GameTooltip:AddLine("Click: stop focusing it (every pin on the map again)", .5, .8, 1)
-			else
-				GameTooltip:AddLine("Click: focus it and show it on the map", .5, .8, 1)
-			end
-			if self.turnIn then GameTooltip:AddLine("Shift-click: a waypoint to where it's turned in", .5, .8, 1) end
-			GameTooltip:Show()
-		end
 	end)
 	r:SetScript("OnLeave", function(self)
 		self.title:SetTextColor(1, .82, 0)
-		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
 	end)
 	rows[n] = r
 	return r
@@ -640,7 +626,7 @@ events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
 	if added ~= true then return end
 	if ourAdd[q] then ourAdd[q] = nil return end
 	if accepted[q] then accepted[q] = nil return end
-	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
+	if ns.db.trackMyZone then ns.db.pinned[q] = true end
 end
 -- A quest whose objective advances (QUEST_WATCH_UPDATE / QUEST_LOG_CRITERIA_UPDATE): pin it and track it if not
 -- already tracked (unless the advancement completed the quest, in which case it moves to Ready to Turn In).
@@ -705,7 +691,7 @@ local function OnNameClick(_, block, button)
 	if button ~= "LeftButton" or not block or IsModifiedClick("QUESTWATCHTOGGLE") or IsModifiedClick("CHATLINK") then return end
 	local q = block.id
 	if type(q) ~= "number" or issecretvalue(q) or HandInFromPopUp(q) then return end
-	ns.QuestClicked(q, "toggle")
+	ns.QuestClicked(q, "toggle", false, true)
 end
 
 -- only the Quests and Campaign sections (the "..." icons are pooled for the tracker's other sections too)

@@ -1,515 +1,902 @@
 -- daves_map / Panel.lua
--- The search and filter panel beside the world map, laid out like Map Genie's sidebar and dressed like the map it sits
--- next to: the map's own metal frame (NineSlice layout "ButtonFrameTemplateNoPortrait", as Blizzard's button frames)
--- and flat panel background, a gold title, then the quest log's pieces (Blizzard_UIPanels_Game QuestMapFrame.xml):
--- its divider, its parchment list background, its tick boxes and yellow checkmarks, and the list headers its quest
--- log uses (ListHeaderVisualTemplate).
---
--- The list shows one of three things:
---   the selected quest chain: its steps numbered in order, as on the map (click a step on another map to open that
---   map, one on this map for a waypoint)
---   search results: matches on this map first (click to select it, draw its chain and open its map, shift-click for a
---   waypoint)
---   the categories: groups and categories with a tick and how many of their pins are on this map
--- Parented to WorldMapFrame (it shows and hides with it) but never registered with it: nothing of Blizzard's map is
--- written. Windowed it docks beside the map (left if there's room, else right, else inside); maximized it sits inside.
+-- Horizontal-split Dave's Map frame beside Blizzard's World Map:
+--   * HUD Edit Mode dialog chrome (`DialogBorderTranslucentTemplate`) with the same styling options
+--     as daves_sack (`Window scale`, `Background` opacity, `Background style`).
+--   * Left-side tab rail (`Layers`, `Zone`, `Dungeon` + `< Back`).
+--   * Right-side visual content pane (search + Find Me + Waypoint + Window Style gear, Search / Focus bar,
+--     Zone progress bar, and clipped variable-height virtualized list with native MinimalScrollBar).
 
 local _, ns = ...
 
-local D
-local panel, tab, search, list, status, factionTicks, checks
-local rows = {}
-local items = {}
-local offset = 0
-local lastMode
-local counts = {}            -- [category index] = pins on this map
-local haystack               -- [pin] = lower-case text to search (built on the first search)
-local found                  -- the pins matching the current search, or nil
-local ROW_H, PAD, WIDTH = 20, 12, 260
-local MAX_RESULTS = 500
-local FACTIONS = { { "Alliance", .4, .62, 1 }, { "Horde", 1, .35, .35 }, { "Neutral", 1, .82, .2 } }
+local ui = ns.PanelUI
+local C = ns.PANEL_CONST
+local WIDTH, MIN_H, RAIL_W, LIST_PAD, SCROLL_GUTTER = C.WIDTH, C.MIN_H or 380, C.RAIL_W, C.LIST_PAD, C.SCROLL_GUTTER
+local Sound = ns.Sound
+
+local TAB_DEFS = {
+	{
+		key = "layers",
+		label = "Base",
+		icon = "tab_base",
+		tip = "Toggle base POI map icons (flight masters, townsfolk, rares, treasures) and adjust Map Settings.",
+	},
+	{
+		key = "tracker",
+		label = "Tracker",
+		icon = "tab_tracker",
+		tip = "View your Focused, Ready to Turn In, Pinned, and Tracking quests on the Base map layer with chain steps, starters, and rewards.",
+	},
+	{
+		key = "zone",
+		label = "Zone",
+		icon = "tab_zone",
+		tip = "Browse zone quests & inline quest chains for your zone or the zone you navigate to on the map.",
+	},
+	{
+		key = "dungeon",
+		label = "Dungeon",
+		icon = "tab_dungeon",
+		tip = "View dungeons, floor maps, and dungeon quests for your zone or the zone you navigate to on the map.",
+	},
+}
 
 ---------------------------------------------------------------------------
--- The quest log's tick box: a square with a yellow checkmark
+-- Chrome Layout & Prominent Reference-Layer Status Bar
 ---------------------------------------------------------------------------
-local function Tick(parent)
-	local box = parent:CreateTexture(nil, "ARTWORK")
-	box:SetAtlas("questlog-icon-ticksquare", true)
-	local mark = parent:CreateTexture(nil, "OVERLAY")
-	mark:SetAtlas("questlog-icon-checkmark-yellow", true)
-	mark:SetPoint("CENTER", box, "CENTER", 1, 1)
-	return {
-		box = box,
-		SetChecked = function(_, on) mark:SetShown(on and true or false) end,
-		SetShown = function(_, on) box:SetShown(on); if not on then mark:Hide() end end,
-	}
-end
+local function UpdateChromeLayout()
+	local D = ns.DATA
+	if not (ui.ready and D) then return end
 
----------------------------------------------------------------------------
--- The list
----------------------------------------------------------------------------
-local function GroupState(gi)
-	local on, off = 0, 0
-	for _, ci in ipairs(D.groups[gi].cats) do
-		if ns.db.hidden[D.cats[ci].id] then off = off + 1 else on = on + 1 end
+	local canBack = ns.DescribeBackTarget()
+	if ui.backBtn then
+		ui.backBtn.isDisabled = not canBack
+		ui.backBtn:SetAlpha(canBack and 1 or 0.42)
+		if ui.backBtn.hl then ui.backBtn.hl:SetAlpha(canBack and 0.35 or 0) end
+		ui.backBtn.activeBg:SetShown(canBack and (ns.IsDungeonViewShown and ns.IsDungeonViewShown() or false))
 	end
-	return on, off
-end
+	if ui.pinBtn and ui.pinBtn.SetActive and ns.PinModeActive then
+		ui.pinBtn:SetActive(ns.PinModeActive())
+	end
+	if ui.styleBtn and ui.styleBtn.SetActive and ns.IsStyleDialogOpen then
+		ui.styleBtn:SetActive(ns.IsStyleDialogOpen())
+	end
 
--- a search result is "on map" when its pin is drawn on this map (a table lookup, and the same as the map shows)
-local function IsHere(i)
-	local map = ns.CurrentMap()
-	return map and ns.PinsOnMap(map).x[i] ~= nil or false
-end
--- a chain step also counts when it lies inside this map's rectangle (the map draws neighbouring-zone steps there)
-local function StepHere(i)
-	local x, y = ns.ProjectPin(ns.CurrentMap(), i)
-	return x and x >= 0 and x <= 1 and y >= 0 and y <= 1 or false
-end
--- the map rebuilds and calls ns.OnLayerChanged itself while it's open; refresh the list directly only when it isn't
-local function RefreshIfMapHidden()
-	if not WorldMapFrame:IsVisible() then ns.OnLayerChanged() end
-end
+	local tab = ns.db.panelTab or "layers"
+	local searching = ui.found ~= nil
 
--- what the list shows now: the chain, the search results or the categories
-local function BuildItems()
-	wipe(items)
-	local chain = ns.Chain()
-	local mode
-	if chain and #chain.steps > 1 then
-		mode = "chain"
-		items[1] = { kind = "chainhead", n = #chain.steps }
-		for n, i in ipairs(chain.steps) do items[#items + 1] = { kind = "step", i = i, n = n, here = StepHere(i) } end
-	elseif found then
-		mode = "search"
-		local all = {}
-		for _, i in ipairs(found) do all[#all + 1] = { kind = "result", i = i, here = IsHere(i) } end
-		table.sort(all, function(a, b)
-			if a.here ~= b.here then return a.here end
-			if D.title[a.i] ~= D.title[b.i] then return D.title[a.i] < D.title[b.i] end
-			return a.i < b.i
-		end)
-		for n = 1, math.min(#all, MAX_RESULTS) do items[n] = all[n] end
-	else
-		mode = "cats"
-		for gi, g in ipairs(D.groups) do
-			items[#items + 1] = { kind = "group", gi = gi }
-			for _, ci in ipairs(g.cats) do items[#items + 1] = { kind = "cat", ci = ci } end
+	for k, b in pairs(ui.tabs) do
+		local selected = (not searching) and (k == tab)
+		b.activeBar:SetShown(selected)
+		b.activeGlow:SetShown(selected)
+		if selected then
+			b.frame:SetVertexColor(1, 0.96, 0.78, 1)
+			b.icon:SetAlpha(1)
+		else
+			b.frame:SetVertexColor(0.76, 0.70, 0.56, 0.90)
+			b.icon:SetAlpha(0.76)
 		end
 	end
-	if mode ~= lastMode then offset = 0; lastMode = mode end
-end
 
-local function LabelAt(row, x)
-	row.label:ClearAllPoints()
-	row.label:SetPoint("LEFT", x, 0)
-	row.label:SetPoint("RIGHT", row.count, "LEFT", -4, 0)
-end
+	local curY = -30
+	ui.layerBar:Hide()
+	ui.zoneBar:Hide()
 
-local function RenderRow(row, item)
-	row.item = item
-	if not item then row:Hide() return end
-	row:Show()
-	local header = item.kind == "group" or item.kind == "chainhead"
-	row.header:SetShown(header)
-	row.tick:SetShown(item.kind == "cat")
-	row.icon:SetShown(item.kind == "cat" or item.kind == "result" or item.kind == "step")
-	row.num:SetText("")
-	row.label:SetText("")
-	row.count:SetText("")
-	if item.kind == "group" then
-		local _, off = GroupState(item.gi)
-		row.header:SetText(D.groups[item.gi].title)
-		row.header.right:SetText(off == 0 and "Hide all" or "Show all")
-	elseif item.kind == "chainhead" then
-		row.header:SetText(("Quest chain, %d steps"):format(item.n))
-		row.header.right:SetText("Clear")
-	elseif item.kind == "cat" then
-		local c = D.cats[item.ci]
-		row.tick:SetChecked(not ns.db.hidden[c.id])
-		row.icon:ClearAllPoints(); row.icon:SetPoint("LEFT", 26, 0)
-		ns.PaintCategoryIcon(row.icon, item.ci)
-		LabelAt(row, 46)
-		row.label:SetText(c.title)
-		local n = counts[item.ci] or 0
-		row.count:SetText(n > 0 and n or "|cff6666660|r")
-	else
-		local i = item.i
-		local x = 6
-		if item.kind == "step" then
-			-- in the step's colour, the colour of its badge and the line into it on the map
-			local chain = ns.Chain()
-			row.num:SetText(("|c%s%d.|r"):format(ns.StepHex(item.n, chain and #chain.steps or 1), item.n))
-			x = 30
+	local focusOn = ns.db and ns.db.focusQuest ~= false
+	local onBaseLayer = tab == "layers" or tab == "tracker"
+	local clickQ = (focusOn and onBaseLayer) and ((ns.ClickFocus and ns.ClickFocus()) or (ns.TrackerFocusQuestID and ns.TrackerFocusQuestID())) or nil
+	if clickQ and not ns.QuestInLog(clickQ) then clickQ = nil end
+	local focused = focusOn and onBaseLayer and ((ns.Focused and ns.Focused()) or (clickQ ~= nil))
+	if searching then
+		ui.layerBar:ClearAllPoints()
+		ui.layerBar:SetPoint("TOPLEFT", LIST_PAD, curY)
+		ui.layerBar:SetPoint("TOPRIGHT", -LIST_PAD, curY)
+		ui.layerBar:SetBackdropColor(0.11, 0.10, 0.07, 0.92)
+		ui.layerBar:SetBackdropBorderColor(0.68, 0.54, 0.25, 0.85)
+		ui.layerBar.label:ClearAllPoints()
+		ui.layerBar.label:SetPoint("LEFT", 10, 0)
+		ui.layerBar.label:SetPoint("RIGHT", ui.layerBar.actionBtn, "LEFT", -8, 0)
+		ui.layerBar.label:SetText(("|cffffd200Search:|r %d match%s"):format(#ui.found, #ui.found == 1 and "" or "es"))
+		ui.layerBar.actionBtn.text:SetText("|cffe8d8a8Clear|r")
+		ui.layerBar.actionBtn:SetWidth(62)
+		ui.layerBar.actionBtn.mode = "search"
+		ui.layerBar:Show()
+		curY = curY - 34
+	elseif focused then
+		ui.layerBar:ClearAllPoints()
+		ui.layerBar:SetPoint("TOPLEFT", LIST_PAD, curY)
+		ui.layerBar:SetPoint("TOPRIGHT", -LIST_PAD, curY)
+		ui.layerBar:SetBackdropColor(0.11, 0.10, 0.07, 0.92)
+		ui.layerBar:SetBackdropBorderColor(0.68, 0.54, 0.25, 0.85)
+		ui.layerBar.label:ClearAllPoints()
+		ui.layerBar.label:SetPoint("LEFT", 10, 0)
+		ui.layerBar.label:SetPoint("RIGHT", ui.layerBar.actionBtn, "LEFT", -8, 0)
+		local fTitle = clickQ and ns.QuestTitle and ns.QuestTitle(clickQ) or nil
+		if fTitle then
+			ui.layerBar.label:SetText(("|cffffd200Focused:|r %s"):format(ns.Shorten(fTitle, 48)))
+		else
+			ui.layerBar.label:SetText("|cffffd200Focused tracked quest|r")
 		end
-		row.icon:ClearAllPoints(); row.icon:SetPoint("LEFT", x, 0)
-		ns.PaintCategoryIcon(row.icon, D.cat[i])
-		LabelAt(row, x + 20)
-		local selected = ns.FocusedPin() == i
-		row.label:SetText(selected and ("|cffffd200" .. D.title[i] .. "|r") or D.title[i])
-		row.count:SetText(item.here and "|cff59ff73on map|r" or (ns.ZoneName(i) or ""))
+		ui.layerBar.actionBtn.text:SetText("|cffe8d8a8Show All|r")
+		ui.layerBar.actionBtn:SetWidth(76)
+		ui.layerBar.actionBtn.mode = "unfocus"
+		ui.layerBar:Show()
+		curY = curY - 34
 	end
-end
 
-local function Render()
-	if not list then return end
-	local n = rows.n or 0
-	offset = math.max(0, math.min(offset, #items - n))
-	for r = 1, n do RenderRow(rows[r], items[offset + r]) end
-	list.more:SetShown(offset + n < #items)
-end
-
--- Every click sounds, as in Blizzard's quest log: a tick for the filters, the quest list's select for a step or a
--- result (a click that turns the map, or sets a waypoint, adds its own map sound in Layer.lua).
-local Sound = ns.Sound   -- (Layer.lua, loaded before this: one sound a click)
-
-local function OnRowClick(row)
-	local item = row.item
-	if not item then return end
-	local hidden = ns.db.hidden
-	if item.kind == "group" then
-		local _, off = GroupState(item.gi)
-		for _, ci in ipairs(D.groups[item.gi].cats) do hidden[D.cats[ci].id] = (off == 0) or nil end
-		Sound(off == 0 and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON")
-		ns.Refresh()
-	elseif item.kind == "cat" then
-		local id = D.cats[item.ci].id
-		hidden[id] = not hidden[id] or nil
-		Sound(hidden[id] and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON")
-		ns.Refresh()
-	elseif item.kind == "chainhead" then
-		ns.Focus(ns.FocusedPin())   -- toggles it off (with its own sound)
-	elseif item.kind == "step" then   -- the seamless map flies there, zoomed in on it; shift/ctrl-click: a waypoint
-		Sound("IG_QUEST_LIST_SELECT")   -- (without the seamless map: a step on another map opens that map; on this one, a waypoint)
-		if IsShiftKeyDown() or IsControlKeyDown() or not ns.ShowPinMap(item.i, true) then ns.SetWaypoint(item.i) end
-	else   -- a search result: select it (its chain is drawn and listed) and open its map; shift/ctrl-click for a waypoint
-		Sound("IG_QUEST_LIST_SELECT")
-		if IsShiftKeyDown() or IsControlKeyDown() then ns.SetWaypoint(item.i) else ns.Focus(item.i); ns.ShowPinMap(item.i) end
-	end
-	RefreshIfMapHidden()   -- Refresh / Focus already update the list while the map is open
-end
-
-local function MakeRow(r)
-	local row = CreateFrame("Button", nil, list)
-	row:SetHeight(ROW_H)
-	row:SetPoint("TOPLEFT", 0, -(r - 1) * ROW_H)
-	row:SetPoint("RIGHT")
-	row:RegisterForClicks("LeftButtonUp")
-	local hl = row:CreateTexture(nil, "HIGHLIGHT")
-	hl:SetAtlas("questlog-quest-glow-yellow")
-	hl:SetAllPoints()
-	hl:SetAlpha(.5)
-	hl:SetBlendMode("ADD")
-	-- group and chain headers: the quest log's list header
-	row.header = CreateFrame("Button", nil, row, "ListHeaderVisualTemplate")
-	row.header:SetAllPoints()
-	row.header:SetFrameLevel(row:GetFrameLevel() + 1)
-	row.header.CollapseButton:Hide()
-	row.header.right = row.header:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	row.header.right:SetPoint("RIGHT", -8, 0)
-	row.header:SetScript("OnClick", function() OnRowClick(row) end)
-	row.tick = Tick(row)
-	row.tick.box:SetPoint("LEFT", 6, 0)
-	row.icon = row:CreateTexture(nil, "ARTWORK")
-	row.icon:SetSize(15, 15)
-	row.num = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	row.num:SetPoint("RIGHT", row, "LEFT", 26, 0)
-	row.num:SetJustifyH("RIGHT")
-	row.label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	row.label:SetJustifyH("LEFT"); row.label:SetWordWrap(false)
-	row.count = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	row.count:SetPoint("RIGHT", -6, 0)
-	row.count:SetJustifyH("RIGHT")
-	row:SetScript("OnClick", OnRowClick)
-	row:SetScript("OnEnter", function(self)
-		local item = self.item
-		if not item then return end
-		if item.kind == "result" or item.kind == "step" then
-			ns.ShowTooltip(self, item.i)
-		elseif item.kind == "cat" and D.cats[item.ci].info ~= "" then
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip:AddLine(D.cats[item.ci].title, 1, 1, 1)
-			GameTooltip:AddLine(D.cats[item.ci].info, .9, .9, .9, true)
-			GameTooltip:Show()
+	if not searching and tab == "zone" then
+		ui.zoneBar:ClearAllPoints()
+		ui.zoneBar:SetPoint("TOPLEFT", LIST_PAD, curY)
+		ui.zoneBar:SetPoint("TOPRIGHT", -LIST_PAD, curY)
+		local zMap = ui.zoneMap or (ns.ActiveZoneContext and ns.ActiveZoneContext()) or (ns.ViewZoneMap and ns.ViewZoneMap())
+		local info = zMap and C_Map.GetMapInfo(zMap)
+		local zName = info and info.name or "World"
+		local zl = zMap and D.zones and D.zones[zMap]
+		if zl then
+			local mid = math.floor((zl[1] + zl[2]) / 2)
+			local range = zl[1] == zl[2] and tostring(zl[1]) or (zl[1] .. "-" .. zl[2])
+			zName = ("%s |c%s(%s)|r"):format(zName, ns.DiffHex(mid), range)
 		end
-	end)
-	row:SetScript("OnLeave", function(self) if GameTooltip:GetOwner() == self then GameTooltip:Hide() end end)
-	rows[r] = row
-	return row
-end
+		local done, total = ui.zoneDone or 0, ui.zoneTotal or 0
+		ui.zoneBar:SetMinMaxValues(0, math.max(1, total))
+		ui.zoneBar:SetValue(total > 0 and done or 0)
+		local pct = total > 0 and math.floor(done * 100 / total + .5) or 0
+		ui.zoneBar.left:SetText(zName)
+		ui.zoneBar.right:SetText(total > 0 and ("%d/%d (%d%%)"):format(done, total, pct) or "No quests")
+		ui.zoneBar:Show()
+		curY = curY - 26
+	end
 
-local function LayoutRows()
-	local n = math.max(1, math.floor(list:GetHeight() / ROW_H))
-	for r = 1, n do if not rows[r] then MakeRow(r) end end
-	-- spare rows from a taller panel are kept (hidden) for when it grows again
-	for r = n + 1, #rows do rows[r]:Hide(); rows[r].item = nil end
-	rows.n = n
-	Render()
+	ui.divider:ClearAllPoints()
+	ui.divider:SetPoint("TOPLEFT", LIST_PAD, curY - 1)
+	ui.divider:SetPoint("TOPRIGHT", -LIST_PAD, curY - 1)
+	local listH = ui.list and ui.list:GetHeight() or 0
+	local needScroll = listH > 0 and (ui.totalH or 0) > (listH + 1)
+	local rightInset = needScroll and (LIST_PAD + SCROLL_GUTTER) or LIST_PAD
+	ui.listTopY = curY - 5
+	ui.listRightInset = rightInset
+	ui.list:ClearAllPoints()
+	ui.list:SetPoint("TOPLEFT", LIST_PAD, ui.listTopY)
+	ui.list:SetPoint("BOTTOMRIGHT", -rightInset, LIST_PAD)
 end
 
 ---------------------------------------------------------------------------
--- Search
----------------------------------------------------------------------------
-local function Haystack(i)
-	if not haystack then haystack = {} end
-	local h = haystack[i]
-	if not h then
-		local text = D.text[i]:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-		h = (D.title[i] .. " " .. text .. " " .. D.cats[D.cat[i]].title .. " " .. (ns.ZoneName(i) or "")):lower()
-		if ns.IsCalibrated() then haystack[i] = h end   -- kept only once the zone names are known
-	end
-	return h
-end
-
-local function RunSearch()
-	ns.Calibrate()   -- the zone names, even while the layer is off
-	local text = (search:GetText() or ""):lower():match("^%s*(.-)%s*$")
-	if #text < 2 then
-		found = nil
-		ns.SetSearch(nil)
-	else
-		local words = {}
-		for w in text:gmatch("%S+") do words[#words + 1] = w end
-		local set = {}
-		found = {}
-		for i = 1, #D.x do
-			local h = Haystack(i)
-			local ok = true
-			for _, w in ipairs(words) do if not h:find(w, 1, true) then ok = false break end end
-			if ok then set[i] = true; found[#found + 1] = i end
-		end
-		ns.SetSearch(set)
-	end
-	RefreshIfMapHidden()   -- SetSearch -> Refresh rebuilds the map, which updates the list, while the map is open
-end
-
----------------------------------------------------------------------------
--- Status, counts, docking
+-- Docking & Public Refresh Hooks
 ---------------------------------------------------------------------------
 function ns.OnLayerChanged()
-	if not panel then return end
-	local map = ns.CurrentMap()
-	wipe(counts)
-	local onMap = 0
+	local D = ns.DATA
+	if not (ui.ready and D) then return end
+	if not (ui.panel and ui.panel:IsVisible()) then
+		ui.dirtyHidden = true
+		return
+	end
+	ui.dirtyHidden = false
+	local map = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
+	wipe(ui.counts)
 	if map then
 		local idx = ns.PinsOnMap(map).idx
-		onMap = #idx
-		for _, i in ipairs(idx) do counts[D.cat[i]] = (counts[D.cat[i]] or 0) + 1 end
+		for _, i in ipairs(idx) do ui.counts[D.cat[i]] = (ui.counts[D.cat[i]] or 0) + 1 end
 	end
-	BuildItems()
-	local chain = ns.Chain()
-	local s
-	if not ns.db.enabled then
-		s = "Layer off (/dmap toggle)."
-	elseif not ns.IsCalibrated() then
-		s = "|cffff6060Couldn't place the pins: no flight points matched. /dmap calib|r"
-	elseif lastMode == "chain" then
-		s = ("Quest chain: %d steps, numbered on the map."):format(#chain.steps)
-	elseif not found and ns.Focused and ns.Focused() then   -- (a search still shows its matches)
-		s = ("Focused quest: %d of its pins shown. Click it again to see all."):format(ns.ShownCount())
-	elseif ns.IsSeamless and ns.IsSeamless() then   -- the seamless map: the pins round the view, whatever their zone
-		s = found and ("%d matches, %d in view."):format(#found, ns.ShownCount()) or ("%d pins in view."):format(ns.ShownCount())
-	elseif found then
-		s = ("%d matches, %d on this map."):format(#found, ns.ShownCount())
-	else
-		s = ("%d of %d pins on this map shown."):format(ns.ShownCount(), onMap)
-	end
-	status:SetText(s .. "\n|cff888888" .. (D.source and D.source.map or "QuestieDB Forever") .. ", " .. D.source.fetched .. "|r")
-	Render()
+	ns.BuildPanelItems()
+	UpdateChromeLayout()
+	ns.LayoutPanelRows()
 end
 
-local docked
+local function TryTemplate(kind, name, parent, template)
+	local ok, f = pcall(CreateFrame, kind, name, parent, template)
+	return ok and f or nil
+end
+
+local function SetBackground(border, a, style)
+	if not border then return end
+	local bg = border.Bg
+	if bg then
+		if style and style.file then
+			local wrap = style.tile and "REPEAT" or "CLAMP"
+			bg:SetTexture(style.file, wrap, wrap)
+			bg:SetTexCoord(0, 1, 0, 1)
+			bg:SetHorizTile(style.tile or false)
+			bg:SetVertTile(style.tile or false)
+			bg:SetVertexColor(1, 1, 1, a)
+		else
+			bg:SetHorizTile(false)
+			bg:SetVertTile(false)
+			bg:SetColorTexture(0, 0, 0, a)
+			bg:SetVertexColor(1, 1, 1, 1)
+		end
+	elseif border.SetBackdrop then
+		local file = style and style.file
+		border:SetBackdrop({
+			bgFile = file or "Interface\\Buttons\\WHITE8X8",
+			tile = (style and style.tile) or false,
+			tileSize = 256,
+			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+			edgeSize = 32,
+			insets = { left = 11, right = 12, top = 12, bottom = 11 },
+		})
+		if file then
+			border:SetBackdropColor(1, 1, 1, a)
+		else
+			border:SetBackdropColor(0, 0, 0, a)
+		end
+	end
+end
+ns.ApplyDialogBackground = SetBackground
+
+local function SaveFreeLayout(panel)
+	if not (panel and ns.db) then return end
+	local w = math.max(WIDTH, math.floor((panel:GetWidth() or WIDTH) + 0.5))
+	local h = math.max(MIN_H, math.floor((panel:GetHeight() or MIN_H) + 0.5))
+	ns.db.panelW = w
+	ns.db.panelH = h
+	local l, t = panel:GetLeft(), panel:GetTop()
+	local ps = panel:GetEffectiveScale()
+	local us = UIParent:GetEffectiveScale()
+	if l and t and ps and us and us > 0 then
+		ns.db.panelPos = {
+			x = math.floor(l * ps / us + 0.5),
+			y = math.floor(t * ps / us + 0.5),
+		}
+	end
+end
+
+local function RestoreFreeLayout(panel)
+	if not (panel and ns.db and ns.db.panelPos) then return false end
+	local pos = ns.db.panelPos
+	if type(pos.x) ~= "number" or type(pos.y) ~= "number" then return false end
+	local ps = panel:GetEffectiveScale()
+	local us = UIParent:GetEffectiveScale()
+	if not (ps and ps > 0 and us and us > 0) then return false end
+	local w = math.max(WIDTH, ns.db.panelW or WIDTH)
+	local h = math.max(MIN_H, ns.db.panelH or (WorldMapFrame and WorldMapFrame:GetHeight()) or 540)
+	panel:ClearAllPoints()
+	panel:SetSize(w, h)
+	panel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x * us / ps, pos.y * us / ps)
+	ui.docked = "free"
+	return true
+end
+
+local function DetachForDragOrResize(panel)
+	if not panel or ui.docked == "free" then return end
+	local l, t = panel:GetLeft(), panel:GetTop()
+	local w = math.max(WIDTH, panel:GetWidth() or WIDTH)
+	local h = math.max(MIN_H, panel:GetHeight() or MIN_H)
+	panel:ClearAllPoints()
+	panel:SetSize(w, h)
+	if l and t then
+		panel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+	else
+		panel:SetPoint("CENTER", UIParent, "CENTER")
+	end
+	ui.docked = "free"
+end
+
+local function BeginPanelMove(panel)
+	if not panel or (panel:IsProtected() and InCombatLockdown()) then return end
+	DetachForDragOrResize(panel)
+	ui.dragging = true
+	panel:StartMoving()
+end
+
+local function BeginPanelResize(panel)
+	if not panel or (panel:IsProtected() and InCombatLockdown()) then return end
+	DetachForDragOrResize(panel)
+	local ps = panel:GetEffectiveScale() or 1
+	local us = UIParent:GetEffectiveScale() or 1
+	local ratio = (ps > 0) and (us / ps) or 1
+	local maxW = math.max(WIDTH, math.floor((UIParent:GetWidth() or 1600) * 0.92 * ratio))
+	local maxH = math.max(MIN_H, math.floor((UIParent:GetHeight() or 900) * 0.92 * ratio))
+	if panel.SetResizeBounds then
+		panel:SetResizeBounds(WIDTH, MIN_H, maxW, maxH)
+	end
+	ui.dragging = true
+	panel:StartSizing("BOTTOMRIGHT")
+end
+
+local function EndPanelDragOrResize(panel)
+	if not (panel and ui.dragging) then return end
+	ui.dragging = false
+	panel:StopMovingOrSizing()
+	local w = math.max(WIDTH, panel:GetWidth() or WIDTH)
+	local h = math.max(MIN_H, panel:GetHeight() or MIN_H)
+	panel:SetSize(w, h)
+	SaveFreeLayout(panel)
+	RestoreFreeLayout(panel)
+	if ns.LayoutPanelRows then ns.LayoutPanelRows() end
+end
+
 local function Dock()
-	local room = WIDTH + 8
+	if not ui.panel or ui.dragging then return end
+	if ui.pinBtn and ui.pinBtn.SetActive and ns.PinModeActive then
+		ui.pinBtn:SetActive(ns.PinModeActive())
+	end
+	if ui.styleBtn and ui.styleBtn.SetActive and ns.IsStyleDialogOpen then
+		ui.styleBtn:SetActive(ns.IsStyleDialogOpen())
+	end
+	if ns.db and ns.db.panelPos then
+		if ui.docked ~= "free" then
+			RestoreFreeLayout(ui.panel)
+		end
+		return
+	end
+	local effW = math.max(WIDTH, (ns.db and ns.db.panelW) or WIDTH)
+	local s = ui.panel:GetScale() or 1
+	local room = (effW * s) + 4
 	local where
-	if WorldMapFrame:IsMaximized() then
+	if WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized() then
 		where = "inside"
 	elseif (WorldMapFrame:GetLeft() or 0) >= room then
 		where = "left"
-	elseif (UIParent:GetRight() or 0) - (WorldMapFrame:GetRight() or 0) >= room then
-		where = "right"
 	else
-		where = "inside"
+		where = "right"
 	end
-	if where == docked then return end
-	docked = where
-	panel:ClearAllPoints()
+	if where == ui.docked then return end
+	ui.docked = where
+	ui.panel:ClearAllPoints()
+	ui.panel:SetWidth(effW)
 	if where == "inside" then
 		local sc = WorldMapFrame.ScrollContainer
-		panel:SetPoint("TOPLEFT", sc, "TOPLEFT", 10, -48)
-		panel:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 10, 10)
+		ui.panel:SetPoint("TOPLEFT", sc, "TOPLEFT", 10, -48)
+		ui.panel:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 10, 10)
 	elseif where == "left" then
-		panel:SetPoint("TOPRIGHT", WorldMapFrame, "TOPLEFT", -8, 0)
-		panel:SetPoint("BOTTOMRIGHT", WorldMapFrame, "BOTTOMLEFT", -8, 0)
+		ui.panel:SetPoint("TOPRIGHT", WorldMapFrame, "TOPLEFT", -10, 2)
+		ui.panel:SetPoint("BOTTOMRIGHT", WorldMapFrame, "BOTTOMLEFT", -10, -2)
 	else
-		panel:SetPoint("TOPLEFT", WorldMapFrame, "TOPRIGHT", 8, 0)
-		panel:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMRIGHT", 8, 0)
+		ui.panel:SetPoint("TOPLEFT", WorldMapFrame, "TOPRIGHT", -4, 2)
+		ui.panel:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMRIGHT", -4, -2)
+	end
+end
+ns.SyncPanelDock = Dock
+
+function ns.ResetPanelPosition()
+	if not ns.db then return end
+	ns.db.panelPos = nil
+	ns.db.panelW = nil
+	ns.db.panelH = nil
+	ui.docked = nil
+	if ui.panel then
+		ui.panel:SetWidth(WIDTH)
+		Dock()
+		if ns.LayoutPanelRows then ns.LayoutPanelRows() end
 	end
 end
 
--- above every pin on the map (Blizzard's run from 2000 to about 2900), so the panel and tab keep their clicks
+function ns.ApplyPanelStyle()
+	if not ns.db then return end
+	local a = math.max(0.2, math.min(1.0, ns.db.background or 0.8))
+	local style = ns.BackgroundStyle and ns.BackgroundStyle(ns.db.backgroundStyle) or { key = "dark", name = "Dark" }
+	local scale = math.max(0.5, math.min(1.5, ns.db.panelScale or 1.0))
+	SetBackground(ns.styleDialogBorder, a, style)
+	if not ui.panel then return end
+	SetBackground(ui.border, a, style)
+	local railA, listA
+	if style.key == "marble" then
+		railA, listA = 0.50, 0.48
+	elseif style.key == "dialog" then
+		railA, listA = 0.24, 0.18
+	else
+		railA, listA = 0.10, 0.08
+	end
+	if ui.leftRail then
+		ui.leftRail:SetBackdropColor(0.03, 0.03, 0.05, railA)
+	end
+	if ui.listBg then
+		ui.listBg:SetColorTexture(0, 0, 0, listA)
+	end
+	if math.abs((ui.panel:GetScale() or 1) - scale) > 0.001 then
+		ui.panel:SetScale(scale)
+		ui.docked = nil
+		Dock()
+	end
+end
+
+function ns.SyncStyleButton()
+	if ui.styleBtn and ui.styleBtn.SetActive and ns.IsStyleDialogOpen then
+		ui.styleBtn:SetActive(ns.IsStyleDialogOpen())
+	end
+end
+
+function ns.SyncPanelScrollBar(scrollPx, listH, totalH)
+	local sb = ui.scrollBar
+	if not sb then return end
+	local maxScroll = math.max(0, (totalH or 0) - (listH or 0))
+	local showScroll = maxScroll > 1 and listH ~= nil and listH > 0 and totalH ~= nil and totalH > 0
+	local wantInset = showScroll and (LIST_PAD + SCROLL_GUTTER) or LIST_PAD
+	if ui.list and ui.listTopY and ui.listRightInset ~= wantInset then
+		ui.listRightInset = wantInset
+		ui.list:ClearAllPoints()
+		ui.list:SetPoint("TOPLEFT", LIST_PAD, ui.listTopY)
+		ui.list:SetPoint("BOTTOMRIGHT", -wantInset, LIST_PAD)
+	end
+	ui.syncingScroll = true
+	if ui.nativeScrollBar then
+		if not showScroll then
+			sb:SetVisibleExtentPercentage(1)
+			sb:SetScrollPercentage(0, true)
+		else
+			local visPct = math.max(0.05, math.min(0.99, listH / totalH))
+			local panPct = math.max(0.01, math.min(0.5, 48 / maxScroll))
+			sb:SetPanExtentPercentage(panPct)
+			sb:SetVisibleExtentPercentage(visPct)
+			sb:SetScrollPercentage(math.max(0, math.min(1, (scrollPx or 0) / maxScroll)), true)
+		end
+	else
+		ui.scrollTrack:SetShown(showScroll)
+		ui.scrollThumb:SetShown(showScroll)
+		if showScroll then
+			local trackH = ui.scrollTrack:GetHeight()
+			if trackH and trackH > 0 then
+				local thumbH = math.max(22, math.min(trackH, math.floor(trackH * (listH / totalH) + 0.5)))
+				local free = math.max(0, trackH - thumbH)
+				local pct = math.max(0, math.min(1, (scrollPx or 0) / maxScroll))
+				ui.scrollThumb:SetHeight(thumbH)
+				ui.scrollThumb:ClearAllPoints()
+				ui.scrollThumb:SetPoint("TOP", ui.scrollTrack, "TOP", 0, -math.floor(free * pct + 0.5))
+			end
+		end
+	end
+	ui.syncingScroll = false
+end
+
+function ns.IsPanelDockedInside()
+	return ui.docked == "inside"
+end
+
 local function AbovePins()
 	return WorldMapFrame:GetPinFrameLevelsManager():GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST") + 10
 end
 
+function ns.PanelFrame()
+	return ui.panel
+end
+
 function ns.UpdatePanel()
-	if not panel then return end
-	panel:SetShown(ns.db.panelOpen)
-	tab:SetAlpha(ns.db.panelOpen and .6 or 1)
+	if not ui.panel then return end
+	ui.panel:Show()
 end
 
 local function RefreshControls()
-	if not checks then return end   -- no panel: the map data isn't loaded
-	local f = ns.db.factions or {}
-	for k, t in ipairs(factionTicks) do t:SetChecked(f[k]) end
-	for key, t in pairs(checks) do t:SetChecked(ns.db[key]) end
-	local low = checks.hideLowLevel
-	if low then
-		low.text:SetText(ns.LowLevelLabel())
-		low.text:GetParent():SetWidth(low.text:GetStringWidth() + 26)
-	end
+	if not ui.ready then return end
+	UpdateChromeLayout()
+	ns.LayoutPanelRows()
 end
 ns.RefreshControls = RefreshControls
 
--- a line of the quest log's tick box and a label, clickable as a whole
-local function TickLine(parent, label, r, g, b, onClick, tooltip)
-	local btn = CreateFrame("Button", nil, parent)
-	btn:SetHeight(20)
-	local t = Tick(btn)
-	t.box:SetPoint("LEFT", 0, 0)
-	local text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	text:SetPoint("LEFT", t.box, "RIGHT", 4, 0)
-	text:SetText(label)
-	if r then text:SetTextColor(r, g, b) end
-	btn:SetWidth(text:GetStringWidth() + 26)
-	t.text = text
-	btn:SetScript("OnClick", onClick)
-	if tooltip then
-		btn:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine(text:GetText(), 1, 1, 1); GameTooltip:AddLine(tooltip, .9, .9, .9, true); GameTooltip:Show()
-		end)
-		btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
+---------------------------------------------------------------------------
+-- Widget Helpers & Horizontal-Split Panel Construction
+---------------------------------------------------------------------------
+local function ToolbarIconButton(parent, texturePath, tipTitle, tipBody, onClick, rightClick)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetSize(22, 22)
+	if rightClick then
+		b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	else
+		b:RegisterForClicks("LeftButtonUp")
 	end
-	return btn, t
+	b.icon = b:CreateTexture(nil, "ARTWORK")
+	b.icon:SetPoint("CENTER")
+	b.icon:SetSize(18, 18)
+	b.icon:SetTexture(texturePath)
+	b.icon:SetAlpha(0.78)
+	b.activeGlow = b:CreateTexture(nil, "OVERLAY")
+	b.activeGlow:SetPoint("CENTER")
+	b.activeGlow:SetSize(18, 18)
+	b.activeGlow:SetTexture(texturePath)
+	b.activeGlow:SetBlendMode("ADD")
+	b.activeGlow:SetAlpha(0.35)
+	b.activeGlow:Hide()
+	local hl = b:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetPoint("CENTER")
+	hl:SetSize(18, 18)
+	hl:SetTexture(texturePath)
+	hl:SetBlendMode("ADD")
+	hl:SetAlpha(0.45)
+	function b:SetActive(on)
+		local active = on == true
+		self.icon:SetAlpha(active and 1 or 0.78)
+		self.activeGlow:SetShown(active)
+	end
+	b:SetScript("OnClick", function(_, button) onClick(button) end)
+	b:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine(tipTitle, 1, .82, .2)
+		GameTooltip:AddLine(tipBody, .9, .9, .9, true)
+		GameTooltip:Show()
+	end)
+	b:SetScript("OnLeave", GameTooltip_Hide)
+	return b
 end
 
----------------------------------------------------------------------------
--- Build
----------------------------------------------------------------------------
+local function SmallPillButton(parent, label, width, onClick, tip)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetSize(width, 21)
+	local capW = 11
+	b.frame = ns.AddBrassPillSlices(b, "BACKGROUND", capW, nil, 0.96, 0.92, 0.86, 0.72)
+	b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	b.text:SetPoint("CENTER", 0, 0)
+	b.text:SetText(label)
+	b.hl = ns.AddBrassPillSlices(b, "HIGHLIGHT", capW, "ADD", 0.35)
+	b:SetScript("OnClick", function(self, button)
+		if self.isDisabled then return end
+		onClick(self, button)
+	end)
+	if tip then
+		b:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:AddLine(ns.StripCodes and ns.StripCodes(b.text:GetText() or "") or (b.text:GetText() or ""), 1, .82, .2)
+			GameTooltip:AddLine(tip, .9, .9, .9, true)
+			GameTooltip:Show()
+		end)
+		b:SetScript("OnLeave", GameTooltip_Hide)
+	end
+	return b
+end
+
 function ns.InitPanel()
-	D = ns.DATA
-	panel = CreateFrame("Frame", nil, WorldMapFrame)
-	panel:SetWidth(WIDTH)
+	local panel = CreateFrame("Frame", nil, WorldMapFrame)
+	ui.panel = panel
+	panel:SetWidth(math.max(WIDTH, (ns.db and ns.db.panelW) or WIDTH))
 	panel:SetFrameStrata(WorldMapFrame:GetFrameStrata())
 	panel:SetFrameLevel(AbovePins())
 	panel:SetClampedToScreen(true)
 	panel:EnableMouse(true)
+	panel:SetMovable(true)
+	panel:SetResizable(true)
+	if panel.SetResizeBounds then
+		panel:SetResizeBounds(WIDTH, MIN_H, 1400, 1000)
+	end
+	if panel.SetDontSavePosition then
+		panel:SetDontSavePosition(true)
+	end
+	panel:RegisterForDrag("LeftButton")
+	panel:SetScript("OnDragStart", BeginPanelMove)
+	panel:SetScript("OnDragStop", EndPanelDragOrResize)
+	panel:SetScript("OnSizeChanged", function(self, w, h)
+		if ui.dragging then return end
+		local needW = w and w < WIDTH - 0.5
+		local needH = ui.docked == "free" and h and h < MIN_H - 0.5
+		if needW or needH then
+			self:SetSize(needW and WIDTH or (w or WIDTH), needH and MIN_H or (h or MIN_H))
+		end
+	end)
 	panel:SetScript("OnUpdate", Dock)
 	local level = panel:GetFrameLevel()
 
-	-- the map's flat panel background and metal frame
-	local bg = CreateFrame("Frame", nil, panel, "FlatPanelBackgroundTemplate")
-	bg:SetPoint("TOPLEFT", 0, -2)
-	bg:SetPoint("BOTTOMRIGHT", 0, 2)
-	bg:SetFrameLevel(level - 1)   -- under the panel's own regions (title, divider, status); still above the map's pins
-	local border = CreateFrame("Frame", nil, panel, "NineSlicePanelTemplate")
-	border:SetFrameLevel(level + 30)   -- the template's own level (500) is under ours
-	NineSliceUtil.ApplyLayoutByName(border, "ButtonFrameTemplateNoPortrait")
+	local border = TryTemplate("Frame", nil, panel, "DialogBorderTranslucentTemplate")
+	if border then
+		border:SetAllPoints()
+	else
+		border = CreateFrame("Frame", nil, panel, BackdropTemplateMixin and "BackdropTemplate" or nil)
+		border:SetAllPoints()
+		border:SetFrameLevel(level)
+		border:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8X8",
+			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+			edgeSize = 32,
+			insets = { left = 11, right = 12, top = 12, bottom = 11 },
+		})
+		border:SetBackdropColor(0, 0, 0, 0.8)
+	end
+	ui.border = border
 
-	-- the title on a frame of its own above the border, as Blizzard's TitleContainer (the metal top edge would cover it)
-	local titleBar = CreateFrame("Frame", nil, panel)
-	titleBar:SetAllPoints()
-	titleBar:SetFrameLevel(level + 31)
-	local title = titleBar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	title:SetPoint("TOP", 0, -5)
+	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
+	title:SetPoint("TOP", 0, -15)
 	title:SetText("Dave's Map")
-	local close = CreateFrame("Button", nil, panel, "UIPanelCloseButtonDefaultAnchors")
-	close:SetFrameLevel(level + 31)
-	close:SetScript("OnClick", function() ns.db.panelOpen = false; ns.UpdatePanel() end)
 
-	search = CreateFrame("EditBox", nil, panel, "SearchBoxTemplate")
-	search:SetHeight(20)
-	search:SetPoint("TOPLEFT", PAD + 6, -32)
-	search:SetPoint("TOPRIGHT", -PAD, -32)
-	search:HookScript("OnTextChanged", RunSearch)
-
-	-- factions, on one line
-	factionTicks = {}
-	local prev
-	for k, fdef in ipairs(FACTIONS) do
-		local btn, t = TickLine(panel, fdef[1], fdef[2], fdef[3], fdef[4], function()
-			ns.db.factions[k] = not ns.db.factions[k]
-			RefreshControls(); ns.Refresh()
-		end)
-		if prev then btn:SetPoint("LEFT", prev, "RIGHT", 10, 0) else btn:SetPoint("TOPLEFT", PAD, -58) end
-		prev = btn
-		factionTicks[k] = t
-	end
-
-	-- quest filters
-	checks = {}
-	local CHECKS = {
-		{ "trackMyZone", "Track only my zone's quests", "The quest tracker follows the quests in your log for the zone you're in; the rest are untracked (they stay in your log). It changes as you enter a new zone; on a flight it waits until you land. The map's markers are not affected." },
-		{ "hideCompleted", "Hide completed quests", "Completed quests are dimmed; tick to hide them. (Matched to the game's quest IDs through pfQuest.)" },
-		{ "otherClasses", "Other classes' quests", "Show quests only other classes can take." },
-		{ "hideHighLevel", "Hide quests >5 levels above me", "Hide quests whose required level is more than 5 above yours. Quests up to 5 levels above you still show." },
-		{ "hideLowLevel", ns.LowLevelLabel(), "Hide quests whose required level is more than this many levels below yours. Set how many (1 to 5) in /dmap options." },
-	}
-	for n, def in ipairs(CHECKS) do
-		local btn, t = TickLine(panel, def[2], nil, nil, nil, function()
-			ns.db[def[1]] = not ns.db[def[1]]
-			RefreshControls(); ns.Refresh()
-			if def[1] == "trackMyZone" then ns.TrackZoneQuests() end   -- ticked on: follow this zone now
-		end, def[3])
-		btn:SetPoint("TOPLEFT", PAD, -80 - (n - 1) * 20)
-		checks[def[1]] = t
-	end
-
-	-- the quest log's divider, then the list on its parchment
-	local divider = panel:CreateTexture(nil, "ARTWORK")
-	divider:SetAtlas("QuestLog-frame-devider")
-	divider:SetPoint("TOPLEFT", 4, -182)
-	divider:SetPoint("TOPRIGHT", -4, -182)
-	divider:SetHeight(8)
-	status = panel:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	status:SetPoint("BOTTOMLEFT", PAD, PAD)
-	status:SetPoint("BOTTOMRIGHT", -PAD, PAD)
-	status:SetJustifyH("LEFT")
-	list = CreateFrame("Frame", nil, panel)
-	list:SetPoint("TOPLEFT", 6, -190)
-	list:SetPoint("BOTTOMRIGHT", -6, PAD + 34)
-	list:EnableMouseWheel(true)
-	list:SetScript("OnMouseWheel", function(_, delta) offset = offset - delta * 3; Render() end)
-	local parchment = list:CreateTexture(nil, "BACKGROUND")
-	parchment:SetAtlas("QuestLog-main-background")
-	parchment:SetAllPoints()
-	list.more = list:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	list.more:SetPoint("TOPRIGHT", list, "BOTTOMRIGHT", -4, -2)
-	list.more:SetText("scroll for more")
-	list:SetScript("OnSizeChanged", LayoutRows)
-
-	-- the tab on the map that brings the panel back
-	tab = CreateFrame("Button", nil, WorldMapFrame.ScrollContainer)
-	tab:SetSize(30, 30)
-	tab:SetPoint("BOTTOMLEFT", 6, 6)
-	tab:SetFrameLevel(AbovePins())
-	local tex = tab:CreateTexture(nil, "ARTWORK")
-	tex:SetAllPoints()
-	tex:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
-	tex:SetTexCoord(.08, .92, .08, .92)
-	local tabBorder = CreateFrame("Frame", nil, tab, "NineSlicePanelTemplate")
-	tabBorder:SetFrameLevel(tab:GetFrameLevel() + 1)
-	NineSliceUtil.ApplyLayoutByName(tabBorder, "InsetFrameTemplate")
-	tab:SetHighlightTexture("Interface\\Buttons\\WHITE8X8")
-	tab:GetHighlightTexture():SetVertexColor(1, 1, 1, .15)
-	tab:SetScript("OnClick", function() ns.db.panelOpen = not ns.db.panelOpen; ns.UpdatePanel() end)
-	tab:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT"); GameTooltip:AddLine("Dave's Map"); GameTooltip:AddLine("Search and filters", .9, .9, .9); GameTooltip:Show()
+	-- Title-bar drag strip: drag anywhere along the top header to move freely (double-click to re-dock beside map).
+	local dragBar = CreateFrame("Button", nil, panel)
+	dragBar:SetPoint("TOPLEFT", 12, -4)
+	dragBar:SetPoint("TOPRIGHT", -12, -4)
+	dragBar:SetHeight(32)
+	dragBar:SetFrameLevel(level + 2)
+	dragBar:RegisterForDrag("LeftButton")
+	dragBar:SetScript("OnDragStart", function() BeginPanelMove(panel) end)
+	dragBar:SetScript("OnDragStop", function() EndPanelDragOrResize(panel) end)
+	dragBar:SetScript("OnDoubleClick", function()
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		ns.ResetPanelPosition()
 	end)
-	tab:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-	BuildItems()
-	RefreshControls()
+	-- Bottom-right resize grip (enforces current width 628px as minimum width).
+	local resizeBtn = CreateFrame("Button", nil, panel)
+	resizeBtn:SetSize(14, 14)
+	resizeBtn:SetPoint("BOTTOMRIGHT", -3, 3)
+	resizeBtn:SetFrameLevel(level + 10)
+	resizeBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+	resizeBtn:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+	resizeBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+	resizeBtn:SetScript("OnMouseDown", function(_, button)
+		if button == "LeftButton" then BeginPanelResize(panel) end
+	end)
+	resizeBtn:SetScript("OnMouseUp", function(_, button)
+		if button == "LeftButton" then EndPanelDragOrResize(panel) end
+	end)
+
+	-----------------------------------------------------------------------
+	-- Slim Left Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon` + `Back`)
+	-----------------------------------------------------------------------
+	local leftRail = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+	ui.leftRail = leftRail
+	leftRail:SetWidth(RAIL_W)
+	leftRail:SetPoint("TOPLEFT", 12, -38)
+	leftRail:SetPoint("BOTTOMLEFT", 12, 12)
+	leftRail:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	leftRail:SetBackdropColor(0.03, 0.03, 0.05, 0.50)
+	leftRail:SetBackdropBorderColor(0.35, 0.28, 0.18, 0.55)
+
+	local slotTex = ns.MEDIA .. "slot"
+	for idx, td in ipairs(TAB_DEFS) do
+		local b = CreateFrame("Button", nil, leftRail)
+		b:SetSize(34, 34)
+		if idx == 1 then
+			b:SetPoint("TOP", leftRail, "TOP", 0, -6)
+		else
+			b:SetPoint("TOP", ui.tabs[TAB_DEFS[idx - 1].key], "BOTTOM", 0, -6)
+		end
+		b:RegisterForClicks("LeftButtonUp", "Button4Up")
+
+		b.frame = b:CreateTexture(nil, "BACKGROUND")
+		b.frame:SetAllPoints()
+		b.frame:SetTexture(slotTex)
+		b.frame:SetVertexColor(0.76, 0.70, 0.56, 0.90)
+
+		b.activeGlow = b:CreateTexture(nil, "BORDER")
+		b.activeGlow:SetAllPoints()
+		b.activeGlow:SetTexture(slotTex)
+		b.activeGlow:SetBlendMode("ADD")
+		b.activeGlow:SetAlpha(0.28)
+		b.activeGlow:Hide()
+
+		b.icon = b:CreateTexture(nil, "ARTWORK")
+		b.icon:SetSize(22, 22)
+		b.icon:SetPoint("CENTER", 0, 0)
+		b.icon:SetTexture(ns.MEDIA .. td.icon)
+		b.icon:SetAlpha(0.76)
+
+		b.activeBar = b:CreateTexture(nil, "OVERLAY")
+		b.activeBar:SetWidth(3)
+		b.activeBar:SetPoint("TOPLEFT", -4, -3)
+		b.activeBar:SetPoint("BOTTOMLEFT", -4, 3)
+		b.activeBar:SetColorTexture(1, 0.84, 0.25, 1)
+		b.activeBar:Hide()
+
+		local hl = b:CreateTexture(nil, "HIGHLIGHT")
+		hl:SetAllPoints()
+		hl:SetTexture(slotTex)
+		hl:SetBlendMode("ADD")
+		hl:SetAlpha(0.35)
+
+		b:SetScript("OnClick", function(_, button)
+			if button == "Button4" then
+				ns.GoBack()
+				return
+			end
+			ns.SelectSidebarTab(td.key)
+		end)
+		b:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:AddLine(td.label, 1, .82, .2)
+			GameTooltip:AddLine(td.tip, .9, .9, .9, true)
+			GameTooltip:Show()
+		end)
+		b:SetScript("OnLeave", GameTooltip_Hide)
+		ui.tabs[td.key] = b
+	end
+
+	local backBtn = CreateFrame("Button", nil, leftRail)
+	ui.backBtn = backBtn
+	backBtn:SetSize(34, 34)
+	backBtn:SetPoint("BOTTOM", leftRail, "BOTTOM", 0, 6)
+	backBtn:RegisterForClicks("LeftButtonUp", "Button4Up")
+	backBtn.frame = backBtn:CreateTexture(nil, "BACKGROUND")
+	backBtn.frame:SetAllPoints()
+	backBtn.frame:SetTexture(slotTex)
+	backBtn.frame:SetVertexColor(0.86, 0.80, 0.66, 0.94)
+	backBtn.activeBg = backBtn:CreateTexture(nil, "BORDER")
+	backBtn.activeBg:SetAllPoints()
+	backBtn.activeBg:SetTexture(slotTex)
+	backBtn.activeBg:SetBlendMode("ADD")
+	backBtn.activeBg:SetAlpha(0.28)
+	backBtn.activeBg:Hide()
+	backBtn.icon = backBtn:CreateTexture(nil, "ARTWORK")
+	backBtn.icon:SetSize(20, 20)
+	backBtn.icon:SetPoint("CENTER", 0, 0)
+	backBtn.icon:SetTexture(ns.MEDIA .. "back")
+	backBtn.hl = backBtn:CreateTexture(nil, "HIGHLIGHT")
+	backBtn.hl:SetAllPoints()
+	backBtn.hl:SetTexture(slotTex)
+	backBtn.hl:SetBlendMode("ADD")
+	backBtn.hl:SetAlpha(0.35)
+	backBtn:SetScript("OnClick", function(self)
+		if self.isDisabled then return end
+		ns.GoBack()
+		if GameTooltip:IsShown() and GameTooltip:GetOwner() == self then
+			local onEnter = self:GetScript("OnEnter")
+			if onEnter then onEnter(self) end
+		end
+	end)
+	backBtn:SetScript("OnEnter", function(self)
+		local _, tTitle, tBody = ns.DescribeBackTarget()
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine(tTitle, 1, .82, .2)
+		GameTooltip:AddLine(tBody, .9, .9, .9, true)
+		GameTooltip:Show()
+	end)
+	backBtn:SetScript("OnLeave", GameTooltip_Hide)
+
+	-----------------------------------------------------------------------
+	-- Right Visual Content Pane
+	-----------------------------------------------------------------------
+	local content = CreateFrame("Frame", nil, panel)
+	ui.content = content
+	content:SetPoint("TOPLEFT", leftRail, "TOPRIGHT", 2, 0)
+	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 12)
+
+	ui.styleBtn = ToolbarIconButton(content, ns.MEDIA .. "gear", "Window Style", "Customize Window scale, Background opacity, Background style, and Pin size (same styling options as Dave's Sack).", function()
+		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
+	end)
+	ui.styleBtn:SetPoint("TOPRIGHT", -LIST_PAD, -4)
+
+	ui.pinBtn = ToolbarIconButton(content, ns.MEDIA .. "waypoint", "Drop Waypoint", "Left-click: arm map pin placement (or Ctrl-click the map anytime).\nRight-click: clear active waypoint.", function(button)
+		ns.TogglePinMode(button == "RightButton")
+		RefreshControls()
+	end, true)
+	ui.pinBtn:SetPoint("RIGHT", ui.styleBtn, "LEFT", -4, 0)
+
+	ui.findBtn = ToolbarIconButton(content, ns.MEDIA .. "findme", "Find Me", "Glide the map to your character's current position.", function()
+		ns.FindPlayer()
+	end)
+	ui.findBtn:SetPoint("RIGHT", ui.pinBtn, "LEFT", -4, 0)
+
+	local search = CreateFrame("EditBox", nil, content, "SearchBoxTemplate")
+	ui.search = search
+	search:SetHeight(20)
+	search:SetPoint("TOPLEFT", LIST_PAD + 4, -5)
+	search:SetPoint("RIGHT", ui.findBtn, "LEFT", -6, 0)
+	search:HookScript("OnTextChanged", ns.RunSearch)
+
+	local layerBar = CreateFrame("Frame", nil, content, "BackdropTemplate")
+	ui.layerBar = layerBar
+	layerBar:SetHeight(30)
+	layerBar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	layerBar:SetBackdropColor(0.11, 0.10, 0.07, 0.92)
+	layerBar:SetBackdropBorderColor(0.68, 0.54, 0.25, 0.85)
+	layerBar.actionBtn = SmallPillButton(layerBar, "|cffe8d8a8Clear|r", 62, function(self)
+		if self.mode == "search" then
+			ns.SetSearchQuiet("")
+			ns.OnLayerChanged()
+		elseif self.mode == "unfocus" then
+			ns.ClearQuestFocus()
+		end
+	end, "Clear search or focused quest filter.")
+	layerBar.actionBtn:SetPoint("RIGHT", -6, 0)
+	layerBar.label = layerBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	layerBar.label:SetPoint("LEFT", 10, 0)
+	layerBar.label:SetPoint("RIGHT", layerBar.actionBtn, "LEFT", -8, 0)
+	layerBar.label:SetJustifyH("LEFT")
+	layerBar.label:SetWordWrap(false)
+	layerBar:Hide()
+
+	local zoneBar = CreateFrame("StatusBar", nil, content, "BackdropTemplate")
+	ui.zoneBar = zoneBar
+	zoneBar:SetHeight(22)
+	zoneBar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+	zoneBar:SetStatusBarColor(0.28, 0.68, 0.34, 0.85)
+	zoneBar:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	zoneBar:SetBackdropColor(0.05, 0.05, 0.07, 0.9)
+	zoneBar:SetBackdropBorderColor(0.5, 0.4, 0.22, 0.85)
+	zoneBar.right = zoneBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	zoneBar.right:SetPoint("RIGHT", -8, 0)
+	zoneBar.right:SetJustifyH("RIGHT")
+	zoneBar.left = zoneBar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	zoneBar.left:SetPoint("LEFT", 8, 0)
+	zoneBar.left:SetPoint("RIGHT", zoneBar.right, "LEFT", -6, 0)
+	zoneBar.left:SetJustifyH("LEFT")
+	zoneBar.left:SetWordWrap(false)
+	zoneBar:Hide()
+
+	ui.divider = content:CreateTexture(nil, "ARTWORK")
+	ui.divider:SetColorTexture(1, 1, 1, 0.14)
+	ui.divider:SetHeight(1)
+
+	local list = CreateFrame("Frame", nil, content)
+	ui.list = list
+	list:SetClipsChildren(true)
+	list:EnableMouse(true)
+	list:EnableMouseWheel(true)
+	list:SetScript("OnMouseUp", function(_, button)
+		if button == "Button4" then ns.GoBack() end
+	end)
+	list:SetScript("OnMouseWheel", function(_, delta)
+		ui.scrollPx = (ui.scrollPx or 0) - delta * 48
+		ns.RenderPanelRows()
+		if ui.lastKey then ui.scrollByKey[ui.lastKey] = ui.scrollPx end
+	end)
+	local listBg = list:CreateTexture(nil, "BACKGROUND")
+	listBg:SetColorTexture(0, 0, 0, 0.08)
+	listBg:SetAllPoints()
+	ui.listBg = listBg
+	list:SetScript("OnSizeChanged", ns.LayoutPanelRows)
+
+	-- Right-side Blizzard MinimalScrollBar (same scrollbar as Dave's Sack's ScrollFrameTemplate),
+	-- with a slim draggable-thumb fallback if the template isn't available.
+	local sb = TryTemplate("EventFrame", nil, content, "MinimalScrollBar")
+	if sb and sb.RegisterCallback and sb.SetVisibleExtentPercentage then
+		ui.scrollBar = sb
+		ui.nativeScrollBar = true
+		sb:SetPoint("TOPLEFT", list, "TOPRIGHT", 4, -2)
+		sb:SetPoint("BOTTOMLEFT", list, "BOTTOMRIGHT", 4, 2)
+		if sb.SetHideIfUnscrollable then sb:SetHideIfUnscrollable(true) end
+		sb:RegisterCallback("OnScroll", function(_, pct)
+			if ui.syncingScroll then return end
+			local listH = list:GetHeight() or 0
+			local maxScroll = math.max(0, (ui.totalH or 0) - listH)
+			ui.scrollPx = math.max(0, math.min(maxScroll, (pct or 0) * maxScroll))
+			if ui.lastKey then ui.scrollByKey[ui.lastKey] = ui.scrollPx end
+			ns.RenderPanelRows()
+		end, list)
+	else
+		local track = content:CreateTexture(nil, "ARTWORK")
+		track:SetWidth(4)
+		track:SetPoint("TOP", list, "TOPRIGHT", 8, -2)
+		track:SetPoint("BOTTOM", list, "BOTTOMRIGHT", 8, 2)
+		track:SetColorTexture(1, 1, 1, 0.14)
+		local thumb = CreateFrame("Button", nil, content)
+		thumb:SetWidth(10)
+		thumb:SetFrameLevel(content:GetFrameLevel() + 6)
+		local tt = thumb:CreateTexture(nil, "ARTWORK")
+		tt:SetPoint("TOP"); tt:SetPoint("BOTTOM"); tt:SetWidth(4)
+		tt:SetColorTexture(0.55, 0.55, 0.58, 0.95)
+		local th = thumb:CreateTexture(nil, "HIGHLIGHT")
+		th:SetPoint("TOP"); th:SetPoint("BOTTOM"); th:SetWidth(4)
+		th:SetColorTexture(1, 0.82, 0, 0.6)
+		local function DragThumb(self)
+			if IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then
+				self:SetScript("OnUpdate", nil)
+				return
+			end
+			local _, cy = GetCursorPosition()
+			cy = cy / self:GetEffectiveScale()
+			local free = (track:GetHeight() or 0) - (self:GetHeight() or 0)
+			local maxScroll = math.max(0, (ui.totalH or 0) - (list:GetHeight() or 0))
+			if free > 0 and maxScroll > 0 then
+				ui.scrollPx = math.max(0, math.min(maxScroll, self.startScroll + (self.startY - cy) * maxScroll / free))
+				if ui.lastKey then ui.scrollByKey[ui.lastKey] = ui.scrollPx end
+				ns.RenderPanelRows()
+			end
+		end
+		thumb:SetScript("OnMouseDown", function(self)
+			local _, cy = GetCursorPosition()
+			self.startY = cy / self:GetEffectiveScale()
+			self.startScroll = ui.scrollPx or 0
+			self:SetScript("OnUpdate", DragThumb)
+		end)
+		thumb:SetScript("OnMouseUp", function(self) self:SetScript("OnUpdate", nil) end)
+		thumb:SetScript("OnHide", function(self) self:SetScript("OnUpdate", nil) end)
+		ui.scrollBar = thumb
+		ui.scrollTrack = track
+		ui.scrollThumb = thumb
+		ui.nativeScrollBar = false
+		track:Hide()
+		thumb:Hide()
+	end
+
+	ui.ready = true
+	panel:SetScript("OnMouseUp", function(_, button)
+		if button == "Button4" then ns.GoBack() end
+	end)
+	panel:SetScript("OnShow", function()
+		Dock()
+		if ui.dirtyHidden or #ui.items == 0 then
+			ns.OnLayerChanged()
+		else
+			RefreshControls()
+		end
+	end)
+	panel:SetScript("OnHide", function()
+		if ui.dragging then EndPanelDragOrResize(panel) end
+		if ns.HideStyleDialog then ns.HideStyleDialog() end
+	end)
+	ns.ApplyPanelStyle()
 	ns.UpdatePanel()
-	panel:SetScript("OnShow", RefreshControls)
+	if panel:IsVisible() then ns.OnLayerChanged() end
 end

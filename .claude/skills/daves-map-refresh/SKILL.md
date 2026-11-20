@@ -37,13 +37,13 @@ py -3 "wowaddons/daves_map/tools/Update-MapData.py"
 
 ## 2. Check the result
 
-- Expect `> 5,000` placed Forever quests (`Quest` + `Repeatable`), `> 5,000` `endp` turn-in links, `> 4,000` prerequisite links, and `> 4,000` objective links across all 18 categories.
+- Expect `> 5,000` placed Forever quests (`Quest` + `Repeatable`), `~1,900+` quests with `~2,500+` item rewards (`D.rew` & `D.iname`), `> 5,000` `endp` turn-in links, `> 3,000` clean prerequisite links (`D.pre`) + `D.nxt` `nextQuestInChain` links, `> 4,000` objective links, `~300+` rares with notable drops, and `35` Classic + WoW: Forever dungeons/raids (`D.dungeons[uiMapID]`) with `700+` dungeon quests across all 18 categories.
 - Run the **wow-addon-test** validator on both `wowaddons/daves_map` and `wowaddons/daves_map_data`:
   ```powershell
   py -3 "wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py" -Path "wowaddons/daves_map" -Flavor forever -NoInfo
   py -3 "wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py" -Path "wowaddons/daves_map_data" -Flavor forever -NoInfo
   ```
-- If `Update-MapData.py` or any handwritten `.lua` file changed, also run `Prepare-WowReview.py -Path "wowaddons/daves_map"` and complete the advisor code review.
+- If `Update-MapData.py` or any handwritten `.lua` file changed, also run `Prepare-WowReview.py -Path "wowaddons/daves_map"` and complete the code review.
 
 ## 3. Tell the user
 

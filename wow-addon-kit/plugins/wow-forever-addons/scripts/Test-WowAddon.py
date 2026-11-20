@@ -48,6 +48,9 @@ LOCAL_WARN_THRESHOLD = 175
 UPVALUE_WARN_THRESHOLD = 55
 LUA_MAX_LOCALS = 200
 LUA_MAX_UPVALUES = 60
+FILE_SIZE_INFO_LINES = 1200
+GENERATED_DATA_RX = re.compile(r"(^|\\)(Data\.lua|LootDB\.lua|Finds\.lua|Data\\)", re.I)
+VENDOR_MOD_RX = re.compile(r"(^|\\)Stitch\\", re.I)
 LUA_KEYWORDS = {
     "and", "break", "do", "else", "elseif", "end", "false", "for", "function",
     "if", "in", "local", "nil", "not", "or", "repeat", "return", "then",
@@ -414,7 +417,7 @@ def check_lua_compiler_limits(raw, rel, add, api=None, defined=None):
             maybe_resolve(idx)
             idx += 1
     except Exception:
-        return
+        return {"chunk_locals": all_funcs[0]["max_locals"], "max_upvalues": 0}
 
     for fn in all_funcs:
         nups = len(fn["upvalues"])
@@ -433,6 +436,10 @@ def check_lua_compiler_limits(raw, rel, add, api=None, defined=None):
         if nm in all_local_names and nm not in known_globals and (nm, ln) not in seen_leaked:
             seen_leaked.add((nm, ln))
             add("error", "out-of-scope-local", rel, ln, f"'{nm}' was declared local in another block/function and is out of scope here (resolves to nil global '{nm}'). Expose it on `ns.{nm}` or hoist the local declaration.")
+    return {
+        "chunk_locals": all_funcs[0]["max_locals"],
+        "max_upvalues": max((len(fn["upvalues"]) for fn in all_funcs), default=0),
+    }
 
 
 def list_lua(addon_dir):
@@ -728,6 +735,7 @@ def check(path, flavors, no_luacheck=False):
             uses_snap = True
 
     all_text = []
+    file_metrics = {}
     slash_defs = {}
     slash_handlers = set()
     uses_addon_msg = None
@@ -738,13 +746,36 @@ def check(path, flavors, no_luacheck=False):
         if LIB_RX.search(rel):
             continue
         is_kit_copy = name.lower() == kit_dialog.lower()
+        is_generated_data = bool(GENERATED_DATA_RX.search(rel))
         raw = read_text(full)
         all_text.append(raw)
         raw_lines = raw.split("\n")
         code_lines = get_code_lines(raw)
         file_text = "\n".join(code_lines)
+        limits_info = {"chunk_locals": 0, "max_upvalues": 0}
         if not is_kit_copy:
-            check_lua_compiler_limits(raw, rel, add, api, defined)
+            if not is_generated_data:
+                limits_info = check_lua_compiler_limits(raw, rel, add, api, defined) or limits_info
+            header_head = "\n".join(raw_lines[:12])
+            if (
+                not is_generated_data
+                and not VENDOR_MOD_RX.search(rel)
+                and len(raw_lines) > FILE_SIZE_INFO_LINES
+                and not ps_search(header_head, r"--\s*file-size:\s*ok")
+            ):
+                add(
+                    "info",
+                    "file-size",
+                    rel,
+                    1,
+                    f"{len(raw_lines)} lines (> {FILE_SIZE_INFO_LINES}); split distinct responsibilities into focused modules before adding new subsystems.",
+                )
+        file_metrics[rel] = {
+            "Lines": len(raw_lines),
+            "ChunkLocals": limits_info["chunk_locals"],
+            "MaxUpvalues": limits_info["max_upvalues"],
+            "Generated": is_generated_data,
+        }
         locals_ = set()
         for match in re.finditer(r"\blocal\s+(?:function\s+)?([A-Za-z_][\w]*(?:\s*,\s*[A-Za-z_][\w]*)*)", file_text):
             for item in re.split(r"\s*,\s*", match.group(1)):
@@ -1074,6 +1105,7 @@ def check(path, flavors, no_luacheck=False):
         "Warnings": warns,
         "Findings": findings,
         "ApiBranch": api_branch,
+        "FileMetrics": file_metrics,
     }
 
 

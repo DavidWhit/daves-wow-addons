@@ -1,6 +1,6 @@
 ---
 name: wow-addon-test
-description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck), an advisor-mode code review whose fixes wait for the user's approval, plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, when the game reports an error, "action blocked" or "only available to the Blizzard UI" (it reads the recorded script errors first, then the client's taint.log), or when asked to check, lint, verify or debug a WoW addon.
+description: Test a World of Warcraft addon for WoW Forever - static validation against Blizzard's real Forever API (TOC, missing files, removed/moved APIs, unknown events, combat-log use, secret-value misuse, slash commands, luacheck), a packet-driven code review that auto-applies clear fixes and lists what was fixed (prompting only on genuine design/direction trade-offs), plus an in-game test checklist (reload, script errors, taint log). Use after any addon change, when an addon is out of date or broken, when the game reports an error, "action blocked" or "only available to the Blizzard UI" (it reads the recorded script errors first, then the client's taint.log), or when asked to check, lint, verify or debug a WoW addon.
 argument-hint: "[addon folder] [flavors]"
 ---
 
@@ -82,6 +82,7 @@ What each rule means and how to fix it:
 | `local-limit` | error/warn | Error: >200 active locals in a file chunk or function (Lua 5.1 refuses to compile the file). Warn: >=175 active locals. Move locals into a table, wrap subsystems in `do ... end`, or split files |
 | `upvalue-limit` | error/warn | Error: >60 upvalues captured by a function (Lua 5.1 refuses to compile the file: `has more than 60 upvalues`). Warn: >=55 upvalues. Split helper functions out or group state into tables |
 | `out-of-scope-local` | error | An identifier declared `local` in another `do ... end` block or function in the same file is referenced outside its lexical scope (resolving to a `nil` global). Expose it on `ns.*` or hoist the `local` declaration |
+| `file-size` | info | Handwritten `.lua` file exceeds `1200` lines (excluding generated `Data.lua` / `Data\*` and `EditModeDialog.lua`; suppressible with `-- file-size: ok`). Split distinct responsibilities into focused modules before adding new subsystems |
 | `editmode-dialog` | error/warn | Error: the addon joins Edit Mode but has no `EditModeDialog.lua`. Copy the kit's `templates/editmode/EditModeDialog.lua` in, list it after `Core.lua`. Warn: the copy was edited. Restore the kit's version and make the change in the kit instead |
 | `editmode-snap` | error/warn | Error: hand-rolled grid snapping (`gridSpacing`, `IsSnapEnabled`, `EditModeMagnetismManager`). Warn: a frame dragged without the kit's snapping. Use `ns.EditMode.Attach`, or `ns.EditMode.SnapRect` / `SnapEdge` in the drag's OnUpdate, so it snaps like Blizzard's frames |
 | `editmode-ui` | error | A hand-built panel, slider or checkbox in an Edit Mode addon. Rebuild it with `ns.EditMode.CreateDialog` (see the **wow-forever-api** skill). For a window that isn't Edit Mode settings (a bag window, say), end the line with `-- editmode-ui: ok` |
@@ -95,9 +96,9 @@ Fix errors first, re-run until clean, then fix warnings. Info notes are context;
 
 If it says the API index or luacheck is missing, run `scripts/Install-WowDevTools.py` (see the **wow-addon-setup** skill).
 
-## 2. Code review (always, advisor mode — packet-driven)
+## 2. Code review (always, packet-driven — auto-apply clear fixes, ask only on direction trade-offs)
 
-Build the pre-annotated review packet first (this runs `Test-WowAddon.py` in-process, scopes to `git diff`, skips unmodified `EditModeDialog.lua`, extracts `<addon>/NOTES.md` rules & skipped items, and pre-annotates every Forever API/method/event in scope):
+Build the pre-annotated review packet first (this runs `Test-WowAddon.py` in-process, reports `ModuleHealth` line/local/upvalue counts for touched files, scopes to `git diff`, skips unmodified `EditModeDialog.lua`, extracts `<addon>/NOTES.md` rules & skipped items, and pre-annotates every Forever API/method/event in scope):
 
 ```powershell
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Prepare-WowReview.py" -Path "<addon folder>" [-Flavor forever,...] [-Full]
@@ -106,19 +107,17 @@ py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Prepare-WowReview.py" -Path "<addon folder>
 Pass `-Full` only for a brand-new untracked addon, before a release, or when the user explicitly asks for a full-addon audit. Then follow `RecommendedMode` from the packet header:
 
 - **`inline` (small, low-risk diffs: <=40 changed lines across <=2 files, 0 validator errors/warnings, no taint/secure/secret triggers):**
-  Do **not** spawn a subagent — you already hold the edited files and packet in context. Review the diff yourself against the semantic checklist in `agents/wow-addon-reviewer.md` and emit the exact advisor report (`Confirmed` / `Suspected` / `Recommendation` / `Questions`) directly.
+  Do **not** spawn a subagent — you already hold the edited files and packet in context. Review the diff yourself against the semantic checklist in `agents/wow-addon-reviewer.md`.
 - **`subagent-diff` or `subagent-full`:**
   - **Claude Code:** Launch `subagent_type: "wow-forever-addons:wow-addon-reviewer"`.
   - **Antigravity / other harnesses:** Invoke a read-only reviewer subagent (`define_subagent` with `EnableWriteTools: false` and `SystemPrompt` from `wow-addon-kit/plugins/wow-forever-addons/agents/wow-addon-reviewer.md`, or `research` subagent instructed to follow `agents/wow-addon-reviewer.md`).
   - In either harness, **paste the `Prepare-WowReview.py` packet into the subagent's prompt** (along with a one-line summary of what changed). Because the packet already includes validator results, line-numbered diffs, `NOTES.md` constraints, and API secret/taint metadata, the reviewer finishes in 1–3 turns instead of re-reading the whole addon.
 
-In **every** mode (`inline`, `subagent-diff`, or `subagent-full`), advisor rules apply strictly:
+In **every** mode (`inline`, `subagent-diff`, or `subagent-full`), handle findings as follows:
 
-1. Show the user the numbered findings (`Confirmed` / `Suspected`), recommendation, and any questions. Keep them verbatim or tightly condensed, and never drop a finding.
-2. **Stop and wait for the user's answer.** Don't apply any reviewer finding until the user says which ones to apply ("apply 1, 3", "all", "none").
-3. Apply exactly what they approved, re-run `Test-WowAddon.py -NoInfo`, and say what changed.
-
-Fixing the validator's own deterministic errors in step 1 doesn't need to wait. Design changes, behaviour trade-offs and anything marked suspect always do.
+1. **Auto-apply clear, unambiguous `Confirmed` fixes immediately** (bugs, secret-value/taint guards, missing combat-lockdown checks, typos, layout clipping, performance cleanups — while still respecting `<addon>/NOTES.md` so previously skipped/declined items are never re-applied).
+2. Re-run `Test-WowAddon.py -NoInfo` after applying fixes to verify `0` errors and `0` warnings, then **concisely list what was fixed** in your report to the user.
+3. **Only prompt and wait for the user** when there is **no clear one-way-or-the-other solution** (`Needs Direction` / `Suspected` findings: genuine UX/design trade-offs, competing approaches, or ambiguous intended behaviour that requires user direction).
 
 ## 3. In-game test (tell the user these steps; you can't run the client)
 
@@ -133,4 +132,4 @@ When the user pastes an error, find the file:line, explain the cause in one sent
 
 ## 4. Report
 
-Say what was checked (flavors, API commit shown in the first line of output), the error/warning counts before and after, which reviewer findings were applied, skipped or are still waiting on the user, and which in-game steps still need the user.
+Say what was checked (flavors, API commit shown in the first line of output), the error/warning counts before and after, a concise bulleted list of the clear review fixes that were applied, any `Needs Direction` / `Suspected` items that actually require a decision from the user, and which in-game steps to test.

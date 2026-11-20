@@ -8,10 +8,38 @@
 local ADDON, ns = ...
 
 ns.VERSION = (C_AddOns and C_AddOns.GetAddOnMetadata(ADDON, "Version")) or "dev"
+ns.MEDIA = "Interface\\AddOns\\daves_map\\Media\\"
+
+-- Map UI audio helper: plays at most one click sound per frame unless `force` is true, and suppresses sounds
+-- inside `ns.WithMutedSound` when mirroring a quest selection triggered by Blizzard's own UI.
+local soundState = { at = nil, muted = false }
+
+function ns.Sound(name, force)
+	local now = GetTime()
+	if soundState.muted or (soundState.at == now and not force) then return end
+	local id = SOUNDKIT and SOUNDKIT[name]
+	if id then
+		PlaySound(id)
+		soundState.at = now
+	end
+end
+
+function ns.WithMutedSound(fn)
+	local was = soundState.muted
+	soundState.muted = true
+	xpcall(fn, CallErrorHandler)
+	soundState.muted = was
+end
 
 -- Quest log and super-tracking helpers (Forever C_QuestLog / C_SuperTrack / C_Map APIs).
 function ns.QuestLogIndex(questID)
 	return C_QuestLog.GetLogIndexForQuestID(questID)
+end
+
+function ns.QuestInLog(questID)
+	if type(questID) ~= "number" or questID == 0 or issecretvalue(questID) then return false end
+	if C_QuestLog.IsOnQuest then return C_QuestLog.IsOnQuest(questID) == true end
+	return C_QuestLog.GetLogIndexForQuestID(questID) ~= nil
 end
 
 function ns.QuestTitle(questID)
@@ -26,6 +54,23 @@ end
 
 function ns.CompletedQuestIDs()
 	return C_QuestLog.GetAllCompletedQuestIDs()
+end
+
+-- Per-character quest completion check: excludes Warband/account-only completions where
+-- C_QuestLog.IsQuestFlaggedCompleted(questID) is false, quests currently in this character's log,
+-- and account-wide quests unless turned in by this character in daves_mapCharDB.doneQuests.
+function ns.IsCharQuestCompleted(questID)
+	if type(questID) ~= "number" or questID == 0 or issecretvalue(questID) then return false end
+	if ns.QuestInLog(questID) then return false end
+	if C_QuestLog.IsQuestFlaggedCompleted(questID) ~= true then return false end
+	if C_QuestLog.IsAccountQuest and C_QuestLog.IsAccountQuest(questID) == true then
+		return (daves_mapCharDB and daves_mapCharDB.doneQuests and daves_mapCharDB.doneQuests[questID]) == true
+	end
+	return true
+end
+
+function ns.ShowObjectiveTargets()
+	return ns.DATA ~= nil and ns.db ~= nil
 end
 
 function ns.RequestQuestTitle(questID)
@@ -45,7 +90,7 @@ function ns.QuestComplete(questID)
 end
 
 function ns.QuestReady(questID)
-	return C_QuestLog.ReadyForTurnIn(questID) and true or false
+	return C_QuestLog.ReadyForTurnIn(questID) == true
 end
 
 function ns.QuestUiMapID(questID)
@@ -87,16 +132,68 @@ ns.NO_DATA = "Tell Dave to give me the data file."   -- shown in chat and on the
 
 local DEFAULTS = {
 	enabled = true,         -- draw the layer on the world map
-	panelOpen = true,       -- the search and filter panel beside the map; its X, the map tab, /dmap panel and Options all set it
+	panelTab = "layers",    -- active left-rail tab: "layers" | "zone" | "dungeon"
 	pinScale = 1.0,         -- pin size
-	hideCompleted = false,  -- completed quests are dimmed; hidden when this is on
-	otherClasses = false,   -- show quests only other classes can take
+	panelScale = 1.0,       -- Dave's Map window scale (0.5..1.5, matching daves_sack)
+	background = 0.8,       -- Dave's Map background opacity (0.2..1.0, matching daves_sack)
+	backgroundStyle = "dark", -- "dark" | "dialog" | "darkdialog" | "marble" | "rock" (matching daves_sack)
+	hideCompleted = false,  -- completed quests show a green checkmark; hidden when this is on
 	trackMyZone = true,     -- the quest tracker follows only your log's quests for the zone you're in (Tracker.lua)
 	focusQuest = true,      -- a click on a tracked quest focuses it (again: unfocuses); the map then shows only its pins
-	hideHighLevel = false,  -- hide quests more than 5 levels above yours
-	hideLowLevel = false,   -- hide quests well below your level
-	lowLevelGap = 5,        -- ...more than this many levels below it (1-5)
+	mapBanner = true,       -- top-center zone level bracket & coordinates pill on the map canvas
+	questSort = "lvl",      -- "lvl" | "xp" | "starter" | "name"
+	questSortAsc = true,    -- sort direction for questSort
 }
+
+-- Same 5 Blizzard dialog backgrounds offered by daves_sack.
+ns.BACKGROUND_STYLES = {
+	{ key = "dark",       name = "Dark" },
+	{ key = "dialog",     name = "Light paper",  file = "Interface\\DialogFrame\\UI-DialogBox-Background", tile = true },
+	{ key = "darkdialog", name = "Dark paper",   file = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark", tile = true },
+	{ key = "marble",     name = "Marble",       file = "Interface\\FrameGeneral\\UI-Background-Marble", tile = true },
+	{ key = "rock",       name = "Rock",         file = "Interface\\FrameGeneral\\UI-Background-Rock", tile = true },
+}
+
+function ns.BackgroundStyle(key)
+	for _, s in ipairs(ns.BACKGROUND_STYLES) do
+		if s.key == key then return s end
+	end
+	return ns.BACKGROUND_STYLES[1]
+end
+
+local LAYER_EXCLUDED_ICONS = {
+	quest = true,
+	repeatable = true,
+	turnin = true,
+	quest_objective = true,
+}
+
+function ns.IsCategoryToggleableInLayers(cat)
+	return cat ~= nil and not LAYER_EXCLUDED_ICONS[cat.icon]
+end
+
+function ns.IsLayerCatOn(catId)
+	return (ns.db and ns.db.layerOn and ns.db.layerOn[catId]) == true
+end
+
+function ns.SetAllOptionalLayers(on)
+	local D, db = ns.DATA, ns.db
+	if not db then return end
+	if type(db.layerOn) ~= "table" then db.layerOn = {} else wipe(db.layerOn) end
+	if on and D and D.cats then
+		for _, cat in ipairs(D.cats) do
+			if ns.IsCategoryToggleableInLayers(cat) then
+				db.layerOn[cat.id] = true
+			end
+		end
+	end
+end
+
+-- Default faction checkboxes for this character: Alliance + Neutral (or Horde + Neutral).
+function ns.DefaultFactions()
+	local faction = UnitFactionGroup and UnitFactionGroup("player")
+	return { [1] = faction ~= "Horde", [2] = faction == "Horde", [3] = true }
+end
 
 function ns.Print(...)
 	print("|cff33ff99" .. ADDON .. "|r:", ...)
@@ -127,47 +224,98 @@ function ns:ADDON_LOADED(name)
 	for k, v in pairs(DEFAULTS) do
 		if daves_mapDB[k] == nil then daves_mapDB[k] = v end
 	end
-	if type(daves_mapDB.hidden) ~= "table" then daves_mapDB.hidden = {} end   -- [Map Genie category id] = true: off
+	daves_mapDB.hidden = nil           -- replaced by layerOn in 0.8.0 (only tracked quest objectives draw by default)
+	if type(daves_mapDB.layerOn) ~= "table" then daves_mapDB.layerOn = {} end -- [category id] = true: optional non-quest POI layer on
 	if type(daves_mapDB.pinned) ~= "table" then daves_mapDB.pinned = {} end   -- [questID] = true: stays tracked across zones
 	if type(daves_mapDB.questTitles) ~= "table" then daves_mapDB.questTitles = {} end   -- [questID] = title: Forever quest IDs -> titles
+	if type(daves_mapDB.questRewards) ~= "table" then daves_mapDB.questRewards = {} end -- [questID] = { itemID, ... } from live client
+	if type(daves_mapDB.zoneFold) ~= "table" then daves_mapDB.zoneFold = { locked = true, done = true } end
 	daves_mapDB.myZoneOnly = nil   -- 0.3.3's map filter, replaced by trackMyZone in 0.3.4
 	daves_mapDB.readyCollapsed = nil   -- the ready section opens expanded every session (Tracker.lua)
 	daves_mapDB.readySection = nil     -- 0.3.4's tick: the ready section is always on now
+	daves_mapDB.autoWaypoint = nil     -- removed in 0.7.2 so tracker focus & pinning stay 100% native
+	daves_mapDB.filterDrawer = nil     -- removed in 0.7.3: faction & completed toggles sit directly on the sidebar
+	daves_mapDB.otherClasses = nil     -- removed in 0.7.3: all quests for checked factions are shown
+	daves_mapDB.hideHighLevel = nil    -- removed in 0.7.3: all quests for checked factions are shown
+	daves_mapDB.hideLowLevel = nil     -- removed in 0.7.3: all quests for checked factions are shown
+	daves_mapDB.lowLevelGap = nil      -- removed in 0.7.3
+	daves_mapDB.factions = nil         -- moved per-character on daves_mapCharDB in 0.7.3
+	daves_mapDB.panelOpen = nil        -- removed in 0.8.9: Dave's Map always opens/closes with WorldMapFrame
 	ns.db = daves_mapDB
 	daves_mapCharDB = type(daves_mapCharDB) == "table" and daves_mapCharDB or {}
+	if type(daves_mapCharDB.doneQuests) ~= "table" then daves_mapCharDB.doneQuests = {} end
+	ns.factions = type(daves_mapCharDB.factions) == "table" and daves_mapCharDB.factions or ns.DefaultFactions()
 	if ns.InitStitch then ns.InitStitch(daves_mapDB, daves_mapCharDB) end   -- the seamless map's settings (Stitch\Base.lua)
 
 	if type(DAVES_MAP_DATA) == "table" and DAVES_MAP_DATA.x then ns.DATA = DAVES_MAP_DATA end
 
-	-- Seed default-off categories cleanly on QuestieDB schema v2 (wiping stale legacy Map Genie category IDs).
-	if ns.DATA and daves_mapDB.dataSchema ~= 2 then
-		wipe(daves_mapDB.hidden)
-		for _, c in ipairs(ns.DATA.cats or {}) do
-			if c.defaultOff then daves_mapDB.hidden[c.id] = true end
-		end
-		daves_mapDB.dataSchema = 2
+	-- v0.8.4 schema v4: optional POI layers default on (toggled via right-side checkbox at top of Layers),
+	-- while Zone / Dungeon quest markers remain explicit reference layers activated when clicked.
+	if daves_mapDB.dataSchema ~= 4 then
+		ns.SetAllOptionalLayers(true)
+		daves_mapDB.panelTab = "layers"
+		daves_mapDB.dataSchema = 4
+	end
+	if daves_mapDB.panelTab ~= "layers" and daves_mapDB.panelTab ~= "tracker" and daves_mapDB.panelTab ~= "zone" and daves_mapDB.panelTab ~= "dungeon" then
+		daves_mapDB.panelTab = "layers"
 	end
 
 	ns:InitOptions()
+	ns.EnforceWindowedOpaqueMap()
 	-- the world map is a Blizzard add-on of its own: it may load before us or after
 	if WorldMapFrame then ns.InitLayer() end
 end
 
-function ns:PLAYER_LOGIN()
-	local db = ns.db
-	if type(db.factions) ~= "table" then   -- { [1] Alliance, [2] Horde, [3] Neutral }: yours and neutral to start with
-		local faction = UnitFactionGroup("player")
-		db.factions = { [1] = faction ~= "Horde", [2] = faction == "Horde", [3] = true }
+-- Keep Blizzard's World Map windowed (never fullscreen) and opaque when moving (no mapFade).
+-- Uses taint-free CVar writes before WorldMapFrame opens so Blizzard's own WorldMapMixin:OnShow
+-- minimizes the map securely without tainting WorldMapFrame.isMaximized in combat.
+local maxMinHooked = false
+function ns.EnforceWindowedOpaqueMap()
+	if not InCombatLockdown() then
+		if C_CVar and C_CVar.SetCVar then
+			if not GetCVarBool or GetCVarBool("mapFade") then
+				C_CVar.SetCVar("mapFade", "0")
+			end
+			if not GetCVarBool or not GetCVarBool("miniWorldMap") then
+				C_CVar.SetCVar("miniWorldMap", "1")
+			end
+		end
 	end
-	local _, class = UnitClass("player")
-	if class and not issecretvalue(class) then ns.playerClass = class end
+	if WorldMapFrame then
+		local a = WorldMapFrame:GetAlpha()
+		if type(a) == "number" and not issecretvalue(a) and a < 1 then
+			WorldMapFrame:SetAlpha(1)
+		end
+		local mm = WorldMapFrame.BorderFrame and WorldMapFrame.BorderFrame.MaximizeMinimizeFrame
+		if mm then
+			if not maxMinHooked then
+				maxMinHooked = true
+				mm:HookScript("OnShow", function(self)
+					if not InCombatLockdown() then self:Hide() end
+				end)
+			end
+			if not InCombatLockdown() then
+				mm:Hide()
+			end
+		end
+	end
+end
+
+function ns:PLAYER_LOGIN()
+	if type(daves_mapCharDB.factions) ~= "table" then   -- { [1] Alliance, [2] Horde, [3] Neutral }: yours and neutral to start with
+		daves_mapCharDB.factions = ns.DefaultFactions()
+	end
+	ns.factions = daves_mapCharDB.factions
+	ns.EnforceWindowedOpaqueMap()
 	ns.InitTracker()
 	if ns.StartStitch then ns.StartStitch() end   -- the seamless map (Stitch\Base.lua)
+	if ns.RefreshControls then ns.RefreshControls() end
+	if ns.Refresh then ns.Refresh() end
 	local D = ns.DATA
 	if D then
 		ns.Print(("v%s loaded: %d map pins from %s (%s). /dmap for commands."):format(ns.VERSION, #D.x, D.source.map, D.source.fetched))
 	else
-		ns.Print(("v%s loaded (no daves_map_data — %s)"):format(ns.VERSION, ns.NO_DATA))
+		ns.Print(("v%s loaded (no daves_map_data - %s)"):format(ns.VERSION, ns.NO_DATA))
 	end
 end
 
@@ -180,15 +328,55 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 	msg = (msg or ""):lower():match("^%s*(.-)%s*$")
 	if msg == "options" then
 		ns:OpenOptions()
+	elseif msg == "style" or msg == "look" then
+		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
+	elseif msg == "reset" or msg == "dock" then
+		if ns.ResetPanelPosition then ns.ResetPanelPosition() end
+		ns.Print("window docked beside the world map at default width.")
 	elseif msg == "" or msg == "toggle" then
 		ns.db.enabled = not ns.db.enabled
 		ns.Print(ns.db.enabled and "map layer on." or "map layer off.")
+		if ns.NotifySetting then ns.NotifySetting("enabled") end
+		if ns.RefreshOptions then ns.RefreshOptions() end
 		if ns.Refresh then ns.Refresh() end
 	elseif msg == "panel" then
-		ns.db.panelOpen = not ns.db.panelOpen
-		if ns.UpdatePanel then ns.UpdatePanel() end
+		ns.Print("Dave's Map opens and closes automatically with the world map (M).")
 	elseif msg == "zone" then
 		ns.ReportZone()
+	elseif msg == "check" or msg:match("^check%s+") then
+		local qid = tonumber(msg:match("^check%s+(%d+)"))
+		if qid then
+			local title = ns.QuestTitle(qid) or "(unknown title)"
+			local charFlag = C_QuestLog.IsQuestFlaggedCompleted(qid) == true
+			local acctFlag = C_QuestLog.IsQuestFlaggedCompletedOnAccount and (C_QuestLog.IsQuestFlaggedCompletedOnAccount(qid) == true) or false
+			local isAcct = C_QuestLog.IsAccountQuest and (C_QuestLog.IsAccountQuest(qid) == true) or false
+			local inLog = ns.QuestInLog(qid)
+			local done = ns.IsCharQuestCompleted(qid)
+			local pin = ns.DATA and ns.QuestPin and ns.QuestPin(qid) or nil
+			ns.Print(("Quest %d (%s): per-char=%s, onAccount=%s, accountQuest=%s, inLog=%s -> daves_map=%s%s"):format(
+				qid, title, tostring(charFlag), tostring(acctFlag), tostring(isAcct), tostring(inLog),
+				done and "DONE" or "NOT DONE", pin and "" or " [not in QuestieDB]"))
+		elseif ns.DATA then
+			local D = ns.DATA
+			local total, charDone, acctOnly, inLog = 0, 0, 0, 0
+			for i = 1, #D.qid do
+				local q = D.qid[i]
+				if q ~= 0 then
+					total = total + 1
+					if ns.QuestInLog(q) then
+						inLog = inLog + 1
+					elseif ns.IsCharQuestCompleted(q) then
+						charDone = charDone + 1
+					elseif C_QuestLog.IsQuestFlaggedCompletedOnAccount and C_QuestLog.IsQuestFlaggedCompletedOnAccount(q) == true then
+						acctOnly = acctOnly + 1
+					end
+				end
+			end
+			ns.Print(("Per-character completion across %d Forever quests: %d done on this character, %d in log, %d completed only on another character (ignored). Usage: /dmap check <questID>"):format(
+				total, charDone, inLog, acctOnly))
+		else
+			ns.Print(ns.NO_DATA)
+		end
 	elseif msg == "calib" then
 		if ns.ReportCalibration then ns.ReportCalibration() end
 	elseif msg == "version" then
@@ -207,7 +395,7 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 			mod:Diag()
 		end
 	else
-		ns.Print("commands: /dmap [toggle | panel | options | calib | zone | seamless | version]")
+		ns.Print("commands: /dmap [toggle | dock | options | style | check [questID] | calib | zone | seamless | version]")
 	end
 end
 

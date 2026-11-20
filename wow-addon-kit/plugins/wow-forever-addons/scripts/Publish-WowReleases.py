@@ -18,7 +18,7 @@ ADDONS_ROOT = os.path.join(REPO_ROOT, "wowaddons")
 
 EXCLUDE_DIRS = {".git", ".vscode", "tests", "tools", "__pycache__", ".release", "guides"}
 EXCLUDE_FILES = [".luacheckrc", ".pkgmeta", ".gitignore", "README.md", "NOTES.md", "*.zip", "*.bak"]
-SKIP_ADDONS = {"ForeverLoot"}
+SKIP_ADDONS: set[str] = set()
 ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
 
 

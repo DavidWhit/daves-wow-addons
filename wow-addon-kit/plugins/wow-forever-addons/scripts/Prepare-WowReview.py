@@ -390,6 +390,19 @@ def build_packet(path, flavors, full=False, threshold=40, no_luacheck=False):
         reason = "; ".join(reasons) or "diff review"
 
     notes_summary = extract_notes_summary(addon_dir)
+    all_metrics = val.get("FileMetrics") or {}
+    vendor_rx = re.compile(r"(^|\\)(Stitch|Libs?|Libraries)\\", re.I)
+    module_metrics = []
+    for rel_f in file_list:
+        m = all_metrics.get(rel_f)
+        if not m:
+            continue
+        tag = ""
+        if not m.get("Generated") and not vendor_rx.search(rel_f) and m["Lines"] > 1000:
+            tag = " [SPLIT CANDIDATE >1000L]"
+        module_metrics.append(
+            f"{rel_f} ({m['Lines']}L, {m['ChunkLocals']}/200 locals, {m['MaxUpvalues']}/60 upvals){tag}"
+        )
 
     return {
         "Addon": val["Addon"],
@@ -404,6 +417,7 @@ def build_packet(path, flavors, full=False, threshold=40, no_luacheck=False):
         "ModeReason": reason,
         "DiffSource": "full" if use_full else git_info["source"],
         "FilesInScope": file_list,
+        "ModuleMetrics": module_metrics,
         "SkippedFiles": (["EditModeDialog.lua (unmodified kit copy)"] if (use_full and kit_same) else git_info["skipped"]),
         "AddedLines": git_info["added"],
         "DeletedLines": git_info["deleted"],
@@ -420,6 +434,8 @@ def print_packet(pkt):
     wowkit.host(f"Validator: {pkt['Errors']} error(s), {pkt['Warnings']} warning(s) ({pkt['InfoNotes']} info note(s) omitted)")
     wowkit.host(f"RecommendedMode: {pkt['RecommendedMode']}  ({pkt['ModeReason']})")
     wowkit.host(f"Scope ({pkt['DiffSource']}): {', '.join(pkt['FilesInScope']) if pkt['FilesInScope'] else '(none)'}")
+    if pkt.get("ModuleMetrics"):
+        wowkit.host(f"ModuleHealth: {'; '.join(pkt['ModuleMetrics'])}")
     if pkt["SkippedFiles"]:
         wowkit.host(f"Skipped (do NOT read): {', '.join(pkt['SkippedFiles'])}")
 

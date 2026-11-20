@@ -16,7 +16,7 @@ py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Find-WowInstall.py"
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Test-WowAddon.py" -Path "<addon>" -Flavor forever -NoInfo
 ```
 
-Don't release with errors. Warnings need either a fix or a stated reason. If changes since the last release haven't had a full advisor review yet, run `Prepare-WowReview.py -Path "<addon>" -Full` and complete **wow-addon-test** step 2 first.
+Don't release with errors. Warnings need either a fix or a stated reason. If changes since the last release haven't had a full code review yet, run `Prepare-WowReview.py -Path "<addon>" -Full` and complete **wow-addon-test** step 2 first.
 
 ## 2. Version and Interface
 

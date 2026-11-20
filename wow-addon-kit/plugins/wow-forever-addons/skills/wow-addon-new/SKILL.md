@@ -52,11 +52,18 @@ You get:
 | `Options.lua` | Blizzard Settings panel (checkbox and slider), `ns:OpenOptions()` |
 | `.luacheckrc`, `.pkgmeta`, `.vscode/settings.json`, `.gitignore`, `README.md` | Lint, packaging and editor config |
 
-## 3. Build the feature
+## 3. Plan the architecture, then build the feature
 
-- Load the **wow-forever-api** skill before writing feature code, and check every API you use with `Find-WowApi.py`. Don't trust memory: many classic globals are gone on Forever.
+- **Load `wow-forever-api` and plan module boundaries before writing code.** Map out which module owns each piece of state, keep data/query helpers free of side effects, and check every API with `Find-WowApi.py` (never trust memory: many classic globals are gone on Forever).
+- **Split modules by responsibility from the start** instead of growing `Core.lua` or one UI file into a multi-thousand-line monolith. List files in `<Name>.toc` in strict bottom-up dependency order:
+  1. `Core.lua` — `local ADDON, ns = ...`, `SavedVariables` defaults on `ADDON_LOADED`, `PLAYER_LOGIN` version announcement, slash command, thin client helpers.
+  2. `EditModeDialog.lua` + `EditMode.lua` *(if `-EditMode`)* — unmodified shared dialog right after `Core.lua`.
+  3. Domain / data modules (pure state, caches, lookups; zero widget creation).
+  4. Controller / focus / navigation modules (selection state, history, actions).
+  5. View / UI modules (frames, pooled rows/textures with full property reset on reuse, deferred `OnShow` builds when hidden).
+  6. `Options.lua` — Settings panel or companion options window.
+- **Follow standard WoW Lua 5.1 conventions:** keep everything `local` and expose cross-file contracts on `ns.PascalCase`; group private module state into `local state = {}` / `local ui = {}` tables so active locals stay well below Lua 5.1's `200`-local / `60`-upvalue limits; avoid `cond and a or b` when `a` can be `false`; use tabs for indentation.
 - Keep the version announcement: `ns.VERSION` comes from `## Version`, and `ns:PLAYER_LOGIN()` prints `v<version> loaded`. `PLAYER_LOGIN` also fires on `/reload`, so every reload shows which build is running. Bump `## Version` with every change the user will test, so a stale build is obvious. The validator warns (`load-version`) if the addon never reads its version.
-- New Lua files go in the TOC, in load order. Keep everything `local` and hang shared things off `ns`.
 - Add new events with `ns.events:RegisterEvent("EVENT")` and handle them with `function ns:EVENT(...)`.
 - Feed values that may be secret (health, power, auras, unit identity) straight into widget setters. Don't compare them or do math on them.
 - **Edit Mode:** a frame the player moves or sets up in Edit Mode goes through `ns.EditMode.Attach` and `ns.EditMode.CreateDialog` from `EditModeDialog.lua`: outline, dragging with Blizzard-style magnetic snapping, click for settings, right-click to reset. Never build that window, its sliders and checkboxes, or your own grid snapping by hand. It keeps every addon's Edit Mode settings identical, keeps numbers inside the dialog, and keeps dialogs from stacking. See "Edit Mode settings" in the **wow-forever-api** skill. Never edit the addon's copy of `EditModeDialog.lua`; change the kit's file and copy it to every addon.
@@ -85,7 +92,7 @@ You get:
 
 ## 4. Validate and review, then put it in the game
 
-Once the feature code is written, run the **wow-addon-test** skill on the addon (`Prepare-WowReview.py -Path "<addon folder>" -Full` for a brand-new addon), not just the validator script. It validates and builds the pre-annotated review packet for the **wow-addon-reviewer** agent in advisor mode. Show the user the reviewer's numbered findings and **wait for them to choose** which to apply before changing anything. Deploy only after that round is settled.
+Once the feature code is written, run the **wow-addon-test** skill on the addon (`Prepare-WowReview.py -Path "<addon folder>" -Full` for a brand-new addon), not just the validator script. It validates and builds the pre-annotated review packet for **wow-addon-reviewer**: apply clear `Confirmed` fixes right away, re-validate, and only pause to ask the user if a finding genuinely needs design/behaviour direction. Then link it in:
 
 ```powershell
 py -3 "${CLAUDE_PLUGIN_ROOT}/scripts/Link-WowAddons.py" -Path "<addon folder>"
@@ -97,5 +104,5 @@ This links the addon into the installed WoW: Forever client (`_forever_\Interfac
 
 - Where the addon lives, and that it's linked into the game (or how to link it).
 - How to try it: fully restart the client the first time (new TOC), enable it in the AddOns list, then use `/<slash>`.
-- What the review found, and which findings they approved, skipped or still need to decide.
-- Next step: describe the feature. After each change, **wow-addon-test** runs again (validator plus advisor review).
+- What the review found and fixed (plus any genuine direction question if one came up).
+- Next step: describe the feature. After each change, **wow-addon-test** runs again (validator plus code review).
