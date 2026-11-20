@@ -831,6 +831,7 @@ function S.AddPin(set, u, v, look, data)
 	pin:SetScript("OnEnter", nil)
 	pin:SetScript("OnLeave", nil)
 	pin.OnClick = nil
+	pin.OnRightClick = nil
 	pin:EnableMouse(true)
 	pin:Show()
 	set.pins[#set.pins + 1] = pin

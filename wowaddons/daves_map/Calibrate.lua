@@ -385,17 +385,25 @@ function ns.PinModeActive()
 	return (pinBtn and pinBtn.isActive) == true
 end
 
+function ns.ClearUserWaypoint()
+	local stitch = ns.StitchWorld()
+	if stitch and stitch.ClearPin then
+		stitch.ClearPin()
+	else
+		if C_Map.ClearUserWaypoint then C_Map.ClearUserWaypoint() end
+		if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+			C_SuperTrack.SetSuperTrackedUserWaypoint(false)
+		end
+		ns.Sound("UI_MAP_WAYPOINT_REMOVE", true)
+	end
+end
+
 function ns.TogglePinMode(rightClick)
 	local stitch = ns.StitchWorld()
 	local pinBtn = WorldMapFrame and WorldMapFrame.WorldMapTrackingPinButton
 	if rightClick then
 		if stitch and stitch.SetPinMode then stitch.SetPinMode(false) end
-		if stitch and stitch.ClearPin then
-			stitch.ClearPin()
-		elseif C_Map.ClearUserWaypoint then
-			C_Map.ClearUserWaypoint()
-			ns.Sound("UI_MAP_WAYPOINT_REMOVE", true)
-		end
+		ns.ClearUserWaypoint()
 		return
 	end
 	local on = not ns.PinModeActive()

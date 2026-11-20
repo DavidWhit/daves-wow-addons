@@ -735,10 +735,31 @@ local function OnHotClick()
 	end
 end
 
+local function OnCanvasRightClickWaypoint(_, button)
+	if button ~= "RightButton" then return false end
+	if not (WorldMapFrame and WorldMapFrame.EnumeratePinsByTemplate) then return false end
+	for pin in WorldMapFrame:EnumeratePinsByTemplate("WaypointLocationPinTemplate") do
+		if pin:IsVisible() and pin:IsMouseOver() then
+			if GameTooltip:GetOwner() == pin then GameTooltip:Hide() end
+			if ns.ClearUserWaypoint then
+				ns.ClearUserWaypoint()
+			elseif C_Map.ClearUserWaypoint then
+				C_Map.ClearUserWaypoint()
+				ns.Sound("UI_MAP_WAYPOINT_REMOVE", true)
+			end
+			return true
+		end
+	end
+	return false
+end
+
 local function Init()
 	local stitch = ns.StitchWorld()
 	if stitch and stitch.RefreshDungeonCard then
 		hooksecurefunc(stitch, "RefreshDungeonCard", function() view.dirty = true end)
+	end
+	if WorldMapFrame and WorldMapFrame.AddCanvasClickHandler then
+		WorldMapFrame:AddCanvasClickHandler(OnCanvasRightClickWaypoint, 1100)
 	end
 
 	local canvas = WorldMapFrame:GetCanvas()

@@ -1325,6 +1325,11 @@ local function OnCanvasClick(from, button)
 			end
 		end
 	elseif button == "RightButton" then
+		-- (daves_map: right-clicking the waypoint pin removes it instead of zooming out)
+		if from and mod.IsWaypointHovered and mod.IsWaypointHovered() and mod.ClearPin then
+			mod.ClearPin()
+			return true
+		end
 		if mod.ClearFlightRoute then mod:ClearFlightRoute() end
 		-- (a city's map is its continent's child in the game's tables: out of it, its own zone comes
 		-- first, as out of any other part of that zone; ns.MapCityZones, banners.py)
@@ -1367,6 +1372,16 @@ end
 
 local function OnPinMouseUp(pin, button)
 	local x, y = sc:GetCursorPosition()
+	-- (daves_map: right-clicking a pin with OnRightClick - e.g. user waypoint - handles it without zooming out)
+	if button == "RightButton" and pin.OnRightClick then
+		if sc:WouldCursorPositionBeClick(button, x, y) or pin:IsMouseOver() then
+			if sc.mouseButtonInfo and sc.mouseButtonInfo.RightButton then
+				sc.mouseButtonInfo.RightButton.down = false
+			end
+			pin:OnRightClick()
+			return
+		end
+	end
 	if button ~= "LeftButton" or not sc:WouldCursorPositionBeClick(button, x, y) or WasDrag() then
 		sc:OnMouseUp(button)
 		return
@@ -2009,7 +2024,12 @@ do
 
 	local function ClearPin()
 		if C_Map.ClearUserWaypoint then pcall(C_Map.ClearUserWaypoint) end
+		if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then
+			pcall(C_SuperTrack.SetSuperTrackedUserWaypoint, false)
+		end
 		if mod.char then mod.char.pin = nil end
+		local tipOwner = GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner()
+		if tipOwner and tipOwner.isWaypoint then GameTooltip:Hide() end
 		if SOUNDKIT and SOUNDKIT.UI_MAP_WAYPOINT_REMOVE then PlaySound(SOUNDKIT.UI_MAP_WAYPOINT_REMOVE) end
 		RefreshWaypoint()
 	end
@@ -2061,7 +2081,7 @@ do
 			local info = C_Map.GetMapInfo(mapID)
 			GameTooltip:AddLine(ns.L["Waypoint"], 1, 0.82, 0)
 			GameTooltip:AddLine(("%s  %.1f, %.1f"):format(info and info.name or "", x * 100, y * 100), 1, 1, 1)
-			GameTooltip:AddLine(ns.L["Click to clear waypoint"], 0.6, 0.6, 0.6)
+			GameTooltip:AddLine(ns.L["Left/Right-click to clear waypoint"], 0.6, 0.6, 0.6)
 			if not own then
 				GameTooltip:AddLine(ns.L["Ctrl-click to toggle super tracking"], 0.6, 0.6, 0.6)
 				GameTooltip:AddLine(ns.L["Shift-click to share in chat"], 0.6, 0.6, 0.6)
@@ -2070,6 +2090,7 @@ do
 		end)
 		pin:SetScript("OnLeave", GameTooltip_Hide)
 		pin.OnClick = PinClick
+		pin.OnRightClick = ClearPin
 	end
 
 	function mod.TrackPoint(mapID, x, y, _, fromButton)
@@ -2124,6 +2145,14 @@ do
 
 	function mod.ClearPin() ClearPin() end
 
+	function mod.IsWaypointHovered()
+		if not (wpSet and wpSet.pins) then return false end
+		for _, pin in ipairs(wpSet.pins) do
+			if pin:IsVisible() and pin:IsMouseOver() then return true end
+		end
+		return false
+	end
+
 	function mod:FindMe(keepZoom)
 		if not mod.IsStitched() then return false end
 		local best = Safe.Call(C_Map.GetBestMapForUnit, "player")
@@ -2152,7 +2181,15 @@ do
 	end
 
 	function mod:BuildNav()
-		wpSet = S.PinSet("waypoint", 0, 20)
+		local wpOffset = 20
+		local fl = map and map.GetPinFrameLevelsManager and map:GetPinFrameLevelsManager()
+		if fl and fl.GetValidFrameLevel and S.iconLevel then
+			local ok, lvl = pcall(fl.GetValidFrameLevel, fl, "PIN_FRAME_LEVEL_WAYPOINT_LOCATION")
+			if ok and type(lvl) == "number" and lvl > S.iconLevel then
+				wpOffset = math.max(20, lvl - S.iconLevel)
+			end
+		end
+		wpSet = S.PinSet("waypoint", 0, wpOffset)
 		RefreshWaypoint()
 	end
 
