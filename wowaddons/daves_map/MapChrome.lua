@@ -17,9 +17,18 @@ local L = {
 	RAIL_MAP_GAP = 8,
 	MAP_CONTENT_GAP = 8,
 	SPACER_H = 67,
+	MAP_MIN_W = 460,
+	MAP_DEFAULT_W = 697,
+	MAP_MAX_W = 900,
+	MAP_MIN_H = 320,
+	MAP_DEFAULT_H = 465,
+	MAP_MAX_H = 600,
 	CONTENT_MIN_W = 480,
 	CONTENT_DEFAULT_W = 516,
 	CONTENT_MAX_W = 1000,
+	BODY_MIN_H = 320,
+	BODY_DEFAULT_H = 465,
+	BODY_MAX_H = 900,
 }
 L.MAP_LEFT_X = L.CHROME_LEFT + L.OUTER_PAD + L.RAIL_W + L.RAIL_MAP_GAP
 ns.UNIFIED_LAYOUT = L
@@ -39,7 +48,9 @@ local state = {
 	mapOverlay = nil,
 	mapTitle = nil,
 	canvasRim = nil,
+	mapW = nil,
 	contentW = nil,
+	bodyH = nil,
 	inLayout = false,
 	navHooked = false,
 	microHooked = false,
@@ -47,6 +58,8 @@ local state = {
 	pendingKeybindSync = false,
 	pendingProviderRefresh = false,
 	pendingLayout = false,
+	pendingCanvasResize = false,
+	pendingReset = false,
 	pendingScale = nil,
 	hideScheduled = false,
 }
@@ -301,10 +314,24 @@ bindEvents:SetScript("OnEvent", function(_, event)
 	if event == "PLAYER_REGEN_ENABLED" then
 		if state.pendingKeybindSync then SyncQuestLogKeybind() end
 		if state.pendingScale then ns.ApplyUnifiedScale(state.pendingScale) end
-		if state.pendingLayout then
+		if state.pendingReset then
+			state.pendingReset = false
+			if ns.ResetPanelPosition then
+				ns.ResetPanelPosition()
+			elseif ns.ResetUnifiedLayout then
+				ns.ResetUnifiedLayout()
+			end
+		elseif state.pendingLayout then
 			state.pendingLayout = false
 			if LayoutUnifiedMapRegion then LayoutUnifiedMapRegion(true) end
 			if SyncMapChromeStrata then SyncMapChromeStrata() end
+		end
+		if state.pendingCanvasResize and WorldMapFrame and WorldMapFrame:IsShown() then
+			local sc = WorldMapFrame.ScrollContainer
+			if sc and sc.mapID and sc.OnCanvasSizeChanged then
+				state.pendingCanvasResize = false
+				sc:OnCanvasSizeChanged()
+			end
 		end
 		if state.pendingProviderRefresh then
 			state.pendingProviderRefresh = false
@@ -326,10 +353,9 @@ local function TryTemplate(kind, name, parent, template)
 	return ok and f or nil
 end
 
-local function GetMapWidth()
-	local mw = WorldMapFrame and WorldMapFrame.minimizedWidth
-	if type(mw) ~= "number" or mw < 500 then mw = 702 end
-	return mw - 5
+local function ClampMapWidth(w)
+	if type(w) ~= "number" then w = L.MAP_DEFAULT_W end
+	return math.max(L.MAP_MIN_W, math.min(L.MAP_MAX_W, math.floor(w + 0.5)))
 end
 
 local function ClampContentWidth(w)
@@ -337,40 +363,117 @@ local function ClampContentWidth(w)
 	return math.max(L.CONTENT_MIN_W, math.min(L.CONTENT_MAX_W, math.floor(w + 0.5)))
 end
 
+local function ClampBodyHeight(h)
+	if type(h) ~= "number" then h = L.BODY_DEFAULT_H end
+	return math.max(L.BODY_MIN_H, math.min(L.BODY_MAX_H, math.floor(h + 0.5)))
+end
+
+local function MapHeightForBody(bodyH)
+	return math.max(L.MAP_MIN_H, math.min(L.MAP_MAX_H, bodyH))
+end
+
+function ns.GetUnifiedWindowSize()
+	local mw = state.mapW or ClampMapWidth(ns.db and ns.db.mapW)
+	local cw = state.contentW or ClampContentWidth(ns.db and ns.db.contentW)
+	local bh = state.bodyH or ClampBodyHeight(ns.db and ns.db.bodyH)
+	return mw, MapHeightForBody(bh), cw, bh
+end
+
 function ns.GetUnifiedContentWidth()
-	if state.contentW then return state.contentW end
-	return ClampContentWidth(ns.db and ns.db.contentW)
+	local _, _, cw = ns.GetUnifiedWindowSize()
+	return cw
 end
 
 local function UpdateChromeBounds()
 	local chrome = state.mapChrome
-	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
-	if not (chrome and sc) then return end
-	local cw = ns.GetUnifiedContentWidth()
+	if not (chrome and WorldMapFrame) then return end
+	local mw, _, cw, bh = ns.GetUnifiedWindowSize()
 	chrome:ClearAllPoints()
 	chrome:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", L.CHROME_LEFT, L.CHROME_TOP)
-	chrome:SetPoint("BOTTOMRIGHT", sc, "BOTTOMRIGHT", L.MAP_CONTENT_GAP + cw + L.OUTER_PAD, -L.OUTER_PAD)
+	chrome:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT",
+		L.MAP_LEFT_X + mw + L.MAP_CONTENT_GAP + cw + L.OUTER_PAD,
+		-(L.SPACER_H + bh + L.OUTER_PAD))
+end
+
+local function ApplySpacerAndScrollBounds(mw, mh)
+	local spacer = WorldMapFrame and WorldMapFrame.TitleCanvasSpacerFrame
+	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
+	if not (spacer and sc) then return end
+	spacer:ClearAllPoints()
+	spacer:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X, 0)
+	spacer:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + mw, -L.SPACER_H)
+	sc:ClearAllPoints()
+	sc:SetPoint("TOPLEFT", spacer, "BOTTOMLEFT", 0, 0)
+	sc:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + mw, -(L.SPACER_H + mh))
+end
+
+function ns.SetUnifiedWindowSize(mapW, contentW, bodyH, save)
+	local curMW, curMH, curCW, curBH = ns.GetUnifiedWindowSize()
+	local cw = ClampContentWidth(contentW ~= nil and contentW or curCW)
+	local mw = curMW
+	local bh = curBH
+	if not InCombatLockdown() then
+		state.pendingReset = false
+		mw = ClampMapWidth(mapW ~= nil and mapW or curMW)
+		bh = ClampBodyHeight(bodyH ~= nil and bodyH or curBH)
+	end
+	local mh = MapHeightForBody(bh)
+	local mapChanged = (mw ~= curMW) or (mh ~= curMH)
+	state.mapW = mw
+	state.contentW = cw
+	state.bodyH = bh
+	if save and ns.db then
+		ns.db.mapW = mw
+		ns.db.contentW = cw
+		ns.db.bodyH = bh
+	end
+	if mapChanged and not InCombatLockdown() and not (WorldMapFrame and WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then
+		ApplySpacerAndScrollBounds(mw, mh)
+	end
+	UpdateChromeBounds()
+	return mw, mh, cw, bh, mapChanged
 end
 
 function ns.SetUnifiedContentWidth(w, save)
-	local cw = ClampContentWidth(w)
-	state.contentW = cw
-	if save and ns.db then
-		ns.db.contentW = cw
-	end
-	UpdateChromeBounds()
+	local _, _, cw = ns.SetUnifiedWindowSize(nil, w, nil, save)
 	return cw
+end
+
+function ns.CommitUnifiedMapResize(mapChanged)
+	local stitch = ns.StitchWorld and ns.StitchWorld() or nil
+	if mapChanged then
+		local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
+		if not InCombatLockdown() and WorldMapFrame and WorldMapFrame:IsShown() and sc and sc.mapID and sc.OnCanvasSizeChanged then
+			state.pendingCanvasResize = false
+			sc:OnCanvasSizeChanged()
+		else
+			state.pendingCanvasResize = true
+		end
+	end
+	if stitch and stitch.EndResize then
+		stitch.EndResize()
+	end
 end
 
 function ns.ResetUnifiedLayout()
 	if ns.db then
+		ns.db.mapW = nil
 		ns.db.contentW = nil
+		ns.db.bodyH = nil
 		ns.db.panelPos = nil
 		ns.db.panelW = nil
 		ns.db.panelH = nil
 	end
-	state.contentW = L.CONTENT_DEFAULT_W
-	UpdateChromeBounds()
+	if InCombatLockdown() then
+		state.pendingReset = true
+		ns.SetUnifiedWindowSize(nil, L.CONTENT_DEFAULT_W, nil, false)
+		return
+	end
+	state.pendingReset = false
+	local _, _, _, _, mapChanged = ns.SetUnifiedWindowSize(L.MAP_DEFAULT_W, L.CONTENT_DEFAULT_W, L.BODY_DEFAULT_H, false)
+	if mapChanged then
+		ns.CommitUnifiedMapResize(true)
+	end
 end
 
 function ns.ApplyUnifiedScale(scale)
@@ -386,11 +489,12 @@ function ns.ApplyUnifiedScale(scale)
 		WorldMapFrame:SetScale(s)
 		if WorldMapFrame:IsShown() and not (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then
 			local uiTop = SafeNum(UIParent and UIParent:GetTop()) or 768
-			local frameH = (SafeNum(WorldMapFrame:GetHeight()) or 534) * s
+			local _, _, _, bh = ns.GetUnifiedWindowSize()
+			local frameH = (L.SPACER_H + bh + L.OUTER_PAD) * s
 			local yOffset = -116
 			local bottomPos = uiTop + yOffset - frameH
-			if bottomPos < 140 then
-				yOffset = yOffset + (140 - bottomPos)
+			if bottomPos < 80 then
+				yOffset = yOffset + (80 - bottomPos)
 			end
 			local maxTop = -math.ceil(L.CHROME_TOP * s) - 2
 			if yOffset > maxTop then
@@ -452,18 +556,16 @@ LayoutUnifiedMapRegion = function(fromSpacerHook)
 	state.pendingLayout = false
 	state.inLayout = true
 	local prevW = SafeNum(sc:GetWidth()) or 0
-	local mapW = GetMapWidth()
-	spacer:ClearAllPoints()
-	spacer:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X, 0)
-	spacer:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + mapW, -L.SPACER_H)
-	sc:ClearAllPoints()
-	sc:SetPoint("TOPLEFT", spacer, "BOTTOMLEFT", 0, 0)
-	sc:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMLEFT", L.MAP_LEFT_X, 2)
-	sc:SetPoint("RIGHT", spacer, "RIGHT", 0, 0)
+	local prevH = SafeNum(sc:GetHeight()) or 0
+	local mw, mh = ns.GetUnifiedWindowSize()
+	ApplySpacerAndScrollBounds(mw, mh)
 	UpdateChromeBounds()
 	LayoutNavBarAndClose()
 	state.inLayout = false
-	if fromSpacerHook and WorldMapFrame:IsShown() and math.abs(prevW - mapW) > 1 and sc.mapID and sc.OnCanvasSizeChanged then
+	if fromSpacerHook and WorldMapFrame:IsShown()
+		and (math.abs(prevW - mw) > 1 or math.abs(prevH - mh) > 1)
+		and sc.mapID and sc.OnCanvasSizeChanged then
+		state.pendingCanvasResize = false
 		sc:OnCanvasSizeChanged()
 	end
 end
@@ -539,7 +641,9 @@ function ns.InitMapChrome()
 		return
 	end
 	state.initialized = true
+	state.mapW = ClampMapWidth(ns.db and ns.db.mapW)
 	state.contentW = ClampContentWidth(ns.db and ns.db.contentW)
+	state.bodyH = ClampBodyHeight(ns.db and ns.db.bodyH)
 
 	-- Single unified HUD Edit Mode translucent dialog frame spanning [ Far-Left Tab Rail | World Map | Right Content ].
 	local sc = WorldMapFrame.ScrollContainer
@@ -612,6 +716,13 @@ function ns.InitMapChrome()
 			SuppressQuestMapFrame()
 			HideDefaultWorldMapChrome()
 			LayoutUnifiedMapRegion(false)
+			if state.pendingCanvasResize and not InCombatLockdown() then
+				local mapSC = WorldMapFrame.ScrollContainer
+				if mapSC and mapSC.mapID and mapSC.OnCanvasSizeChanged then
+					state.pendingCanvasResize = false
+					mapSC:OnCanvasSizeChanged()
+				end
+			end
 			SyncMapChromeStrata()
 			UpdateMapTitle()
 			if ns.WasQuestLogKeyPressed() and ns.OpenTrackerTab then

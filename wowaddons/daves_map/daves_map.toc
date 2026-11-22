@@ -2,7 +2,7 @@
 ## Title: |cffd4a94eDave's|r Map
 ## Notes: QuestieDB Forever quests, objectives, turn-ins, quest chains, townsfolk and rares with search, filters and zone quest tracking, on OpenMap's seamless world map and dungeon maps.
 ## Author: davidwhit5
-## Version: 0.9.3
+## Version: 0.9.4
 ## OptionalDeps: daves_map_data, daves_map_textures
 ## SavedVariables: daves_mapDB
 ## SavedVariablesPerCharacter: daves_mapCharDB

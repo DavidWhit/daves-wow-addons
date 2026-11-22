@@ -4,8 +4,9 @@
 --   * `ui.panel` is a mouse-transparent container matching `DavesMapWorldChrome` so the live World Map
 --     canvas and NavBar in the middle stay 100% interactive, while `leftRail` and `content` capture clicks.
 --   * Top content toolbar: `[ <- Back | Search... | Find Me | Drop Waypoint | Map Settings ]`.
---   * Bottom-right grip resizes the right content pane live horizontally (persisted in `ns.db.contentW`),
---     and `Window scale` scales the entire unified window uniformly.
+--   * Bottom-right grip resizes the unified window in 2D: the OpenMap canvas grows/shrinks freely inside
+--     its fixed min/max bounds (`460..900 x 320..600`, scaling to fit on drop) while any further drag grows
+--     the right content pane; a vertical divider between map & panel trades width between them directly.
 
 local _, ns = ...
 
@@ -17,12 +18,31 @@ local HEADER_H = L.HEADER_H or 34
 local CHROME_TOP = L.CHROME_TOP or 6
 local RAIL_W = L.RAIL_W or C.RAIL_W or 46
 local MAP_CONTENT_GAP = L.MAP_CONTENT_GAP or 8
+local MAP_MIN_W = L.MAP_MIN_W or 460
+local MAP_MAX_W = L.MAP_MAX_W or 900
 local CONTENT_MIN_W = L.CONTENT_MIN_W or 480
 local CONTENT_MAX_W = L.CONTENT_MAX_W or 1000
+local BODY_MIN_H = L.BODY_MIN_H or 320
+local BODY_MAX_H = L.BODY_MAX_H or 900
 local LIST_PAD, SCROLL_GUTTER = C.LIST_PAD, C.SCROLL_GUTTER
 local Sound = ns.Sound
 
-local resizeState = { active = false, startX = 0, startW = 0, lastW = 0 }
+local resizeState = {
+	active = false,
+	mode = nil,
+	btn = nil,
+	startX = 0,
+	startY = 0,
+	startMapW = 697,
+	startMapH = 465,
+	startContentW = 516,
+	startBodyH = 465,
+	lastMapW = 697,
+	lastMapH = 465,
+	lastContentW = 516,
+	lastBodyH = 465,
+	mapChanged = false,
+}
 
 local function SafeNum(v)
 	return (type(v) == "number" and not issecretvalue(v)) and v or nil
@@ -292,27 +312,46 @@ local function AbovePins()
 	return WorldMapFrame:GetPinFrameLevelsManager():GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST") + 10
 end
 
-local function ComputeMaxContentWidth()
+local function ComputeScreenResizeCaps()
 	local chrome = ns.WorldMapChrome and ns.WorldMapChrome()
 	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
-	if not (chrome and sc) then return CONTENT_MAX_W end
-	local scR = SafeNum(sc:GetRight())
+	local maxTotalW = MAP_MAX_W + CONTENT_MAX_W
+	local maxBodyH = BODY_MAX_H
+	if not (chrome and sc) then return maxTotalW, maxBodyH end
+	local scL = SafeNum(sc:GetLeft())
+	local scT = SafeNum(sc:GetTop())
 	local effScale = SafeNum(chrome:GetEffectiveScale())
 	local uw = SafeNum(UIParent:GetWidth()) or 1365
 	local us = SafeNum(UIParent:GetEffectiveScale()) or 1
 	local uiW = uw * us
-	if not (scR and effScale and effScale > 0) then return CONTENT_MAX_W end
-	local avail = math.floor((uiW - 6) / effScale - scR - MAP_CONTENT_GAP - OUTER_PAD)
-	return math.max(CONTENT_MIN_W, math.min(CONTENT_MAX_W, avail))
+	if effScale and effScale > 0 then
+		if scL then
+			local availW = math.floor((uiW - 6) / effScale - scL - MAP_CONTENT_GAP - OUTER_PAD)
+			maxTotalW = math.max(MAP_MIN_W + CONTENT_MIN_W, math.min(MAP_MAX_W + CONTENT_MAX_W, availW))
+		end
+		if scT then
+			local availH = math.floor(scT - (6 / effScale) - OUTER_PAD)
+			maxBodyH = math.max(BODY_MIN_H, math.min(BODY_MAX_H, availH))
+		end
+	end
+	return maxTotalW, maxBodyH
 end
 
-local function StopWidthResize(btn, commit)
+local function StopResize(btn, commit)
 	if not resizeState.active then return end
+	local activeBtn = btn or resizeState.btn
+	local mapChanged = resizeState.mapChanged == true
 	resizeState.active = false
+	resizeState.mode = nil
+	resizeState.btn = nil
+	resizeState.mapChanged = false
 	ui.dragging = false
-	if btn then btn:SetScript("OnUpdate", nil) end
-	if commit and ns.SetUnifiedContentWidth then
-		ns.SetUnifiedContentWidth(resizeState.lastW, true)
+	if activeBtn then activeBtn:SetScript("OnUpdate", nil) end
+	if commit and ns.SetUnifiedWindowSize then
+		ns.SetUnifiedWindowSize(resizeState.lastMapW, resizeState.lastContentW, resizeState.lastBodyH, true)
+	end
+	if ns.CommitUnifiedMapResize then
+		ns.CommitUnifiedMapResize(commit and mapChanged)
 	end
 	if ui.detailsPane and ui.detailsPane:IsShown() then
 		if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
@@ -323,32 +362,99 @@ end
 
 local function OnResizeUpdate(self)
 	if not resizeState.active or (IsMouseButtonDown and not IsMouseButtonDown("LeftButton")) then
-		StopWidthResize(self, true)
+		StopResize(self, true)
 		return
 	end
-	local cx = GetCursorPosition()
+	local cx, cy = GetCursorPosition()
 	local effScale = (ui.panel and SafeNum(ui.panel:GetEffectiveScale())) or 1
 	if effScale <= 0 then effScale = 1 end
 	local dx = (cx - resizeState.startX) / effScale
-	local maxW = ComputeMaxContentWidth()
-	local nextW = math.max(CONTENT_MIN_W, math.min(maxW, math.floor(resizeState.startW + dx + 0.5)))
-	if nextW ~= resizeState.lastW then
-		resizeState.lastW = nextW
-		if ns.SetUnifiedContentWidth then ns.SetUnifiedContentWidth(nextW, false) end
+	local dy = (resizeState.startY - cy) / effScale
+	local maxTotalW, maxBodyH = ComputeScreenResizeCaps()
+	local nextMapW = resizeState.lastMapW
+	local nextContentW = resizeState.lastContentW
+	local nextBodyH = resizeState.lastBodyH
+
+	if resizeState.mode == "split" then
+		if InCombatLockdown() then
+			StopResize(self, true)
+			return
+		end
+		local totalW = resizeState.startMapW + resizeState.startContentW
+		local maxMapForSplit = math.min(MAP_MAX_W, totalW - CONTENT_MIN_W)
+		local minMapForSplit = math.max(MAP_MIN_W, totalW - CONTENT_MAX_W)
+		if maxMapForSplit >= minMapForSplit then
+			nextMapW = math.max(minMapForSplit, math.min(maxMapForSplit, math.floor(resizeState.startMapW + dx + 0.5)))
+			nextContentW = totalW - nextMapW
+		end
+	else
+		if InCombatLockdown() then
+			nextMapW = resizeState.lastMapW
+			nextBodyH = resizeState.lastBodyH
+			local maxCW = math.max(CONTENT_MIN_W, math.min(CONTENT_MAX_W, maxTotalW - nextMapW))
+			local wantTotalW = math.floor(resizeState.startMapW + resizeState.startContentW + dx + 0.5)
+			nextContentW = math.max(CONTENT_MIN_W, math.min(maxCW, wantTotalW - nextMapW))
+		else
+			local startTotalW = resizeState.startMapW + resizeState.startContentW
+			local wantTotalW = math.max(MAP_MIN_W + CONTENT_MIN_W, math.min(maxTotalW, math.floor(startTotalW + dx + 0.5)))
+			local effDx = wantTotalW - startTotalW
+			nextMapW = math.max(MAP_MIN_W, math.min(MAP_MAX_W, math.floor(resizeState.startMapW + effDx * 0.57 + 0.5)))
+			nextContentW = wantTotalW - nextMapW
+			if nextContentW < CONTENT_MIN_W then
+				nextContentW = CONTENT_MIN_W
+				nextMapW = math.max(MAP_MIN_W, math.min(MAP_MAX_W, wantTotalW - nextContentW))
+			elseif nextContentW > CONTENT_MAX_W then
+				nextContentW = CONTENT_MAX_W
+				nextMapW = math.max(MAP_MIN_W, math.min(MAP_MAX_W, wantTotalW - nextContentW))
+			end
+			nextBodyH = math.max(BODY_MIN_H, math.min(maxBodyH, math.floor(resizeState.startBodyH + dy + 0.5)))
+		end
+	end
+
+	if nextMapW ~= resizeState.lastMapW or nextContentW ~= resizeState.lastContentW or nextBodyH ~= resizeState.lastBodyH then
+		if ns.SetUnifiedWindowSize then
+			local mw, mh, cw, bh, mapChg = ns.SetUnifiedWindowSize(nextMapW, nextContentW, nextBodyH, false)
+			resizeState.lastMapW = mw
+			resizeState.lastMapH = mh
+			resizeState.lastContentW = cw
+			resizeState.lastBodyH = bh
+			if mapChg then
+				resizeState.mapChanged = true
+				local stitch = ns.StitchWorld and ns.StitchWorld() or nil
+				if stitch and stitch.FollowResize then stitch.FollowResize() end
+			end
+		end
 		if not (ui.detailsPane and ui.detailsPane:IsShown()) and ns.LayoutPanelRows then
 			ns.LayoutPanelRows()
 		end
 	end
 end
 
-local function StartWidthResize(btn)
-	if not (ui.panel and ns.GetUnifiedContentWidth) then return end
-	local cx = GetCursorPosition()
+local function StartResize(btn, mode)
+	if not (ui.panel and ns.GetUnifiedWindowSize) then return end
+	if mode == "split" and InCombatLockdown() then return end
+	if resizeState.active then StopResize(resizeState.btn, false) end
+	local cx, cy = GetCursorPosition()
+	local mw, mh, cw, bh = ns.GetUnifiedWindowSize()
 	resizeState.active = true
+	resizeState.mode = mode or "corner"
+	resizeState.btn = btn
 	resizeState.startX = cx
-	resizeState.startW = ns.GetUnifiedContentWidth()
-	resizeState.lastW = resizeState.startW
+	resizeState.startY = cy
+	resizeState.startMapW = mw
+	resizeState.startMapH = mh
+	resizeState.startContentW = cw
+	resizeState.startBodyH = bh
+	resizeState.lastMapW = mw
+	resizeState.lastMapH = mh
+	resizeState.lastContentW = cw
+	resizeState.lastBodyH = bh
+	resizeState.mapChanged = false
 	ui.dragging = true
+	if not InCombatLockdown() then
+		local stitch = ns.StitchWorld and ns.StitchWorld() or nil
+		if stitch and stitch.BeginResize then stitch.BeginResize() end
+	end
 	btn:SetScript("OnUpdate", OnResizeUpdate)
 end
 
@@ -359,6 +465,7 @@ local function AnchorPanelToChrome()
 	ui.panel:SetFrameStrata(WorldMapFrame:GetFrameStrata() or "MEDIUM")
 	ui.panel:SetFrameLevel(lvl)
 	if ui.headerBar then ui.headerBar:SetFrameLevel(lvl + 2) end
+	if ui.splitter then ui.splitter:SetFrameLevel(lvl + 8) end
 	if ui.resizeBtn then ui.resizeBtn:SetFrameLevel(lvl + 10) end
 	ui.panel:ClearAllPoints()
 	if chrome then
@@ -377,12 +484,14 @@ ns.SyncPanelDock = AnchorPanelToChrome
 
 function ns.ResetPanelPosition()
 	if resizeState.active then
-		StopWidthResize(ui.resizeBtn, false)
+		StopResize(resizeState.btn, false)
 	end
 	if ns.ResetUnifiedLayout then
 		ns.ResetUnifiedLayout()
 	elseif ns.db then
+		ns.db.mapW = nil
 		ns.db.contentW = nil
+		ns.db.bodyH = nil
 		ns.db.panelPos = nil
 		ns.db.panelW = nil
 		ns.db.panelH = nil
@@ -592,7 +701,7 @@ function ns.InitPanel()
 		ns.ResetPanelPosition()
 	end)
 
-	-- Bottom-right horizontal width resize grip for the right content pane.
+	-- Bottom-right 2D resize grip: grows/shrinks map within its min/max bounds and overflows into the right panel.
 	local resizeBtn = CreateFrame("Button", nil, panel)
 	ui.resizeBtn = resizeBtn
 	resizeBtn:SetSize(14, 14)
@@ -602,21 +711,25 @@ function ns.InitPanel()
 	resizeBtn:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	resizeBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
 	resizeBtn:SetScript("OnMouseDown", function(self, button)
-		if button == "LeftButton" then StartWidthResize(self) end
+		if button == "LeftButton" then StartResize(self, "corner") end
 	end)
 	resizeBtn:SetScript("OnMouseUp", function(self, button)
-		if button == "LeftButton" then StopWidthResize(self, true) end
+		if button == "LeftButton" then
+			StopResize(self, true)
+		elseif button == "Button4" and ns.GoBack then
+			ns.GoBack()
+		end
 	end)
 	resizeBtn:SetScript("OnDoubleClick", function(self, button)
 		if button ~= "LeftButton" then return end
-		StopWidthResize(self, false)
+		StopResize(self, false)
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		ns.ResetPanelPosition()
 	end)
 	resizeBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:AddLine("Resize Panel Width", 1, .82, .2)
-		GameTooltip:AddLine("Drag left or right to widen or narrow the right panel.\nDouble-click to reset to default width.", .9, .9, .9, true)
+		GameTooltip:AddLine("Resize Window", 1, .82, .2)
+		GameTooltip:AddLine("Drag to resize both the map and right panel (the map scales to fit within its min/max bounds while further resizing grows the right panel).\nDouble-click to reset to default size.", .9, .9, .9, true)
 		GameTooltip:Show()
 	end)
 	resizeBtn:SetScript("OnLeave", GameTooltip_Hide)
@@ -714,6 +827,47 @@ function ns.InitPanel()
 		content:SetPoint("TOPLEFT", leftRail, "TOPRIGHT", MAP_CONTENT_GAP, 0)
 	end
 	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -OUTER_PAD, OUTER_PAD)
+
+	-- Vertical divider handle between the live World Map and right content pane (drag left/right to trade width).
+	local splitter = CreateFrame("Button", nil, panel)
+	ui.splitter = splitter
+	splitter:SetWidth(MAP_CONTENT_GAP)
+	splitter:SetPoint("TOPRIGHT", content, "TOPLEFT", 0, 0)
+	splitter:SetPoint("BOTTOMRIGHT", content, "BOTTOMLEFT", 0, 0)
+	splitter:SetFrameLevel(level + 8)
+	local splitLine = splitter:CreateTexture(nil, "ARTWORK")
+	splitLine:SetWidth(1)
+	splitLine:SetPoint("TOP", 0, -4)
+	splitLine:SetPoint("BOTTOM", 0, 4)
+	splitLine:SetColorTexture(0.55, 0.44, 0.24, 0.28)
+	local splitHL = splitter:CreateTexture(nil, "HIGHLIGHT")
+	splitHL:SetWidth(2)
+	splitHL:SetPoint("TOP", 0, -4)
+	splitHL:SetPoint("BOTTOM", 0, 4)
+	splitHL:SetColorTexture(1, 0.84, 0.25, 0.72)
+	splitter:SetScript("OnMouseDown", function(self, button)
+		if button == "LeftButton" then StartResize(self, "split") end
+	end)
+	splitter:SetScript("OnMouseUp", function(self, button)
+		if button == "LeftButton" then
+			StopResize(self, true)
+		elseif button == "Button4" and ns.GoBack then
+			ns.GoBack()
+		end
+	end)
+	splitter:SetScript("OnDoubleClick", function(self, button)
+		if button ~= "LeftButton" then return end
+		StopResize(self, false)
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		ns.ResetPanelPosition()
+	end)
+	splitter:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine("Resize Map / Panel Split", 1, .82, .2)
+		GameTooltip:AddLine("Drag left or right to adjust the balance between the map and right panel.\nDouble-click to reset to default size.", .9, .9, .9, true)
+		GameTooltip:Show()
+	end)
+	splitter:SetScript("OnLeave", GameTooltip_Hide)
 
 	ui.styleBtn = ToolbarIconButton(content, ns.MEDIA .. "gear", "Map Settings", "Customize Map Tracking & Filters, Window scale, Pin size, Background opacity, and Background style.", function()
 		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
@@ -931,7 +1085,7 @@ function ns.InitPanel()
 		end
 	end)
 	panel:SetScript("OnHide", function()
-		if resizeState.active then StopWidthResize(ui.resizeBtn, true) end
+		if resizeState.active then StopResize(resizeState.btn, true) end
 		if ui.pinBtn then ui.pinBtn:SetActive(false) end
 		if ns.DisarmPinMode then ns.DisarmPinMode() end
 		if ns.HideStyleDialog then ns.HideStyleDialog() end

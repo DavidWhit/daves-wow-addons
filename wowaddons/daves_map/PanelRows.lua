@@ -320,12 +320,23 @@ local function RenderRow(row, item, yTop)
 		PaintStateIcon(row.icon, nil, item.state or "log")
 		row.icon:Show()
 
+		local onTracker = (not ui.found) and (ns.IsTrackerTab and ns.IsTrackerTab())
 		local focusQ = ns.ActiveFocusQuest and ns.ActiveFocusQuest() or nil
 		local selected = (focusQ ~= nil and focusQ == item.questID) or (ui.detailQuestID ~= nil and ui.detailQuestID == item.questID)
 		if selected then
-			row.selBg:SetColorTexture(1, 0.84, 0.25, 0.14)
+			if onTracker then
+				row.selBg:SetColorTexture(0.20, 0.90, 0.42, 0.18)
+				row.selBar:SetColorTexture(0.28, 0.98, 0.48, 0.98)
+			else
+				row.selBg:SetColorTexture(1, 0.84, 0.25, 0.14)
+				row.selBar:SetColorTexture(1, 0.84, 0.25, 0.95)
+			end
 			row.selBg:Show()
-			row.selBar:SetColorTexture(1, 0.84, 0.25, 0.95)
+			row.selBar:Show()
+		elseif onTracker then
+			row.selBg:SetColorTexture(1, 0.82, 0.20, 0.10)
+			row.selBg:Show()
+			row.selBar:SetColorTexture(1, 0.82, 0.20, 0.82)
 			row.selBar:Show()
 		end
 
@@ -349,7 +360,9 @@ local function RenderRow(row, item, yTop)
 		row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
 		row.sub:Hide()
 
-		row.label:SetText((selected and "|cffffd200" or "") .. (item.title or ("Quest #" .. tostring(item.questID))) .. (selected and "|r" or ""))
+		local titleColor = selected and (onTracker and "|cff59ff73" or "|cffffd200") or (onTracker and "|cffffd200" or nil)
+		local rawTitle = item.title or ("Quest #" .. tostring(item.questID))
+		row.label:SetText(titleColor and (titleColor .. rawTitle .. "|r") or rawTitle)
 		row.starterBtn.lbl:SetText(item.zone and ("|cff9ea4b0" .. item.zone .. "|r") or "|cff666666-|r")
 		row.starterBtn:Show()
 		row.colLvl:SetText(item.lvlTxt or "|cff666666-|r")
@@ -407,12 +420,27 @@ local function RenderRow(row, item, yTop)
 
 		local cleanTitle = D.title[i] or ""
 		local starterTxt = item.starterName or "-"
+		local onTracker = (not ui.found) and (ns.IsTrackerTab and ns.IsTrackerTab())
 		local selPin = ns.FocusedPin()
-		local isSelected = selPin ~= nil and (selPin == i or (D.qid[selPin] ~= 0 and D.qid[selPin] == D.qid[i]))
+		local focusQ = ns.ActiveFocusQuest and ns.ActiveFocusQuest() or nil
+		local stepQ = item.inLogQuestID or item.trackQuestID or (D.qid[i] ~= 0 and D.qid[i] or nil)
+		local isSelected = (selPin ~= nil and (selPin == i or (D.qid[selPin] ~= 0 and D.qid[selPin] == D.qid[i])))
+			or (onTracker and stepQ ~= nil and ((focusQ ~= nil and focusQ == stepQ) or (ui.detailQuestID ~= nil and ui.detailQuestID == stepQ)))
+		local isOnQuest = onTracker and (item.state == "log" or item.state == "ready" or item.inLogQuestID ~= nil)
 		if isSelected then
-			row.selBg:SetColorTexture(1, 0.84, 0.25, 0.15)
+			if onTracker then
+				row.selBg:SetColorTexture(0.20, 0.90, 0.42, 0.18)
+				row.selBar:SetColorTexture(0.28, 0.98, 0.48, 0.98)
+			else
+				row.selBg:SetColorTexture(1, 0.84, 0.25, 0.15)
+				row.selBar:SetColorTexture(1, 0.84, 0.25, 0.95)
+			end
 			row.selBg:Show()
-			row.selBar:SetColorTexture(1, 0.84, 0.25, 0.95)
+			row.selBar:Show()
+		elseif isOnQuest then
+			row.selBg:SetColorTexture(1, 0.82, 0.20, 0.11)
+			row.selBg:Show()
+			row.selBar:SetColorTexture(1, 0.82, 0.20, 0.86)
 			row.selBar:Show()
 		end
 		if item.isDone then
@@ -421,10 +449,19 @@ local function RenderRow(row, item, yTop)
 			row.icon:SetDesaturated(true)
 			row.icon:SetVertexColor(.62, .65, .70)
 			row.icon:SetAlpha(.70)
-			row.label:SetText((isSelected and "|cffffd200" or "|cff777b84") .. cleanTitle .. "|r")
+			local doneCol = isSelected and (onTracker and "|cff59ff73" or "|cffffd200") or "|cff777b84"
+			row.label:SetText(doneCol .. cleanTitle .. "|r")
 			row.starterBtn.lbl:SetText("|cff778899" .. starterTxt .. "|r")
 			row.colLvl:SetText(item.lvlTxt or "|cff666666-|r")
 			row.colXP:SetText(item.xpColTxt or "|cff6d8f74Done|r")
+		elseif onTracker then
+			local numHex = isSelected and "ff59ff73" or (isOnQuest and "ffffdf59" or "ff98a2b0")
+			local txtHex = isSelected and "ff59ff73" or (isOnQuest and "ffffd200" or "ffd0d6de")
+			row.num:SetText(("|c%s%d.|r"):format(numHex, item.n))
+			row.label:SetText(("|c%s%s|r"):format(txtHex, cleanTitle))
+			row.starterBtn.lbl:SetText(item.starterName and ("|cff7fd4ff" .. starterTxt .. "|r") or "|cff666666-|r")
+			row.colLvl:SetText(item.lvlTxt or "|cff666666-|r")
+			row.colXP:SetText(item.xpColTxt or "|cff666666-|r")
 		else
 			row.num:SetText(("|c%s%d.|r"):format(item.isCurrent and "ffffdf59" or "ff59ff73", item.n))
 			row.label:SetText((isSelected and "|cffffd200" or "|cff59ff73") .. cleanTitle .. "|r")
@@ -457,26 +494,44 @@ local function RenderRow(row, item, yTop)
 	end
 	row.icon:Show()
 
+	local onTracker = (not ui.found) and (ns.IsTrackerTab and ns.IsTrackerTab())
 	local selPin = ns.FocusedPin()
 	local selQid = (selPin and D.qid[selPin] ~= 0) and D.qid[selPin] or nil
-	-- When a chain is expanded, its active child bullet displays the single selection highlight (never duplicate on the parent row).
+	local focusQ = onTracker and ns.ActiveFocusQuest and ns.ActiveFocusQuest() or nil
+	local rowQ = item.inLogQuestID or item.trackQuestID or (D.qid[i] ~= 0 and D.qid[i] or nil)
+	-- When a chain is expanded, its active child bullet displays the single selection/on-quest highlight (never duplicate on the parent row).
 	local selected = false
-	if selPin ~= nil then
-		if item.hasChain then
-			if not item.expanded then
+	if not (item.hasChain and item.expanded) then
+		if selPin ~= nil then
+			if item.hasChain then
 				selected = (selPin == i or selPin == item.activePin
 					or (selQid and (D.qid[i] == selQid or (item.activePin and D.qid[item.activePin] == selQid)))
 					or (item.chainSet and item.chainSet[selPin] == true))
+			else
+				selected = (selPin == i or (item.activePin and selPin == item.activePin)
+					or (selQid and (D.qid[i] == selQid or (item.activePin and D.qid[item.activePin] == selQid))))
 			end
-		else
-			selected = (selPin == i or (item.activePin and selPin == item.activePin)
-				or (selQid and (D.qid[i] == selQid or (item.activePin and D.qid[item.activePin] == selQid))))
+		end
+		if not selected and onTracker and rowQ ~= nil then
+			selected = (focusQ ~= nil and focusQ == rowQ) or (ui.detailQuestID ~= nil and ui.detailQuestID == rowQ)
 		end
 	end
+	local isOnQuest = onTracker and (not (item.hasChain and item.expanded))
+		and (item.state == "log" or item.state == "ready" or item.inLogQuestID ~= nil)
 	if selected then
-		row.selBg:SetColorTexture(1, 0.84, 0.25, 0.14)
+		if onTracker then
+			row.selBg:SetColorTexture(0.20, 0.90, 0.42, 0.18)
+			row.selBar:SetColorTexture(0.28, 0.98, 0.48, 0.98)
+		else
+			row.selBg:SetColorTexture(1, 0.84, 0.25, 0.14)
+			row.selBar:SetColorTexture(1, 0.84, 0.25, 0.95)
+		end
 		row.selBg:Show()
-		row.selBar:SetColorTexture(1, 0.84, 0.25, 0.95)
+		row.selBar:Show()
+	elseif isOnQuest then
+		row.selBg:SetColorTexture(1, 0.82, 0.20, 0.10)
+		row.selBg:Show()
+		row.selBar:SetColorTexture(1, 0.82, 0.20, 0.82)
 		row.selBar:Show()
 	end
 
@@ -537,6 +592,8 @@ local function RenderRow(row, item, yTop)
 		local rawName = D.title[i] or ""
 		local nameTxt
 		if selected then
+			nameTxt = (onTracker and "|cff59ff73" or "|cffffd200") .. rawName .. "|r"
+		elseif isOnQuest then
 			nameTxt = "|cffffd200" .. rawName .. "|r"
 		elseif item.state == "done" then
 			nameTxt = "|cff777b84" .. rawName .. "|r"

@@ -693,9 +693,9 @@ do
 			end,
 			"While grouped, show a brass number badge beside quests showing how many group members are on that quest.")
 
-		local dockBtn = PanelButton(opt, "Reset Window Width", COL_W)
+		local dockBtn = PanelButton(opt, "Reset Window Size", COL_W)
 		dockBtn:SetPoint("BOTTOMLEFT", PAD_X, 46)
-		AddTip(dockBtn, "Reset the right panel back to its default width.")
+		AddTip(dockBtn, "Reset the map viewport and right panel back to their default size.")
 		dockBtn:SetScript("OnClick", function()
 			ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 			if ns.ResetPanelPosition then ns.ResetPanelPosition() end
