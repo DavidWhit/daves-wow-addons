@@ -44,6 +44,8 @@ local ui = {
 	found = nil,
 	searchOriginMap = nil,
 	trackerFocusQ = nil,
+	detailQuestID = nil,
+	detailPin = nil,
 	revealPin = nil,
 	revealItemIdx = nil,
 	syncingScroll = false,
@@ -347,6 +349,10 @@ ns.SetSearchQuiet = SetSearchQuiet
 
 function ns.RunSearch()
 	if ui.quietSearch or not ui.search then return end
+	if ui.detailQuestID then
+		ui.detailQuestID = nil
+		ui.detailPin = nil
+	end
 	ns.Calibrate()
 	ApplySearchText(ui.search:GetText())
 	ns.RefreshIfMapHidden()
@@ -450,26 +456,88 @@ function ns.TrackerFocusQuestID()
 	return ui.trackerFocusQ
 end
 
-function ns.OpenTrackerTab(q, preferredPin)
+function ns.OpenQuestDetails(questID, pin, skipPush)
+	if type(questID) ~= "number" or questID == 0 or issecretvalue(questID) or not ns.QuestInLog(questID) then
+		return false
+	end
+	if not skipPush and ui.detailQuestID ~= questID and ns.PushNavState then
+		ns.PushNavState("details")
+	end
+	ui.detailQuestID = questID
+	local resolvedPin = pin or (ns.QuestPin and ns.QuestPin(questID)) or nil
+	if not resolvedPin and ns.FindQuestPinsForTracker then
+		local pins = ns.FindQuestPinsForTracker(questID)
+		resolvedPin = pins and pins[1] or nil
+	end
+	ui.detailPin = resolvedPin
+	if ns.UpdatePanel then ns.UpdatePanel() end
+	if ns.RefreshControls then
+		ns.RefreshControls()
+	elseif ns.OnLayerChanged then
+		ns.OnLayerChanged()
+	end
+	return true
+end
+
+function ns.CloseQuestDetails(silent)
+	if not ui.detailQuestID then return false end
+	if not ui.restoring then
+		local top = ui.history[#ui.history]
+		if top and top.reason == "details" then
+			table.remove(ui.history)
+		end
+	end
+	ui.detailQuestID = nil
+	ui.detailPin = nil
+	if not silent then
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+	end
+	if ns.OnLayerChanged then
+		ns.OnLayerChanged()
+	elseif ns.RefreshControls then
+		ns.RefreshControls()
+	end
+	return true
+end
+
+function ns.PopRecentTrackerPush()
+	if ui.restoring then return end
+	local top = ui.history[#ui.history]
+	if top and (top.reason == "tracker" or top.reason == "details") then
+		table.remove(ui.history)
+	end
+end
+
+function ns.OpenTrackerTab(q, preferredPin, skipPush, openDetails, detailQ)
 	local D = ns.DATA
 	if not (ns.db and D) then return end
-	if ns.PushNavState then ns.PushNavState("tracker") end
+	if not skipPush and ns.PushNavState then ns.PushNavState("tracker") end
 	if ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.CloseDungeonView then
 		ns.CloseDungeonView()
 	end
 	if ui.found then SetSearchQuiet("") end
 	ui.zoneContextLock = nil
 	ui.dungeonZoneLock = nil
-	ui.trackerFocusQ = q
+	if q ~= nil then
+		ui.trackerFocusQ = q
+	end
 	ns.db.panelTab = "tracker"
 	if ns.SetRefLayer then ns.SetRefLayer(nil, true, true) end
 	if ns.db.zoneFold then
 		ns.db.zoneFold["trk:focused"] = false
 	end
+	local showQ = detailQ or q
 	local pin = preferredPin
-	if not pin and q then
-		local pins = ns.FindQuestPinsForTracker(q)
+	if not pin and showQ then
+		local pins = ns.FindQuestPinsForTracker(showQ)
 		pin = pins and pins[1] or nil
+	end
+	if openDetails and showQ and ns.QuestInLog(showQ) then
+		ui.detailQuestID = showQ
+		ui.detailPin = pin
+	else
+		ui.detailQuestID = nil
+		ui.detailPin = nil
 	end
 	if pin and ns.ChainFor then
 		local ch = ns.ChainFor(pin)
@@ -518,6 +586,8 @@ local function CaptureNavEntry(reason)
 		zoneContextLock = ui.zoneContextLock,
 		dungeonZoneLock = ui.dungeonZoneLock,
 		trackerFocusQ = ui.trackerFocusQ,
+		detailQuestID = ui.detailQuestID,
+		detailPin = ui.detailPin,
 	}
 end
 
@@ -531,6 +601,7 @@ local function PushNavState(reason)
 		and top.zoneContextLock == entry.zoneContextLock
 		and top.dungeonZoneLock == entry.dungeonZoneLock
 		and top.trackerFocusQ == entry.trackerFocusQ
+		and top.detailQuestID == entry.detailQuestID
 		and ((not top.mapState and not entry.mapState) or (top.mapState and entry.mapState and top.mapState.map == entry.mapState.map)) then
 		top.scrollPx = entry.scrollPx
 		top.mapState = entry.mapState
@@ -554,7 +625,8 @@ local function PruneSameHistoryTop()
 			and (top.search or "") == sTxt and top.dungeonOpen == dungShown
 			and top.zoneContextLock == ui.zoneContextLock
 			and top.dungeonZoneLock == ui.dungeonZoneLock
-			and top.trackerFocusQ == ui.trackerFocusQ then
+			and top.trackerFocusQ == ui.trackerFocusQ
+			and top.detailQuestID == ui.detailQuestID then
 			table.remove(ui.history)
 		else
 			break
@@ -567,13 +639,17 @@ local function DescribeBackTarget()
 	local dungShown = ns.IsDungeonViewShown and ns.IsDungeonViewShown() or false
 	PruneSameHistoryTop()
 	local top = ui.history[#ui.history]
+	if ui.detailQuestID then
+		local tabLbl = TAB_NAMES[(top and top.tab) or (ns.db and ns.db.panelTab) or "tracker"] or "Tracker"
+		return true, "Back to " .. tabLbl, "Close Quest Text and return to the quest list (or press Mouse Back)."
+	end
 	if dungShown and (not top or not top.dungeonOpen) then
 		local dName = ui.dungeonOpenName or "dungeon"
 		local where = (top and top.zoneName) or "the world map"
 		return true, "Back to World Map", ("Close %s floor map and return to %s (or right-click map / press Esc)."):format(dName, where)
 	end
 	if not top then
-		return false, "Back", "After switching tabs, searching, or opening a dungeon floor map, click here (or press Mouse Back) to return right where you were."
+		return false, "Back", "After switching tabs, reading Quest Text, searching, or opening a dungeon floor map, click here (or press Mouse Back) to return right where you were."
 	end
 	if top.dungeonOpen and top.dungeonTitle then
 		return true, "Back to " .. top.dungeonTitle .. " Map", "Re-open the dungeon floor map."
@@ -596,6 +672,15 @@ function ns.GoBack()
 	local dungShown = ns.IsDungeonViewShown and ns.IsDungeonViewShown() or false
 	Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 	local top = ui.history[#ui.history]
+	if ui.detailQuestID and (not top or (top.tab == (ns.db and ns.db.panelTab) and not top.detailQuestID)) then
+		if top and top.reason == "details" then
+			table.remove(ui.history)
+		end
+		ui.detailQuestID = nil
+		ui.detailPin = nil
+		if ns.OnLayerChanged then ns.OnLayerChanged() end
+		return true
+	end
 	if dungShown and (not top or not top.dungeonOpen) then
 		if top and top.reason == "dungeon" then
 			table.remove(ui.history)
@@ -621,14 +706,14 @@ function ns.GoBack()
 	end
 	ns.SetFocusedPin(entry.pin, true)
 	ui.trackerFocusQ = entry.trackerFocusQ
-	if not wantRef and ns.UpdateFocus then ns.UpdateFocus(false) end
-	if entry.pin then
-		if ns.SyncQuestDetailsPane then
-			ns.SyncQuestDetailsPane(ns.FocusedPin(), entry.mapState and entry.mapState.map)
-		end
-	elseif ns.CloseQuestDetailsIfShown then
-		ns.CloseQuestDetailsIfShown()
+	if entry.detailQuestID and ns.QuestInLog(entry.detailQuestID) then
+		ui.detailQuestID = entry.detailQuestID
+		ui.detailPin = entry.detailPin
+	else
+		ui.detailQuestID = nil
+		ui.detailPin = nil
 	end
+	if not wantRef and ns.UpdateFocus then ns.UpdateFocus(false) end
 	if entry.dungeonOpen and (entry.dungeonPin or entry.dungeonTitle) and ns.OpenInstancePin then
 		ui.dungeonOpenPin, ui.dungeonOpenName = entry.dungeonPin, entry.dungeonTitle
 		if not ns.OpenInstancePin(entry.dungeonPin, ui.panel, entry.dungeonTitle, true) and ns.RestoreMapState then
@@ -751,6 +836,13 @@ function ns.SelectSidebarTab(tabKey)
 	local dungShown = ns.IsDungeonViewShown and ns.IsDungeonViewShown() or false
 
 	if not searching and curTab == tabKey then
+		if ui.detailQuestID then
+			Sound("IG_CHARACTER_INFO_TAB")
+			ui.detailQuestID = nil
+			ui.detailPin = nil
+			if ns.OnLayerChanged then ns.OnLayerChanged() end
+			return
+		end
 		if dungShown and ns.CloseDungeonView then
 			Sound("IG_CHARACTER_INFO_TAB")
 			ns.CloseDungeonView()
@@ -772,6 +864,8 @@ function ns.SelectSidebarTab(tabKey)
 	end
 
 	PushNavState("tab")
+	ui.detailQuestID = nil
+	ui.detailPin = nil
 	if dungShown and ns.CloseDungeonView then ns.CloseDungeonView() end
 	ns.db.panelTab = tabKey
 	if searching then SetSearchQuiet("") end
@@ -802,6 +896,8 @@ function ns.RevealQuestInPanel(pin, forceTab, _enableRefLayer, exactPin)
 	if ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.CloseDungeonView then
 		ns.CloseDungeonView()
 	end
+	ui.detailQuestID = nil
+	ui.detailPin = nil
 	if ui.found then SetSearchQuiet("") end
 	local zMap = (ns.P and ns.P.zone[pin]) or (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
 	local viewZ = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()

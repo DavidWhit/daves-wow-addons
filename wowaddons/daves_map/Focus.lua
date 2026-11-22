@@ -35,6 +35,9 @@ local state = {
 	clickFromTracker = nil,
 	clickWasFocused = nil,
 	inQuestDetails = false,
+	detailsOpenedByBlizzQ = nil,
+	detailsOpenedByBlizzAt = 0,
+	detailsHadPriorDetail = nil,
 	hooksInstalled = false,
 }
 
@@ -98,7 +101,7 @@ end
 function ns.CollectTrackerQuests()
 	local pinned = (ns.db and ns.db.pinned) or {}
 	local focusQ = ns.ActiveFocusQuest()
-	local buckets = { focused = {}, ready = {}, pinned = {}, tracking = {} }
+	local buckets = { focused = {}, ready = {}, pinned = {}, tracking = {}, log = {} }
 	local seenQ = {}
 	local nEntries = ns.NumQuestLogEntries() or 0
 	for idx = 1, nEntries do
@@ -115,6 +118,8 @@ function ns.CollectTrackerQuests()
 					buckets.pinned[#buckets.pinned + 1] = q
 				elseif ns.QuestWatched(q) then
 					buckets.tracking[#buckets.tracking + 1] = q
+				else
+					buckets.log[#buckets.log + 1] = q
 				end
 			end
 		end
@@ -472,17 +477,9 @@ function ns.RevalidateFocusOnFilterChange()
 	end
 end
 
-local function IsGamepadActive()
-	return (InputUtil and InputUtil.IsGamepadUIEnabled and InputUtil.IsGamepadUIEnabled()) == true
-end
-
 function ns.CloseQuestDetailsIfShown()
-	if InCombatLockdown() or IsGamepadActive() then return end
-	local d = QuestMapFrame and QuestMapFrame.DetailsFrame
-	if d and d:IsShown() and QuestMapFrame_CloseQuestDetails then
-		state.inQuestDetails = true
-		ns.WithMutedSound(function() QuestMapFrame_CloseQuestDetails() end)
-		state.inQuestDetails = false
+	if ns.CloseQuestDetails then
+		ns.CloseQuestDetails(true)
 	end
 end
 
@@ -500,52 +497,25 @@ local function QuestIDForDetails(pin)
 	return nil
 end
 
-function ns.SyncQuestDetailsPane(pin, targetMapHint, fromBgEvent)
-	if not (pin and ns.DATA and WorldMapFrame and WorldMapFrame:IsShown()) or InCombatLockdown() or IsGamepadActive() then
+-- Quest details now render inside Dave's Map (`QuestDetails.lua`) instead of Blizzard's QuestMapFrame.
+-- Keep active drill-in details synced when a background chain step advances, without popping Blizzard's side panel.
+function ns.SyncQuestDetailsPane(pin, _targetMapHint, fromBgEvent)
+	if not (pin and ns.DATA and WorldMapFrame and WorldMapFrame:IsShown()) then
 		return false
 	end
-	if fromBgEvent and (WorldMapFrame:IsMaximized() or not (QuestMapFrame and QuestMapFrame:IsShown())) then return false end
 	local q = QuestIDForDetails(pin)
-	if not q then
-		if not fromBgEvent then ns.CloseQuestDetailsIfShown() end
+	if fromBgEvent then
+		if q and ns.PanelUI and ns.PanelUI.detailQuestID and ns.OpenQuestDetails then
+			ns.OpenQuestDetails(q, pin, true)
+			return true
+		end
 		return false
 	end
-	local qMap = GetQuestUiMapID and GetQuestUiMapID(q) or 0
-	if issecretvalue(qMap) or type(qMap) ~= "number" then qMap = 0 end
-	local stitch = ns.StitchWorld()
-	local hintMap = targetMapHint or (ns.P and ns.P.zone[ns.ActivePinTarget(pin)])
-	local useStitch = Stitched() or (stitch and stitch.enabled and hintMap and ns.IsStitchableMap(hintMap))
-	if useStitch then
-		if qMap ~= 0 and not ns.IsStitchableMap(qMap) then ns.CloseQuestDetailsIfShown(); return false end
-	elseif qMap ~= 0 then
-		local expectMap = targetMapHint or WorldMapFrame:GetMapID()
-		if expectMap and expectMap ~= 0 and qMap ~= expectMap then ns.CloseQuestDetailsIfShown(); return false end
+	if ns.PanelUI and ns.PanelUI.detailQuestID and q and ns.OpenQuestDetails then
+		ns.OpenQuestDetails(q, pin, true)
+		return true
 	end
-	local d = QuestMapFrame and QuestMapFrame.DetailsFrame
-	if d and d:IsShown() and d.questID == q and QuestMapFrame:IsShown() and not WorldMapFrame:IsMaximized() then return true end
-	local u0, v0, z0
-	if Stitched() and stitch and stitch.ViewNow then u0, v0, z0 = stitch.ViewNow() end
-	local keepSidebarLock = state.refPinnedMap ~= nil or (ns.HasRefContextLock and ns.HasRefContextLock())
-	if keepSidebarLock then
-		state.inSidebarNav = true
-		state.sidebarNavAt = GetTime()
-	end
-	state.inQuestDetails, state.ownOpen = true, true
-	ns.WithMutedSound(function()
-		if WorldMapFrame:IsMaximized() or not (QuestMapFrame and QuestMapFrame:IsShown()) then
-			if QuestMapFrame_OpenToQuestDetails then QuestMapFrame_OpenToQuestDetails(q) end
-		else
-			if QuestMapFrame.SetDisplayMode and QuestLogDisplayMode and QuestLogDisplayMode.Quests then
-				QuestMapFrame:SetDisplayMode(QuestLogDisplayMode.Quests)
-			end
-			if QuestMapFrame_ShowQuestDetails then QuestMapFrame_ShowQuestDetails(q) end
-		end
-	end)
-	state.ownOpen, state.inQuestDetails = nil, false
-	if keepSidebarLock then state.inSidebarNav = false end
-	if ns.SyncPanelDock then ns.SyncPanelDock() end
-	if u0 and Stitched() and stitch and stitch.ShowNow then stitch.ShowNow(u0, v0, z0) end
-	return true
+	return false
 end
 
 function ns.SyncActiveChainStep()
@@ -661,23 +631,7 @@ local function FlyToMap(mapID, u, v, closer)
 end
 
 local function SetWorldMapID(mapID)
-	local d = QuestMapFrame and QuestMapFrame.DetailsFrame
-	local keepQ = (d and d:IsShown() and QuestMapFrame:IsShown() and not WorldMapFrame:IsMaximized()) and d.questID or nil
-	if keepQ and issecretvalue(keepQ) then keepQ = nil end
 	WorldMapFrame:SetMapID(mapID)
-	if keepQ and d and not d:IsShown() and QuestMapFrame_ShowQuestDetails and not IsGamepadActive() then
-		local qMap = GetQuestUiMapID and GetQuestUiMapID(keepQ) or 0
-		if issecretvalue(qMap) or type(qMap) ~= "number" then qMap = 0 end
-		if qMap == 0 or qMap == mapID or (Stitched() and ns.IsStitchableMap(qMap)) then
-			local stitch = ns.StitchWorld()
-			local u0, v0, z0
-			if Stitched() and stitch and stitch.ViewNow then u0, v0, z0 = stitch.ViewNow() end
-			state.inQuestDetails = true
-			ns.WithMutedSound(function() QuestMapFrame_ShowQuestDetails(keepQ) end)
-			state.inQuestDetails = false
-			if u0 and Stitched() and stitch and stitch.ShowNow then stitch.ShowNow(u0, v0, z0) end
-		end
-	end
 end
 
 local function ShowMap(mapID)
@@ -901,6 +855,8 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 	local reopen = state.pendingOpen == q and not InCombatLockdown()
 	state.pendingOpen = nil
 	local mapAlreadyOpen = WorldMapFrame ~= nil and WorldMapFrame:IsShown() and (GetTime() - state.mapShownAt > .1)
+	local fromBlizzDetails = (state.detailsOpenedByBlizzQ == q and state.detailsOpenedByBlizzAt == GetTime())
+	local prevDetailQ = fromBlizzDetails and state.detailsHadPriorDetail or (ns.PanelUI and ns.PanelUI.detailQuestID or nil)
 	local alreadyFocused = (wasFocused ~= nil) and wasFocused or ns.ClickFocused(q)
 	local letGo
 	if not focusEnabled then
@@ -908,7 +864,8 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 			letGo = now ~= q and not reopen
 			if letGo and state.lockedPin ~= pin then return false end
 		else
-			letGo = state.lockedPin == pin and not reopen and state.autoFocusedAt ~= GetTime() and mapAlreadyOpen
+			local matchedPrev = (pin ~= nil and state.lockedPin == pin) or (pin == nil and prevDetailQ == q)
+			letGo = matchedPrev and not reopen and state.autoFocusedAt ~= GetTime() and mapAlreadyOpen
 		end
 	elseif how == "toggle" then
 		letGo = alreadyFocused and not reopen and mapAlreadyOpen
@@ -921,6 +878,9 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 		Sound(letGo and "IG_MAINMENU_OPTION_CHECKBOX_OFF" or "IG_MAINMENU_OPTION_CHECKBOX_ON")
 	end
 	if letGo then
+		if fromBlizzDetails and ns.PopRecentTrackerPush then
+			ns.PopRecentTrackerPush()
+		end
 		ns.SetClickFocus(nil)
 		if focusEnabled and now == q then ns.SetSuperTrackedQuest(0) end
 		if state.lockedPin then ns.SetFocusedPin(nil, true) end
@@ -936,13 +896,13 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 
 	if fromTracker then
 		-- Focused tracker quests stay on the Base map layer (tracked/focused objectives + base POIs)
-		-- and display in the dedicated `Tracker` tab (Focused / Ready / Pinned / Tracking).
+		-- and drill into the quest's text inside the integrated `Tracker` tab.
 		ns.SetRefLayer(nil, true)
 	end
 	ns.SetFocusedPin(pin, true)
 	if focusEnabled then ns.SetClickFocus(q) end
 	if fromTracker and ns.OpenTrackerTab then
-		ns.OpenTrackerTab(focusEnabled and q or nil, pin)
+		ns.OpenTrackerTab(focusEnabled and q or nil, pin, fromBlizzDetails, true, q)
 	end
 	if how == "focused" and reopen and now ~= q then
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON", true)
@@ -953,11 +913,13 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 		ns.Refresh()
 	end
 	if how == "details" then
+		if ns.OpenQuestDetails and ns.QuestInLog(q) then
+			ns.OpenQuestDetails(q, pin)
+		end
 		FlyToQuest(q)
 		return false
 	end
-	local d = QuestMapFrame and QuestMapFrame.DetailsFrame
-	if WorldMapFrame and WorldMapFrame:IsShown() and d and d:IsShown() and d.questID == q then
+	if WorldMapFrame and WorldMapFrame:IsShown() then
 		if pin then
 			local target = ns.ActivePinTarget(pin)
 			if mapAlreadyOpen then
@@ -975,35 +937,28 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 		return false
 	end
 	if InCombatLockdown() then
-		if WorldMapFrame and WorldMapFrame:IsShown() then
-			if pin then
-				ns.ShowPinMap(ns.ActivePinTarget(pin), true)
-			else
-				CentreQuest(q)
-			end
-		else
-			state.pendingOpen = q
-			ns.Print("focused it; can't open the map in combat: click it again after combat to see it.")
-		end
+		state.pendingOpen = q
+		ns.Print("focused it; can't open the map in combat: click it again after combat to see it.")
 		return false
 	end
-	local wasShown = WorldMapFrame and WorldMapFrame:IsShown()
-	if QuestMapFrame_OpenToQuestDetails then
+	if OpenWorldMap then
 		state.ownOpen = true
-		xpcall(QuestMapFrame_OpenToQuestDetails, CallErrorHandler, q)
+		xpcall(OpenWorldMap, CallErrorHandler)
 		state.ownOpen = nil
 	end
 	if pin then
 		local target = ns.ActivePinTarget(pin)
-		if wasShown then
-			ns.ShowPinMap(target, true)
-		else
-			C_Timer.After(0, function()
-				if WorldMapFrame and WorldMapFrame:IsShown() then
-					ns.ShowPinMap(target, true)
-				end
-			end)
-		end
+		C_Timer.After(0, function()
+			if WorldMapFrame and WorldMapFrame:IsShown() then
+				ns.ShowPinMap(target, true)
+			end
+		end)
+	else
+		C_Timer.After(0, function()
+			if WorldMapFrame and WorldMapFrame:IsShown() then
+				CentreQuest(q)
+			end
+		end)
 	end
 	return false
 end
@@ -1052,19 +1007,18 @@ local function OnQuestDetails(q)
 		return
 	end
 	ns.OnUserMapNavigate(false)
+	if ns.QuestInLog(q) and ns.OpenTrackerTab then
+		state.detailsHadPriorDetail = ns.PanelUI and ns.PanelUI.detailQuestID or nil
+		state.detailsOpenedByBlizzQ = q
+		state.detailsOpenedByBlizzAt = GetTime()
+		ns.OpenTrackerTab(nil, nil, false, true, q)
+	end
 	if not GetQuestUiMapID or GetQuestUiMapID(q) ~= 0 then
 		return
 	end
-	local details = QuestMapFrame and QuestMapFrame.DetailsFrame
-	local wasShown = details and details:IsShown() and details.questID == q
 	if ns.ShowQuestOnMap(q) == false and ns.ShowUnmappedQuestFallback then
 		ns.ShowUnmappedQuestFallback(q)
 		return
-	end
-	if wasShown and details and not details:IsShown() and QuestMapFrame_ShowQuestDetails and not InCombatLockdown() then
-		state.inQuestDetails = true
-		xpcall(QuestMapFrame_ShowQuestDetails, CallErrorHandler, q)
-		state.inQuestDetails = false
 	end
 end
 

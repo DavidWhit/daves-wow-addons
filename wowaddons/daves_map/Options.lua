@@ -86,6 +86,7 @@ end
 function ns.ToggleOptions()
 	if WorldMapFrame and WorldMapFrame:IsShown() and ns.db then
 		ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		if ns.CloseQuestDetails then ns.CloseQuestDetails(true) end
 		ns.db.panelTab = "layers"
 		if ns.SetSearchQuiet then ns.SetSearchQuiet("") end
 		if ns.SetRefLayer then ns.SetRefLayer(nil, true) end
@@ -274,16 +275,45 @@ function ns:InitOptions()
 		end)
 	end
 
+	if Settings.RegisterProxySetting and ns.BLIZZ_MAP_FILTERS and ns.GetBlizzMapFilter and ns.SetBlizzMapFilter then
+		for _, fdef in ipairs(ns.BLIZZ_MAP_FILTERS) do
+			if fdef.cvar or fdef.minimapFilter then
+				local fKey = fdef.key
+				local defVal = true
+				if fdef.default ~= nil then
+					defVal = fdef.default == true
+				elseif fdef.minimapFilter and C_Minimap and C_Minimap.GetDefaultTrackingValue then
+					defVal = C_Minimap.GetDefaultTrackingValue(fdef.minimapFilter) == true
+				end
+				local proxy = Settings.RegisterProxySetting(
+					category,
+					ADDON .. "_" .. fKey,
+					Settings.VarType.Boolean,
+					fdef.label,
+					defVal,
+					function() return ns.GetBlizzMapFilter(fKey) == true end,
+					function(v)
+						if syncingSettings then return end
+						ns.SetBlizzMapFilter(fKey, v == true)
+						ns.RefreshOptions()
+					end
+				)
+				Settings.CreateCheckbox(category, proxy, fdef.tip)
+			end
+		end
+	end
+
 	Settings.RegisterAddOnCategory(category)
 	ns.settingsCategory = category
 end
 
 ---------------------------------------------------------------------------
--- Window Style Dialog (same HUD Edit Mode controls & look as Dave's Sack)
+-- Map Settings & Style Dialog (two-column HUD Edit Mode dialog: Look + Map Tracking)
 ---------------------------------------------------------------------------
 do
-	local STYLE_W, STYLE_H = 288, 354
-	local PAD_X, INNER_W = 24, 240
+	local STYLE_W, STYLE_H = 540, 354
+	local PAD_X, COL_W, COL_GAP = 22, 236, 24
+	local COL2_X = PAD_X + COL_W + COL_GAP
 	local opt, controls
 
 	local function TryTemplate(kind, name, parent, template)
@@ -314,6 +344,38 @@ do
 		line:SetColorTexture(1, 1, 1, 0.14)
 		line:SetPoint("TOPLEFT", x, y - 16)
 		line:SetSize(w, 1)
+	end
+
+	local function StyleCheckbox(parent, x, y, width, label, get, set, tip)
+		local cb = CreateFrame("Button", nil, parent)
+		cb:SetSize(width, 24)
+		cb:SetPoint("TOPLEFT", x, y)
+		local hl = cb:CreateTexture(nil, "HIGHLIGHT")
+		hl:SetAllPoints()
+		hl:SetColorTexture(1, 0.84, 0.25, 0.12)
+		local box = cb:CreateTexture(nil, "ARTWORK")
+		box:SetAtlas("questlog-icon-ticksquare", true)
+		box:SetPoint("LEFT", 2, 0)
+		local mark = cb:CreateTexture(nil, "OVERLAY")
+		mark:SetAtlas("questlog-icon-checkmark-yellow", true)
+		mark:SetPoint("CENTER", box, "CENTER", 1, 1)
+		local text = cb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		text:SetPoint("LEFT", box, "RIGHT", 7, 0)
+		text:SetPoint("RIGHT", -2, 0)
+		text:SetJustifyH("LEFT")
+		text:SetWordWrap(false)
+		text:SetText(label)
+		function cb:Refresh()
+			mark:SetShown(get() == true)
+		end
+		cb:SetScript("OnClick", function(self)
+			local nextV = not (get() == true)
+			set(nextV)
+			self:Refresh()
+		end)
+		AddTip(cb, tip)
+		controls[#controls + 1] = cb
+		return cb
 	end
 
 	local function StyleSlider(parent, x, y, width, label, minV, maxV, step, fmt, get, set, tip)
@@ -520,7 +582,7 @@ do
 		end
 		ns.styleDialogBorder = border
 
-		local title = Label(opt, "Window Style", "GameFontHighlightLarge")
+		local title = Label(opt, "Map Settings", "GameFontHighlightLarge")
 		title:SetPoint("TOP", 0, -15)
 
 		local close = TryTemplate("Button", nil, opt, "UIPanelCloseButton")
@@ -538,8 +600,8 @@ do
 		close:SetScript("OnClick", function() opt:Hide() end)
 
 		local db = ns.db
-		Header(opt, "Size & Pins", PAD_X, -48, INNER_W)
-		StyleSlider(opt, PAD_X, -70, INNER_W, "Window scale", 0.5, 1.5, 0.05,
+		Header(opt, "Size & Look", PAD_X, -48, COL_W)
+		StyleSlider(opt, PAD_X, -70, COL_W, "Window scale", 0.5, 1.5, 0.05,
 			function(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) end,
 			function() return db.panelScale or 1.0 end,
 			function(v)
@@ -550,7 +612,7 @@ do
 			end,
 			"Scale of the Dave's Map window (50% to 150%).")
 
-		StyleSlider(opt, PAD_X, -118, INNER_W, "Pin size", 0.5, 2.0, 0.05,
+		StyleSlider(opt, PAD_X, -118, COL_W, "Pin size", 0.5, 2.0, 0.05,
 			function(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) end,
 			function() return db.pinScale or 1.0 end,
 			function(v)
@@ -560,8 +622,7 @@ do
 			end,
 			"Size of the pins on the world map (50% to 200%).")
 
-		Header(opt, "Look", PAD_X, -168, INNER_W)
-		StyleSlider(opt, PAD_X, -190, INNER_W, "Background", 0.2, 1.0, 0.05,
+		StyleSlider(opt, PAD_X, -166, COL_W, "Background", 0.2, 1.0, 0.05,
 			function(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) end,
 			function() return db.background or 0.8 end,
 			function(v)
@@ -570,9 +631,9 @@ do
 				if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
 				if ns.OnLayerChanged then ns.OnLayerChanged() end
 			end,
-			"Opacity / darkness of the window background (20% to 100%). This dialog follows the same setting.")
+			"Opacity / darkness of the World Map and Dave's Map window background (20% to 100%).")
 
-		StyleDropdown(opt, PAD_X, -236, INNER_W, "Background style", ns.BACKGROUND_STYLES,
+		StyleDropdown(opt, PAD_X, -214, COL_W, "Background style", ns.BACKGROUND_STYLES,
 			function() return db.backgroundStyle or "dark" end,
 			function(key)
 				db.backgroundStyle = key
@@ -580,16 +641,57 @@ do
 				if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
 				if ns.OnLayerChanged then ns.OnLayerChanged() end
 			end,
-			"Which of Blizzard's standard backgrounds shows behind Dave's Map (same styles as Dave's Sack).")
+			"Which of Blizzard's standard backgrounds shows behind the World Map and Dave's Map.")
 
-		local dockBtn = PanelButton(opt, "Dock to Map (Reset Size)", INNER_W)
+		Header(opt, "Map Tracking & Filters", COL2_X, -48, COL_W)
+		local ty = -70
+		if ns.BLIZZ_MAP_FILTERS and ns.GetBlizzMapFilter and ns.SetBlizzMapFilter then
+			for _, fdef in ipairs(ns.BLIZZ_MAP_FILTERS) do
+				if fdef.cvar or fdef.minimapFilter then
+					local fKey = fdef.key
+					StyleCheckbox(opt, COL2_X, ty, COL_W, fdef.label,
+						function() return ns.GetBlizzMapFilter(fKey) == true end,
+						function(v)
+							if ns.SetBlizzMapFilter(fKey, v) then
+								ns.Sound(v and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+								if ns.NotifySetting then ns.NotifySetting(fKey) end
+								if ns.OnLayerChanged then ns.OnLayerChanged() end
+							end
+						end,
+						fdef.tip)
+					ty = ty - 26
+				end
+			end
+		end
+		StyleCheckbox(opt, COL2_X, ty, COL_W, "Track only my zone's quests",
+			function() return db.trackMyZone ~= false end,
+			function(v)
+				db.trackMyZone = v
+				ns.Sound(v and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+				if ns.NotifySetting then ns.NotifySetting("trackMyZone") end
+				if ns.TrackZoneQuests then ns.TrackZoneQuests() end
+				if ns.OnLayerChanged then ns.OnLayerChanged() end
+			end,
+			"Objective Tracker follows quests for your current zone; check or pin quests to keep them tracked across zones.")
+		ty = ty - 26
+		StyleCheckbox(opt, COL2_X, ty, COL_W, "Show party quest numbers",
+			function() return db.groupQuestCount ~= false end,
+			function(v)
+				db.groupQuestCount = v
+				ns.Sound(v and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+				if ns.NotifySetting then ns.NotifySetting("groupQuestCount") end
+				if ns.RefreshGroupQuestCounts then ns.RefreshGroupQuestCounts() elseif ns.OnLayerChanged then ns.OnLayerChanged() end
+			end,
+			"While grouped, show a brass number badge beside quests showing how many group members are on that quest.")
+
+		local dockBtn = PanelButton(opt, "Dock to Map (Reset Size)", COL_W)
 		dockBtn:SetPoint("BOTTOMLEFT", PAD_X, 46)
 		dockBtn:SetScript("OnClick", function()
 			ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 			if ns.ResetPanelPosition then ns.ResetPanelPosition() end
 		end)
 
-		local resetBtn = PanelButton(opt, "Reset Look", 114)
+		local resetBtn = PanelButton(opt, "Reset Look", 112)
 		resetBtn:SetPoint("BOTTOMLEFT", PAD_X, 18)
 		resetBtn:SetScript("OnClick", function()
 			ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
@@ -605,8 +707,8 @@ do
 			if ns.Refresh then ns.Refresh() end
 		end)
 
-		local allBtn = PanelButton(opt, "All Settings", 114)
-		allBtn:SetPoint("BOTTOMRIGHT", -PAD_X, 18)
+		local allBtn = PanelButton(opt, "All Settings", 112)
+		allBtn:SetPoint("BOTTOMLEFT", PAD_X + 124, 18)
 		allBtn:SetScript("OnClick", function()
 			ns.ToggleOptions()
 		end)

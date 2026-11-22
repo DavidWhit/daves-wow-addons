@@ -28,6 +28,7 @@ local ROW_HEIGHTS = {
 	reward = 24,
 	cstep = 26,
 	quest = 28,
+	logquest = 28,
 	dung_open = 34,
 	poi = 34,
 	result = 34,
@@ -328,11 +329,16 @@ local function AppendRewardsForQuest(out, questPin, indent, dim, stepNum, seen)
 	end
 end
 
-local function EmitQuestEntry(out, entry)
+local function EmitQuestEntry(out, entry, showTrackCheck)
 	local D = ns.DATA
+	local wantCheck = showTrackCheck == true
 	local inGroup = IsInGroup and IsInGroup()
 	if entry.hasChain then
 		local ch = entry.chain
+		local headLogQ = entry.liveQid
+			or (entry.inLogPin and ns.LogQuestIDForPin and ns.LogQuestIDForPin(entry.inLogPin))
+			or (ns.LogQuestIDForPin and ns.LogQuestIDForPin(entry.pin))
+		local headTrackQ = (wantCheck and headLogQ and ns.QuestInLog(headLogQ)) and headLogQ or nil
 		local headGCnt, headGQid = nil, nil
 		if not entry.expanded and inGroup and ns.GroupQuestCountForPin then
 			local gCnt, gQid = ns.GroupQuestCountForPin(entry.inLogPin or entry.activePin, entry.liveQid)
@@ -357,6 +363,9 @@ local function EmitQuestEntry(out, entry)
 			chainDone = entry.chainDone or 0,
 			chainSet = ch.set,
 			expanded = entry.expanded,
+			inLogQuestID = headLogQ,
+			trackQuestID = headTrackQ,
+			watched = headTrackQ and ns.QuestWatched(headTrackQ) or nil,
 			groupCount = headGCnt,
 			groupQuestID = headGQid,
 			lvlTxt = entry.lvlTxt,
@@ -384,6 +393,8 @@ local function EmitQuestEntry(out, entry)
 					stepXP = "|cff666666-|r"
 				end
 				local stepLiveQ = (entry.liveQid and stepPin == entry.inLogPin) and entry.liveQid or nil
+				local stepLogQ = stepLiveQ or (ns.LogQuestIDForPin and ns.LogQuestIDForPin(stepPin)) or nil
+				local stepTrackQ = (wantCheck and stepLogQ and ns.QuestInLog(stepLogQ)) and stepLogQ or nil
 				local stepGCnt, stepGQid = 0, nil
 				if inGroup and ns.GroupQuestCountForPin then
 					stepGCnt, stepGQid = ns.GroupQuestCountForPin(stepPin, stepLiveQ)
@@ -401,6 +412,9 @@ local function EmitQuestEntry(out, entry)
 					state = sst,
 					isDone = isDone,
 					isCurrent = isCurrent,
+					inLogQuestID = stepLogQ,
+					trackQuestID = stepTrackQ,
+					watched = stepTrackQ and ns.QuestWatched(stepTrackQ) or nil,
 					groupCount = stepGCnt > 0 and stepGCnt or nil,
 					groupQuestID = stepGCnt > 0 and stepGQid or nil,
 					xpColTxt = stepXP,
@@ -415,6 +429,8 @@ local function EmitQuestEntry(out, entry)
 			end
 		end
 	else
+		local logQ = entry.liveQid or (ns.LogQuestIDForPin and ns.LogQuestIDForPin(entry.pin)) or nil
+		local trackQ = (wantCheck and logQ and ns.QuestInLog(logQ)) and logQ or nil
 		local gCnt, gQid = 0, nil
 		if inGroup and ns.GroupQuestCountForPin then
 			gCnt, gQid = ns.GroupQuestCountForPin(entry.pin, entry.liveQid)
@@ -428,6 +444,9 @@ local function EmitQuestEntry(out, entry)
 			starterZone = entry.starterZone,
 			state = entry.state,
 			here = IsHere(entry.pin),
+			inLogQuestID = logQ,
+			trackQuestID = trackQ,
+			watched = trackQ and ns.QuestWatched(trackQ) or nil,
 			groupCount = gCnt > 0 and gCnt or nil,
 			groupQuestID = gCnt > 0 and gQid or nil,
 			lvlTxt = entry.lvlTxt,
@@ -586,6 +605,22 @@ local function BuildLayersItems()
 		checked = db.mapBanner ~= false,
 	}
 
+	if ns.BLIZZ_MAP_FILTERS and ns.GetBlizzMapFilter then
+		ui.items[#ui.items + 1] = { kind = "head", title = "Blizzard Map Tracking & Filters", right = "" }
+		for _, fdef in ipairs(ns.BLIZZ_MAP_FILTERS) do
+			if fdef.cvar or fdef.minimapFilter then
+				ui.items[#ui.items + 1] = {
+					kind = "setting_check",
+					skey = fdef.key,
+					label = fdef.label,
+					tipTitle = fdef.label,
+					tip = fdef.tip,
+					checked = ns.GetBlizzMapFilter(fdef.key) == true,
+				}
+			end
+		end
+	end
+
 	local stitch = ns.OM and ns.OM:GetModule("worldmap")
 	if stitch and stitch.db and not ns.OpenMapOn() then
 		ui.items[#ui.items + 1] = { kind = "head", title = "Seamless & Dungeon Maps", right = "" }
@@ -692,7 +727,7 @@ local function BuildZoneItems()
 		if not closed then
 			ui.items[#ui.items + 1] = { kind = "qcols" }
 			for _, entry in ipairs(entries) do
-				EmitQuestEntry(ui.items, entry, zName)
+				EmitQuestEntry(ui.items, entry, false)
 			end
 		end
 	end
@@ -796,7 +831,7 @@ local function BuildDungeonItems()
 				ui.items[#ui.items + 1] = { kind = "qcols" }
 			end
 			for _, entry in ipairs(qentries) do
-				EmitQuestEntry(ui.items, entry, zName)
+				EmitQuestEntry(ui.items, entry, false)
 			end
 		end
 	end
@@ -807,6 +842,7 @@ local TRACKER_SECTIONS = {
 	{ key = "ready", title = "Ready to Turn In" },
 	{ key = "pinned", title = "Pinned" },
 	{ key = "tracking", title = "Tracking" },
+	{ key = "log", title = "Quest Log" },
 }
 
 local function ResolveTrackerPin(q)
@@ -818,18 +854,40 @@ local function ResolveTrackerPin(q)
 	return pin
 end
 
+local function BuildLogMetaMap()
+	local meta = {}
+	local header = nil
+	local nEntries = ns.NumQuestLogEntries and ns.NumQuestLogEntries() or 0
+	for idx = 1, nEntries do
+		local info = ns.QuestInfo and ns.QuestInfo(idx)
+		if info then
+			if info.isHeader then
+				header = info.title
+			elseif not info.isHidden and info.questID and info.questID ~= 0 and not issecretvalue(info.questID) then
+				meta[info.questID] = {
+					title = info.title,
+					level = info.level or 0,
+					zone = header,
+				}
+			end
+		end
+	end
+	return meta
+end
+
 local function BuildTrackerItems()
 	local D = ns.DATA
 	if not (D and ns.Calibrate() and ns.CollectTrackerQuests) then return end
 	local bucketQuests = ns.CollectTrackerQuests()
+	local logMeta = BuildLogMetaMap()
 
-	-- Deduplicate chain starters in strict priority order (Focused -> Ready -> Pinned -> Tracking)
+	-- Deduplicate chain starters in strict priority order (Focused -> Ready -> Pinned -> Tracking -> Quest Log)
 	-- so two active steps of the same branched chain never render duplicate chain blocks.
 	local seenStarter = {}
 	local fold = (ns.db and ns.db.zoneFold) or {}
 	for _, sec in ipairs(TRACKER_SECTIONS) do
-		local entries, noData = {}, {}
-		for _, q in ipairs(bucketQuests[sec.key]) do
+		local entries, logOnly = {}, {}
+		for _, q in ipairs(bucketQuests[sec.key] or {}) do
 			local pin = ResolveTrackerPin(q)
 			if pin then
 				local entry = MakeQuestEntry(pin, nil, true, q)
@@ -838,30 +896,69 @@ local function BuildTrackerItems()
 					entries[#entries + 1] = entry
 				end
 			else
-				noData[#noData + 1] = { q = q, title = (ns.QuestTitle and ns.QuestTitle(q)) or ("Quest #" .. tostring(q)) }
+				local lm = logMeta[q]
+				logOnly[#logOnly + 1] = {
+					q = q,
+					title = (lm and lm.title) or (ns.QuestTitle and ns.QuestTitle(q)) or ("Quest #" .. tostring(q)),
+					level = lm and lm.level or 0,
+					zone = lm and lm.zone or nil,
+				}
 			end
 		end
-		local total = #entries + #noData
+		local total = #entries + #logOnly
 		if total > 0 then
 			SortQuestEntries(entries)
+			if #logOnly > 1 then
+				local mode = (ns.db and ns.db.questSort) or "lvl"
+				local asc = not (ns.db and ns.db.questSortAsc == false)
+				table.sort(logOnly, function(a, b)
+					if a == b then return false end
+					if mode == "name" then
+						local tc = CompareDirected((a.title or ""):lower(), (b.title or ""):lower(), asc)
+						if tc ~= nil then return tc end
+					elseif mode == "starter" then
+						local sa, sb = (a.zone or ""):lower(), (b.zone or ""):lower()
+						local ea, eb = sa == "", sb == ""
+						if ea ~= eb then return not ea end
+						local sc = CompareDirected(sa, sb, asc)
+						if sc ~= nil then return sc end
+					else
+						local la = (a.level and a.level > 0) and a.level or 999
+						local lb = (b.level and b.level > 0) and b.level or 999
+						local lc = CompareLevel(la, lb, asc)
+						if lc ~= nil then return lc end
+					end
+					local ta, tb = (a.title or ""):lower(), (b.title or ""):lower()
+					if ta ~= tb then return ta < tb end
+					return (a.q or 0) < (b.q or 0)
+				end)
+			end
 			local fkey = "trk:" .. sec.key
 			local closed = fold[fkey] == true
 			ui.items[#ui.items + 1] = { kind = "zsec", key = fkey, title = sec.title, n = tostring(total), closed = closed }
 			if not closed then
-				if #entries > 0 then
+				if #entries > 0 or #logOnly > 0 then
 					ui.items[#ui.items + 1] = { kind = "qcols" }
-					for _, entry in ipairs(entries) do
-						EmitQuestEntry(ui.items, entry)
-					end
 				end
-				for _, nd in ipairs(noData) do
-					local gCnt = ns.GroupQuestCount and ns.GroupQuestCount(nd.q) or 0
+				for _, entry in ipairs(entries) do
+					EmitQuestEntry(ui.items, entry, true)
+				end
+				for _, lq in ipairs(logOnly) do
+					local gCnt = (IsInGroup and IsInGroup() and ns.GroupQuestCount) and ns.GroupQuestCount(lq.q) or 0
+					local isReady = ns.QuestReady(lq.q) or ns.QuestComplete(lq.q) == true
 					ui.items[#ui.items + 1] = {
-						kind = "note",
+						kind = "logquest",
+						questID = lq.q,
+						inLogQuestID = lq.q,
+						trackQuestID = lq.q,
+						watched = ns.QuestWatched(lq.q),
+						title = lq.title,
+						zone = lq.zone,
+						lvlTxt = FormatLvlCell(lq.level),
+						state = isReady and "ready" or "log",
 						groupCount = gCnt > 0 and gCnt or nil,
-						groupQuestID = gCnt > 0 and nd.q or nil,
-						title = "No map data for: " .. nd.title,
-						sub = "QuestieDB Forever has no pin data for this quest yet.",
+						groupQuestID = gCnt > 0 and lq.q or nil,
+						xpColTxt = isReady and "|cffffd200Ready|r" or "|cff7fd4ffIn Log|r",
 					}
 				end
 			end
@@ -871,8 +968,8 @@ local function BuildTrackerItems()
 	if #ui.items == 0 then
 		ui.items[1] = {
 			kind = "note",
-			title = "No quests in tracker",
-			sub = "Track, pin, or click a quest in the Objective Tracker to view its details, chain, and rewards here.",
+			title = "Your Quest Log is empty",
+			sub = "Accept quests in the world or browse the Zone / Dungeon tabs to see available quests.",
 		}
 	end
 end

@@ -1071,7 +1071,8 @@ DockNow = function()
 		return
 	end
 	local log = map.QuestLog
-	local open = not PadView() and view:IsShown() and log and log:IsVisible() and true or false
+	local suppressed = addonNs.IsQuestMapSuppressed and addonNs.IsQuestMapSuppressed()
+	local open = not PadView() and not suppressed and view:IsShown() and log and log:IsVisible() and true or false
 	side:ClearAllPoints()
 	view.port:SetPoint("BOTTOMRIGHT", 0, 0)
 	if open then

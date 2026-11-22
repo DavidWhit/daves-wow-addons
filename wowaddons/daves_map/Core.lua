@@ -85,6 +85,59 @@ function ns.NumQuestLogEntries()
 	return C_QuestLog.GetNumQuestLogEntries()
 end
 
+function ns.QuestLogCounts()
+	local _, numQuests = C_QuestLog.GetNumQuestLogEntries()
+	local maxQuests = (C_QuestLog.GetMaxNumQuestsCanAccept and C_QuestLog.GetMaxNumQuestsCanAccept()) or 25
+	if issecretvalue(numQuests) or type(numQuests) ~= "number" then numQuests = 0 end
+	if issecretvalue(maxQuests) or type(maxQuests) ~= "number" or maxQuests <= 0 then maxQuests = 25 end
+	return numQuests, maxQuests
+end
+
+function ns.LinkQuestInChat(questID, openIfClosed)
+	if type(questID) ~= "number" or questID == 0 or issecretvalue(questID) then return false end
+	if ChatFrameUtil and ChatFrameUtil.TryInsertQuestLinkForQuestID then
+		if ChatFrameUtil.TryInsertQuestLinkForQuestID(questID) then return true end
+	end
+	local link = GetQuestLink and GetQuestLink(questID)
+	if not link or issecretvalue(link) then return false end
+	local insertLink = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
+	if insertLink and insertLink(link) then return true end
+	if openIfClosed == true and ChatFrameUtil and ChatFrameUtil.OpenChat then
+		ChatFrameUtil.OpenChat(link)
+		return true
+	end
+	return false
+end
+
+function ns.ToggleQuestTrack(questID)
+	if type(questID) ~= "number" or questID == 0 or issecretvalue(questID) or not ns.QuestInLog(questID) then
+		return false
+	end
+	if ns.QuestWatched(questID) then
+		if ns.db and ns.db.pinned then ns.db.pinned[questID] = nil end
+		ns.RemoveQuestWatch(questID)
+		ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		return false
+	end
+	local maxWatches = (Constants and Constants.QuestWatchConsts and Constants.QuestWatchConsts.MAX_QUEST_WATCHES) or 25
+	local curWatches = (C_QuestLog.GetNumQuestWatches and C_QuestLog.GetNumQuestWatches()) or 0
+	if not issecretvalue(curWatches) and curWatches >= maxWatches then
+		if UIErrorsFrame and OBJECTIVES_WATCH_TOO_MANY then
+			UIErrorsFrame:AddMessage(OBJECTIVES_WATCH_TOO_MANY, 1.0, 0.1, 0.1, 1.0)
+		else
+			ns.Print("you are already tracking the maximum number of quests.")
+		end
+		return false
+	end
+	if ns.db and ns.db.trackMyZone and not ns.QuestReady(questID) then
+		if type(ns.db.pinned) ~= "table" then ns.db.pinned = {} end
+		ns.db.pinned[questID] = true
+	end
+	ns.AddQuestWatch(questID)
+	ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+	return true
+end
+
 function ns.QuestComplete(questID)
 	return C_QuestLog.IsComplete(questID)
 end
@@ -275,9 +328,10 @@ function ns:ADDON_LOADED(name)
 	if WorldMapFrame then ns.InitLayer() end
 end
 
--- Keep Blizzard's World Map windowed (never fullscreen) and opaque when moving (no mapFade).
+-- Keep Blizzard's World Map windowed (never fullscreen), opaque when moving (no mapFade),
+-- and without Blizzard's built-in Quest Log side panel (questLogOpen = 0).
 -- Uses taint-free CVar writes before WorldMapFrame opens so Blizzard's own WorldMapMixin:OnShow
--- minimizes the map securely without tainting WorldMapFrame.isMaximized in combat.
+-- opens map-only windowed securely without tainting WorldMapFrame.isMaximized in combat.
 local maxMinHooked = false
 function ns.EnforceWindowedOpaqueMap()
 	if not InCombatLockdown() then
@@ -287,6 +341,9 @@ function ns.EnforceWindowedOpaqueMap()
 			end
 			if not GetCVarBool or not GetCVarBool("miniWorldMap") then
 				C_CVar.SetCVar("miniWorldMap", "1")
+			end
+			if not GetCVarBool or GetCVarBool("questLogOpen") then
+				C_CVar.SetCVar("questLogOpen", "0")
 			end
 		end
 	end

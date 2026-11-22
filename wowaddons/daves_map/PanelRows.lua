@@ -129,6 +129,10 @@ local function ResetRow(row)
 	row.groupBadge.questID = nil
 	row.groupBadge:Hide()
 	row.groupBadge:ClearAllPoints()
+	row.trackBtn.questID = nil
+	row.trackBtn.tick:SetChecked(false)
+	row.trackBtn:Hide()
+	row.trackBtn:ClearAllPoints()
 end
 
 local function RenderRow(row, item, yTop)
@@ -165,6 +169,9 @@ local function RenderRow(row, item, yTop)
 		StyleCol(qc.starterBtn, mode == "starter" and ("Starter" .. arrow) or "Starter", mode == "starter")
 		StyleCol(qc.lvlBtn, mode == "lvl" and ("Lvl" .. arrow) or "Lvl", mode == "lvl")
 		StyleCol(qc.xpBtn, mode == "xp" and ("XP" .. arrow) or "XP", mode == "xp")
+		qc.nameBtn:ClearAllPoints()
+		qc.nameBtn:SetPoint("LEFT", qc, "LEFT", (not ui.found and ns.db and ns.db.panelTab == "tracker") and 44 or 26, 0)
+		qc.nameBtn:SetPoint("RIGHT", qc.starterBtn, "LEFT", -COL_STR_GAP, 0)
 		qc:Show()
 		return
 	end
@@ -302,6 +309,56 @@ local function RenderRow(row, item, yTop)
 		return
 	end
 
+	if item.kind == "logquest" then
+		local tb = row.trackBtn
+		tb.questID = item.questID
+		tb.tick:SetChecked(item.watched == true)
+		tb:SetPoint("LEFT", row, "LEFT", 4, 0)
+		tb:Show()
+
+		row.icon:SetPoint("LEFT", 24, 0)
+		PaintStateIcon(row.icon, nil, item.state or "log")
+		row.icon:Show()
+
+		local focusQ = ns.ActiveFocusQuest and ns.ActiveFocusQuest() or nil
+		local selected = (focusQ ~= nil and focusQ == item.questID) or (ui.detailQuestID ~= nil and ui.detailQuestID == item.questID)
+		if selected then
+			row.selBg:SetColorTexture(1, 0.84, 0.25, 0.14)
+			row.selBg:Show()
+			row.selBar:SetColorTexture(1, 0.84, 0.25, 0.95)
+			row.selBar:Show()
+		end
+
+		row.colXP:ClearAllPoints()
+		row.colLvl:ClearAllPoints()
+		row.starterBtn:ClearAllPoints()
+		row.label:ClearAllPoints()
+		row.colXP:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
+		row.colLvl:SetPoint("RIGHT", row.colXP, "LEFT", -COL_GAP, 0)
+		row.starterBtn:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_STR_GAP, 0)
+		if item.groupCount and item.groupCount > 0 then
+			local gb = row.groupBadge
+			gb.questID = item.groupQuestID
+			ns.StyleGroupCountPill(gb, item.groupCount)
+			gb:SetPoint("LEFT", row, "LEFT", 42, 0)
+			gb:Show()
+			row.label:SetPoint("LEFT", gb, "RIGHT", 6, 0)
+		else
+			row.label:SetPoint("LEFT", row, "LEFT", 44, 0)
+		end
+		row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
+		row.sub:Hide()
+
+		row.label:SetText((selected and "|cffffd200" or "") .. (item.title or ("Quest #" .. tostring(item.questID))) .. (selected and "|r" or ""))
+		row.starterBtn.lbl:SetText(item.zone and ("|cff9ea4b0" .. item.zone .. "|r") or "|cff666666-|r")
+		row.starterBtn:Show()
+		row.colLvl:SetText(item.lvlTxt or "|cff666666-|r")
+		row.colXP:SetText(item.xpColTxt or "|cff7fd4ffIn Log|r")
+		row.colLvl:Show()
+		row.colXP:Show()
+		return
+	end
+
 	if item.kind == "cstep" then
 		local i = item.i
 		row.rewardBg:ClearAllPoints()
@@ -310,10 +367,20 @@ local function RenderRow(row, item, yTop)
 		row.rewardBg:SetColorTexture(0.06, 0.08, 0.10, 0.42)
 		row.rewardBg:Show()
 
+		local shiftX = 0
+		if item.trackQuestID then
+			local tb = row.trackBtn
+			tb.questID = item.trackQuestID
+			tb.tick:SetChecked(item.watched == true)
+			tb:SetPoint("LEFT", row, "LEFT", 20, 0)
+			tb:Show()
+			shiftX = 18
+		end
+
 		-- Numbered bullet indented cleanly under the parent quest row
-		row.num:SetPoint("LEFT", row, "LEFT", 24, 0)
+		row.num:SetPoint("LEFT", row, "LEFT", 24 + shiftX, 0)
 		row.icon:SetSize(14, 14)
-		row.icon:SetPoint("LEFT", 42, 0)
+		row.icon:SetPoint("LEFT", 42 + shiftX, 0)
 		PaintStateIcon(row.icon, i, item.state)
 		row.icon:Show()
 
@@ -329,11 +396,11 @@ local function RenderRow(row, item, yTop)
 			local gb = row.groupBadge
 			gb.questID = item.groupQuestID
 			ns.StyleGroupCountPill(gb, item.groupCount)
-			gb:SetPoint("LEFT", row, "LEFT", 58, 0)
+			gb:SetPoint("LEFT", row, "LEFT", 58 + shiftX, 0)
 			gb:Show()
 			row.label:SetPoint("LEFT", gb, "RIGHT", 5, 0)
 		else
-			row.label:SetPoint("LEFT", row, "LEFT", 60, 0)
+			row.label:SetPoint("LEFT", row, "LEFT", 60 + shiftX, 0)
 		end
 		row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
 		row.sub:Hide()
@@ -373,7 +440,16 @@ local function RenderRow(row, item, yTop)
 
 	-- Standard `quest`, `result`, or `poi` row
 	local i = item.i
-	row.icon:SetPoint("LEFT", 6, 0)
+	local checkShift = 0
+	if item.kind == "quest" and item.trackQuestID then
+		local tb = row.trackBtn
+		tb.questID = item.trackQuestID
+		tb.tick:SetChecked(item.watched == true)
+		tb:SetPoint("LEFT", row, "LEFT", 4, 0)
+		tb:Show()
+		checkShift = 18
+	end
+	row.icon:SetPoint("LEFT", 6 + checkShift, 0)
 	if item.state then
 		PaintStateIcon(row.icon, i, item.state)
 	else
@@ -417,7 +493,7 @@ local function RenderRow(row, item, yTop)
 		if item.hasChain then
 			local cb = row.chainBtn
 			cb:ClearAllPoints()
-			cb:SetPoint("LEFT", row, "LEFT", 24, 0)
+			cb:SetPoint("LEFT", row, "LEFT", 24 + checkShift, 0)
 			cb.icon:SetTexture(ns.MEDIA .. (item.expanded and "minus" or "plus"))
 			cb.icon:Show()
 			local steps = item.chainSteps or 2
@@ -449,11 +525,11 @@ local function RenderRow(row, item, yTop)
 			local gb = row.groupBadge
 			gb.questID = item.groupQuestID
 			ns.StyleGroupCountPill(gb, item.groupCount)
-			gb:SetPoint("LEFT", row, "LEFT", 24, 0)
+			gb:SetPoint("LEFT", row, "LEFT", 24 + checkShift, 0)
 			gb:Show()
 			row.label:SetPoint("LEFT", gb, "RIGHT", 6, 0)
 		else
-			row.label:SetPoint("LEFT", row, "LEFT", 26, 0)
+			row.label:SetPoint("LEFT", row, "LEFT", 26 + checkShift, 0)
 		end
 		row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
 		row.sub:Hide()
@@ -564,7 +640,7 @@ local function Render()
 	end
 	for k = r + 1, #ui.rows do
 		local row = ui.rows[k]
-		if tipOwner and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge) then
+		if tipOwner and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge or tipOwner == row.trackBtn) then
 			GameTooltip:Hide()
 			tipOwner = nil
 		end
@@ -579,7 +655,7 @@ local function Render()
 	if tipOwner then
 		for k = 1, r do
 			local row = ui.rows[k]
-			if row and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge) then
+			if row and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge or tipOwner == row.trackBtn) then
 				GameTooltip:Hide()
 				local over = tipOwner:IsShown() and tipOwner:IsMouseOver()
 				if not issecretvalue(over) and over and row.item then
@@ -607,6 +683,15 @@ local function ApplySettingToggle(skey)
 		ns.factions[k] = nextOn
 		Sound(nextOn and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
 		if ns.OnFactionsChanged then ns.OnFactionsChanged() elseif ns.Refresh then ns.Refresh() end
+		return
+	end
+	if skey:match("^blizz_") and ns.GetBlizzMapFilter and ns.SetBlizzMapFilter then
+		local nextOn = not ns.GetBlizzMapFilter(skey)
+		if ns.SetBlizzMapFilter(skey, nextOn) then
+			Sound(nextOn and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+			if ns.NotifySetting then ns.NotifySetting(skey) end
+			ns.OnLayerChanged()
+		end
 		return
 	end
 	local stitch = ns.OM and ns.OM:GetModule("worldmap")
@@ -785,23 +870,47 @@ local function OnRowClick(row, button)
 				ns.ShowPinMap(item.i, true, fromRef)
 			end
 		end
+	elseif item.kind == "logquest" then
+		if IsModifiedClick and IsModifiedClick("CHATLINK") and ns.LinkQuestInChat and ns.LinkQuestInChat(item.questID) then
+			return
+		end
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		if ns.OpenQuestDetails then
+			ns.OpenQuestDetails(item.questID)
+		end
+		return
 	elseif item.kind == "cstep" then
+		local qid = item.trackQuestID or item.inLogQuestID or (ns.LogQuestIDForPin and ns.LogQuestIDForPin(item.i))
+		if qid and IsModifiedClick and IsModifiedClick("CHATLINK") and ns.LinkQuestInChat and ns.LinkQuestInChat(qid) then
+			return
+		end
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		if IsShiftKeyDown() or IsControlKeyDown() then
 			ns.SetWaypoint(item.i)
+		elseif button == "RightButton" and qid and ns.QuestInLog(qid) and ns.OpenQuestDetails then
+			ns.OpenQuestDetails(qid, item.i)
 		else
 			local target = item.isCurrent and ns.ActivePinTarget(item.i) or item.i
 			local fromRef = LockIfRefTab(target)
 			if ns.CloseDungeonView then ns.CloseDungeonView() end
 			ns.SetFocusedPin(item.i, true)
-			if ns.SyncQuestDetailsPane then ns.SyncQuestDetailsPane(item.i, ns.P and ns.P.zone[target]) end
 			ns.ShowPinMap(target, true, fromRef)
+			if not ui.found and db.panelTab == "tracker" and qid and ns.QuestInLog(qid) and ns.OpenQuestDetails then
+				ns.OpenQuestDetails(qid, item.i)
+			end
 		end
 	else
+		local focusTarget = item.activePin or item.i
+		local qid = item.trackQuestID or item.inLogQuestID or (focusTarget and ns.LogQuestIDForPin and ns.LogQuestIDForPin(focusTarget))
+		if qid and IsModifiedClick and IsModifiedClick("CHATLINK") and ns.LinkQuestInChat and ns.LinkQuestInChat(qid) then
+			return
+		end
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		local icon = D.cats[D.cat[item.i]].icon
 		if IsShiftKeyDown() or IsControlKeyDown() then
 			ns.SetWaypoint(item.i)
+		elseif button == "RightButton" and qid and ns.QuestInLog(qid) and ns.OpenQuestDetails then
+			ns.OpenQuestDetails(qid, focusTarget)
 		elseif icon == "instance" and ns.OpenInstancePin then
 			local fromRef = LockIfRefTab(item.i)
 			ns.BeforeOpenDungeonMap(item.i, D.title[item.i])
@@ -809,26 +918,28 @@ local function OnRowClick(row, button)
 				ns.CancelOpenDungeonMap()
 				ns.ShowPinMap(item.i, true, fromRef)
 			end
+		elseif not ui.found and db.panelTab == "tracker" and qid and ns.QuestInLog(qid) and ns.OpenQuestDetails then
+			local mapTarget = ns.ActivePinTarget(focusTarget)
+			if ns.CloseDungeonView then ns.CloseDungeonView() end
+			ns.SetFocusedPin(focusTarget, true)
+			ns.ShowPinMap(mapTarget, true, false)
+			ns.OpenQuestDetails(qid, focusTarget)
 		elseif item.hasChain then
-			local focusTarget = item.activePin or item.i
 			local mapTarget = ns.ActivePinTarget(focusTarget)
 			local wasSelected = ns.FocusedPin() == focusTarget
 			if ns.CloseDungeonView then ns.CloseDungeonView() end
 			local nowExpanded = (item.expanded and not wasSelected) and true or ns.ToggleChainExpanded(item.i, item.expanded)
 			ns.SetFocusedPin(focusTarget, true)
-			if ns.SyncQuestDetailsPane then ns.SyncQuestDetailsPane(focusTarget) end
 			if nowExpanded then
 				local fromRef = LockIfRefTab(mapTarget)
 				ns.ShowPinMap(mapTarget, true, fromRef)
 			end
 			ns.OnLayerChanged()
 		else
-			local focusTarget = item.activePin or item.i
 			local mapTarget = ns.ActivePinTarget(focusTarget)
 			local fromRef = LockIfRefTab(mapTarget)
 			if ns.CloseDungeonView then ns.CloseDungeonView() end
 			ns.SetFocusedPin(focusTarget, true)
-			if ns.SyncQuestDetailsPane then ns.SyncQuestDetailsPane(focusTarget, ns.P and ns.P.zone[mapTarget]) end
 			ns.ShowPinMap(mapTarget, true, fromRef)
 		end
 	end
@@ -838,7 +949,7 @@ end
 MakeRow = function(r)
 	local row = CreateFrame("Button", nil, ui.list)
 	row:SetHeight(ROW_H)
-	row:RegisterForClicks("LeftButtonUp", "Button4Up")
+	row:RegisterForClicks("LeftButtonUp", "RightButtonUp", "Button4Up")
 	local hl = row:CreateTexture(nil, "HIGHLIGHT")
 	hl:SetAtlas("questlog-quest-glow-yellow")
 	hl:SetAllPoints()
@@ -965,6 +1076,36 @@ MakeRow = function(r)
 	gBadge:SetScript("OnClick", function(_, button) OnRowClick(row, button) end)
 	row.groupBadge = gBadge
 
+	-- Clickable Quest Log track checkbox on Tracker rows (toggles Objective Tracker watch in place)
+	local tBtn = CreateFrame("Button", nil, row)
+	tBtn:SetSize(18, 18)
+	tBtn:SetFrameLevel(row:GetFrameLevel() + 2)
+	tBtn:RegisterForClicks("LeftButtonUp", "Button4Up")
+	local tHl = tBtn:CreateTexture(nil, "HIGHLIGHT")
+	tHl:SetAllPoints()
+	tHl:SetColorTexture(1, 0.85, 0.35, 0.20)
+	tBtn.tick = Tick(tBtn)
+	tBtn.tick.box:SetPoint("CENTER", 0, 0)
+	tBtn:SetScript("OnClick", function(self, button)
+		if button == "Button4" then ns.GoBack(); return end
+		if self.questID and ns.ToggleQuestTrack then
+			ns.ToggleQuestTrack(self.questID)
+			if ns.UpdateFocus then ns.UpdateFocus(false) end
+			if ns.Refresh then ns.Refresh() elseif ns.OnLayerChanged then ns.OnLayerChanged() end
+		end
+	end)
+	tBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine("Track Quest", 1, 0.82, 0.2)
+		GameTooltip:AddLine("Check to track this quest on the Objective Tracker (also pins it when tracking zone quests).", 0.9, 0.9, 0.9, true)
+		GameTooltip:Show()
+	end)
+	tBtn:SetScript("OnLeave", function(self)
+		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+	end)
+	tBtn:Hide()
+	row.trackBtn = tBtn
+
 	-- Dedicated clickable Starter column link button (navigates straight to the starter pickup without toggling chains)
 	local sBtn = CreateFrame("Button", nil, row)
 	sBtn:SetSize(COL_STARTER_W, 20)
@@ -981,6 +1122,10 @@ MakeRow = function(r)
 		if button == "Button4" then ns.GoBack(); return end
 		local item = row.item
 		if not item then return end
+		if item.kind == "logquest" then
+			OnRowClick(row, button)
+			return
+		end
 		local targetPin = item.starterNavPin or item.i
 		if not targetPin then return end
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
@@ -991,7 +1136,6 @@ MakeRow = function(r)
 		local fromRef = LockIfRefTab(targetPin)
 		if ns.CloseDungeonView then ns.CloseDungeonView() end
 		ns.SetFocusedPin(targetPin, true)
-		if ns.SyncQuestDetailsPane then ns.SyncQuestDetailsPane(targetPin, ns.P and ns.P.zone[targetPin]) end
 		ns.ShowPinMap(targetPin, true, fromRef)
 		ns.RefreshIfMapHidden()
 	end)

@@ -22,9 +22,9 @@ local TAB_DEFS = {
 	},
 	{
 		key = "tracker",
-		label = "Tracker",
+		label = "Tracker & Log",
 		icon = "tab_tracker",
-		tip = "View your Focused, Ready to Turn In, Pinned, and Tracking quests with chain steps, starters, and rewards. Tracked quest pins stay visible on the map at every zoom level.",
+		tip = "Your merged Quest Log & Tracker (Focused, Ready to Turn In, Pinned, Tracking, and all Quest Log quests) with track checkboxes and built-in Quest Text.",
 	},
 	{
 		key = "zone",
@@ -121,10 +121,32 @@ local function UpdateChromeLayout()
 		curY = curY - 34
 	end
 
-	if not searching and tab == "zone" then
+	local inDetails = (not searching) and (ui.detailQuestID ~= nil) and ns.QuestInLog and ns.QuestInLog(ui.detailQuestID)
+	if ui.detailQuestID and not inDetails and not searching then
+		ui.detailQuestID = nil
+		ui.detailPin = nil
+	end
+
+	if not searching and not inDetails and tab == "tracker" then
 		ui.zoneBar:ClearAllPoints()
 		ui.zoneBar:SetPoint("TOPLEFT", LIST_PAD, curY)
 		ui.zoneBar:SetPoint("TOPRIGHT", -LIST_PAD, curY)
+		ui.zoneBar:SetStatusBarColor(0.66, 0.50, 0.22, 0.85)
+		local numQ, maxQ = 0, 25
+		if ns.QuestLogCounts then numQ, maxQ = ns.QuestLogCounts() end
+		local nWatched = (C_QuestLog and C_QuestLog.GetNumQuestWatches and C_QuestLog.GetNumQuestWatches()) or 0
+		if issecretvalue(nWatched) then nWatched = 0 end
+		ui.zoneBar:SetMinMaxValues(0, math.max(1, maxQ))
+		ui.zoneBar:SetValue(numQ)
+		ui.zoneBar.left:SetText(nWatched > 0 and ("Quest Log  -  %d tracked"):format(nWatched) or "Quest Log")
+		ui.zoneBar.right:SetText(("%d / %d"):format(numQ, maxQ))
+		ui.zoneBar:Show()
+		curY = curY - 26
+	elseif not searching and not inDetails and tab == "zone" then
+		ui.zoneBar:ClearAllPoints()
+		ui.zoneBar:SetPoint("TOPLEFT", LIST_PAD, curY)
+		ui.zoneBar:SetPoint("TOPRIGHT", -LIST_PAD, curY)
+		ui.zoneBar:SetStatusBarColor(0.28, 0.68, 0.34, 0.85)
 		local zMap = ui.zoneMap or (ns.ActiveZoneContext and ns.ActiveZoneContext()) or (ns.ViewZoneMap and ns.ViewZoneMap())
 		local info = zMap and C_Map.GetMapInfo(zMap)
 		local zName = info and info.name or "World"
@@ -148,13 +170,33 @@ local function UpdateChromeLayout()
 	ui.divider:SetPoint("TOPLEFT", LIST_PAD, curY - 1)
 	ui.divider:SetPoint("TOPRIGHT", -LIST_PAD, curY - 1)
 	local listH = ui.list and ui.list:GetHeight() or 0
-	local needScroll = listH > 0 and (ui.totalH or 0) > (listH + 1)
+	local needScroll = (not inDetails) and listH > 0 and (ui.totalH or 0) > (listH + 1)
 	local rightInset = needScroll and (LIST_PAD + SCROLL_GUTTER) or LIST_PAD
 	ui.listTopY = curY - 5
 	ui.listRightInset = rightInset
 	ui.list:ClearAllPoints()
 	ui.list:SetPoint("TOPLEFT", LIST_PAD, ui.listTopY)
 	ui.list:SetPoint("BOTTOMRIGHT", -rightInset, LIST_PAD)
+
+	if inDetails and ui.detailsPane then
+		local wasShown = ui.detailsPane:IsShown()
+		ui.list:Hide()
+		if ui.scrollBar then ui.scrollBar:Hide() end
+		if ui.scrollTrack then ui.scrollTrack:Hide() end
+		if ui.scrollThumb then ui.scrollThumb:Hide() end
+		if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane(true) end
+		if wasShown then
+			if ns.RefreshQuestDetails then ns.RefreshQuestDetails(false) end
+		else
+			ui.detailsPane:Show()
+		end
+	else
+		if ui.detailsPane then ui.detailsPane:Hide() end
+		ui.list:Show()
+		if ui.nativeScrollBar and ui.scrollBar then
+			ui.scrollBar:Show()
+		end
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -319,19 +361,21 @@ local function Dock()
 		end
 		return
 	end
+	local anchor = (ns.WorldMapChrome and ns.WorldMapChrome()) or WorldMapFrame
 	local effW = math.max(WIDTH, (ns.db and ns.db.panelW) or WIDTH)
 	local s = ui.panel:GetScale() or 1
 	local room = (effW * s) + 4
 	local where
 	if WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized() then
 		where = "inside"
-	elseif (WorldMapFrame:GetLeft() or 0) >= room then
+	elseif (anchor:GetLeft() or 0) >= room then
 		where = "left"
 	else
 		where = "right"
 	end
-	if where == ui.docked then return end
+	if where == ui.docked and ui.dockAnchor == anchor then return end
 	ui.docked = where
+	ui.dockAnchor = anchor
 	ui.panel:ClearAllPoints()
 	ui.panel:SetWidth(effW)
 	if where == "inside" then
@@ -339,11 +383,21 @@ local function Dock()
 		ui.panel:SetPoint("TOPLEFT", sc, "TOPLEFT", 10, -48)
 		ui.panel:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 10, 10)
 	elseif where == "left" then
-		ui.panel:SetPoint("TOPRIGHT", WorldMapFrame, "TOPLEFT", -10, 2)
-		ui.panel:SetPoint("BOTTOMRIGHT", WorldMapFrame, "BOTTOMLEFT", -10, -2)
+		if anchor ~= WorldMapFrame then
+			ui.panel:SetPoint("TOPRIGHT", anchor, "TOPLEFT", 6, 0)
+			ui.panel:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMLEFT", 6, 0)
+		else
+			ui.panel:SetPoint("TOPRIGHT", WorldMapFrame, "TOPLEFT", -10, 2)
+			ui.panel:SetPoint("BOTTOMRIGHT", WorldMapFrame, "BOTTOMLEFT", -10, -2)
+		end
 	else
-		ui.panel:SetPoint("TOPLEFT", WorldMapFrame, "TOPRIGHT", -4, 2)
-		ui.panel:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMRIGHT", -4, -2)
+		if anchor ~= WorldMapFrame then
+			ui.panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -6, 0)
+			ui.panel:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", -6, 0)
+		else
+			ui.panel:SetPoint("TOPLEFT", WorldMapFrame, "TOPRIGHT", -4, 2)
+			ui.panel:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMRIGHT", -4, -2)
+		end
 	end
 end
 ns.SyncPanelDock = Dock
@@ -354,6 +408,7 @@ function ns.ResetPanelPosition()
 	ns.db.panelW = nil
 	ns.db.panelH = nil
 	ui.docked = nil
+	ui.dockAnchor = nil
 	if ui.panel then
 		ui.panel:SetWidth(WIDTH)
 		Dock()
@@ -367,6 +422,8 @@ function ns.ApplyPanelStyle()
 	local style = ns.BackgroundStyle and ns.BackgroundStyle(ns.db.backgroundStyle) or { key = "dark", name = "Dark" }
 	local scale = math.max(0.5, math.min(1.5, ns.db.panelScale or 1.0))
 	SetBackground(ns.styleDialogBorder, a, style)
+	if ns.ApplyMapChromeStyle then ns.ApplyMapChromeStyle(a, style) end
+	if ns.ApplyDetailsStyle then ns.ApplyDetailsStyle(a, style) end
 	if not ui.panel then return end
 	SetBackground(ui.border, a, style)
 	local railA, listA
@@ -397,6 +454,7 @@ function ns.SyncStyleButton()
 end
 
 function ns.SyncPanelScrollBar(scrollPx, listH, totalH)
+	if ui.detailsPane and ui.detailsPane:IsShown() then return end
 	local sb = ui.scrollBar
 	if not sb then return end
 	local maxScroll = math.max(0, (totalH or 0) - (listH or 0))
@@ -732,7 +790,7 @@ function ns.InitPanel()
 	content:SetPoint("TOPLEFT", leftRail, "TOPRIGHT", 2, 0)
 	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 12)
 
-	ui.styleBtn = ToolbarIconButton(content, ns.MEDIA .. "gear", "Window Style", "Customize Window scale, Background opacity, Background style, and Pin size (same styling options as Dave's Sack).", function()
+	ui.styleBtn = ToolbarIconButton(content, ns.MEDIA .. "gear", "Map Settings", "Customize Map Tracking & Filters, Window scale, Pin size, Background opacity, and Background style.", function()
 		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
 	end)
 	ui.styleBtn:SetPoint("TOPRIGHT", -LIST_PAD, -4)
@@ -881,13 +939,17 @@ function ns.InitPanel()
 		thumb:Hide()
 	end
 
+	if ns.InitQuestDetailsPane then
+		ns.InitQuestDetailsPane(content)
+	end
+
 	ui.ready = true
 	panel:SetScript("OnMouseUp", function(_, button)
 		if button == "Button4" then ns.GoBack() end
 	end)
 	panel:SetScript("OnShow", function()
 		Dock()
-		if ui.dirtyHidden or #ui.items == 0 then
+		if ui.dirtyHidden or #ui.items == 0 or ui.detailQuestID then
 			ns.OnLayerChanged()
 		else
 			RefreshControls()

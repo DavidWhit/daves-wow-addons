@@ -815,6 +815,7 @@ local function Init()
 	ns.InitQuests()
 	ns.InitFocus()
 	if ns.EnforceWindowedOpaqueMap then ns.EnforceWindowedOpaqueMap() end
+	if ns.InitMapChrome then ns.InitMapChrome() end
 
 	WorldMapFrame:HookScript("OnShow", function()
 		if ns.EnforceWindowedOpaqueMap then ns.EnforceWindowedOpaqueMap() end

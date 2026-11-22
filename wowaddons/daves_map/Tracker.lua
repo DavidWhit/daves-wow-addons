@@ -382,7 +382,12 @@ local function ShowQuest(q)
 		ns.Print("tracking it; can't open the map in combat, click it again after.")
 		return
 	end
-	if QuestMapFrame_OpenToQuestDetails then QuestMapFrame_OpenToQuestDetails(q) end
+	if OpenWorldMap and not (WorldMapFrame and WorldMapFrame:IsShown()) then
+		OpenWorldMap()
+	end
+	if ns.OpenTrackerTab then
+		ns.OpenTrackerTab(nil, nil, false, true, q)
+	end
 end
 
 local function OnRowClick(row)
@@ -735,7 +740,7 @@ events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
 	if added ~= true then return end
 	if ourAdd[q] then ourAdd[q] = nil return end
 	if accepted[q] then accepted[q] = nil return end
-	if ns.db.trackMyZone then ns.db.pinned[q] = true end
+	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
 end
 -- A quest whose objective advances (QUEST_WATCH_UPDATE / QUEST_LOG_CRITERIA_UPDATE): pin it and track it if not
 -- already tracked (unless the advancement completed the quest, in which case it moves to Ready to Turn In).
@@ -747,7 +752,7 @@ local function OnQuestAdvance(_, q)
 		if MoveReadyOut({ q }) then ns.UpdateReady() end
 		return
 	end
-	if ns.db.trackMyZone then ns.db.pinned[q] = true end
+	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
 	if not Watched(q) then ns.AddQuestWatch(q) end
 end
 events.QUEST_WATCH_UPDATE = OnQuestAdvance
