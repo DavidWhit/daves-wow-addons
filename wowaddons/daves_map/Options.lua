@@ -26,6 +26,7 @@ function ns.RestoreDefaultSettings()
 	db.hideCompleted = false
 	db.trackMyZone = true
 	db.focusQuest = true
+	db.groupQuestCount = true
 	db.pinScale = 1.0
 	db.panelScale = 1.0
 	db.background = 0.8
@@ -57,13 +58,14 @@ function ns.RestoreDefaultSettings()
 	if ns.OnFactionsChanged then ns.OnFactionsChanged() end
 	if ns.UpdateFocus then ns.UpdateFocus(true) end
 	if ns.TrackZoneQuests then ns.TrackZoneQuests() end
+	if ns.RefreshGroupQuestCounts then ns.RefreshGroupQuestCounts() end
 	if ns.UpdatePanel then ns.UpdatePanel() end
 	if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
 	if ns.RefreshStyleDialog then ns.RefreshStyleDialog() end
 	if ns.RefreshControls then ns.RefreshControls() end
 	if ns.Refresh then ns.Refresh() end
 	for _, k in ipairs({
-		"enabled", "trackMyZone", "hideCompleted", "focusQuest", "mapBanner",
+		"enabled", "trackMyZone", "hideCompleted", "focusQuest", "groupQuestCount", "mapBanner",
 		"pinScale", "panelScale", "background", "backgroundStyle",
 		"seamless", "dungeonMaps", "autoSwitch", "openZoomed",
 	}) do
@@ -86,8 +88,14 @@ function ns.ToggleOptions()
 		ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		ns.db.panelTab = "layers"
 		if ns.SetSearchQuiet then ns.SetSearchQuiet("") end
+		if ns.SetRefLayer then ns.SetRefLayer(nil, true) end
+		if ns.UpdateFocus then ns.UpdateFocus(false) end
 		if ns.UpdatePanel then ns.UpdatePanel() end
-		if ns.OnLayerChanged then ns.OnLayerChanged() end
+		if ns.Refresh then
+			ns.Refresh()
+		elseif ns.OnLayerChanged then
+			ns.OnLayerChanged()
+		end
 		return
 	end
 	if not InCombatLockdown() and Settings and Settings.OpenToCategory and ns.settingsCategory then
@@ -146,6 +154,19 @@ function ns:InitOptions()
 		ns.RefreshOptions()
 		if ns.UpdateFocus then ns.UpdateFocus(true) end
 		if ns.Refresh then ns.Refresh() end
+	end)
+
+	local groupQuestCount = Settings.RegisterAddOnSetting(category, ADDON .. "_groupQuestCount", "groupQuestCount", ns.db,
+		Settings.VarType.Boolean, "Show party quest numbers", true)
+	Settings.CreateCheckbox(category, groupQuestCount, "While in a party or raid, show a brass number badge beside quests in Dave's Map and the objective tracker (hover the number to see group member names).")
+	groupQuestCount:SetValueChangedCallback(function()
+		if syncingSettings then return end
+		if ns.RefreshGroupQuestCounts then
+			ns.RefreshGroupQuestCounts()
+		else
+			if ns.OnGroupQuestsChanged then ns.OnGroupQuestsChanged() end
+			ns.RefreshOptions()
+		end
 	end)
 
 	local mapBanner = Settings.RegisterAddOnSetting(category, ADDON .. "_mapBanner", "mapBanner", ns.db,

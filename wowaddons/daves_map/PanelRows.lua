@@ -126,6 +126,9 @@ local function ResetRow(row)
 	row.starterBtn.lbl:SetText("")
 	row.chainBtn:Hide()
 	row.chainBtn.lbl:SetText("")
+	row.groupBadge.questID = nil
+	row.groupBadge:Hide()
+	row.groupBadge:ClearAllPoints()
 end
 
 local function RenderRow(row, item, yTop)
@@ -217,7 +220,16 @@ local function RenderRow(row, item, yTop)
 	end
 
 	if item.kind == "note" then
-		PlaceRowLabels(row, 6, item.sub ~= nil and item.sub ~= "")
+		local leftX = 6
+		if item.groupCount and item.groupCount > 0 then
+			local gb = row.groupBadge
+			gb.questID = item.groupQuestID
+			local w = ns.StyleGroupCountPill(gb, item.groupCount)
+			gb:SetPoint("LEFT", row, "LEFT", 6, 0)
+			gb:Show()
+			leftX = 6 + w + 6
+		end
+		PlaceRowLabels(row, leftX, item.sub ~= nil and item.sub ~= "")
 		row.label:SetText("|cffcccccc" .. item.title .. "|r")
 		row.sub:SetText(item.sub or "")
 		return
@@ -313,7 +325,16 @@ local function RenderRow(row, item, yTop)
 		row.colXP:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
 		row.colLvl:SetPoint("RIGHT", row.colXP, "LEFT", -COL_GAP, 0)
 		row.starterBtn:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_STR_GAP, 0)
-		row.label:SetPoint("LEFT", row, "LEFT", 60, 0)
+		if item.groupCount and item.groupCount > 0 then
+			local gb = row.groupBadge
+			gb.questID = item.groupQuestID
+			ns.StyleGroupCountPill(gb, item.groupCount)
+			gb:SetPoint("LEFT", row, "LEFT", 58, 0)
+			gb:Show()
+			row.label:SetPoint("LEFT", gb, "RIGHT", 5, 0)
+		else
+			row.label:SetPoint("LEFT", row, "LEFT", 60, 0)
+		end
 		row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
 		row.sub:Hide()
 
@@ -414,7 +435,23 @@ local function RenderRow(row, item, yTop)
 				cb.lbl:SetText("|cffe8d8a8" .. cntTxt .. "|r")
 			end
 			cb:Show()
-			row.label:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+			if item.groupCount and item.groupCount > 0 and not item.expanded then
+				local gb = row.groupBadge
+				gb.questID = item.groupQuestID
+				ns.StyleGroupCountPill(gb, item.groupCount)
+				gb:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+				gb:Show()
+				row.label:SetPoint("LEFT", gb, "RIGHT", 6, 0)
+			else
+				row.label:SetPoint("LEFT", cb, "RIGHT", 6, 0)
+			end
+		elseif item.groupCount and item.groupCount > 0 then
+			local gb = row.groupBadge
+			gb.questID = item.groupQuestID
+			ns.StyleGroupCountPill(gb, item.groupCount)
+			gb:SetPoint("LEFT", row, "LEFT", 24, 0)
+			gb:Show()
+			row.label:SetPoint("LEFT", gb, "RIGHT", 6, 0)
 		else
 			row.label:SetPoint("LEFT", row, "LEFT", 26, 0)
 		end
@@ -515,6 +552,7 @@ local function Render()
 	end
 
 	ui.scrollPx = math.max(0, math.min(ui.scrollPx or 0, maxScroll))
+	local tipOwner = GameTooltip:IsShown() and GameTooltip:GetOwner() or nil
 	local first = FirstVisibleIndex(items, ui.scrollPx)
 	local r = 0
 	for idx = first, #items do
@@ -524,10 +562,9 @@ local function Render()
 		local row = ui.rows[r] or MakeRow(r)
 		RenderRow(row, it, it.top - ui.scrollPx)
 	end
-	local tipOwner = GameTooltip:IsShown() and GameTooltip:GetOwner() or nil
 	for k = r + 1, #ui.rows do
 		local row = ui.rows[k]
-		if tipOwner and (tipOwner == row or tipOwner == row.header) then
+		if tipOwner and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge) then
 			GameTooltip:Hide()
 			tipOwner = nil
 		end
@@ -542,9 +579,10 @@ local function Render()
 	if tipOwner then
 		for k = 1, r do
 			local row = ui.rows[k]
-			if row and (tipOwner == row or tipOwner == row.header) then
+			if row and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge) then
 				GameTooltip:Hide()
-				if tipOwner:IsShown() and row.item then
+				local over = tipOwner:IsShown() and tipOwner:IsMouseOver()
+				if not issecretvalue(over) and over and row.item then
 					local onEnter = tipOwner:GetScript("OnEnter")
 					if onEnter then onEnter(tipOwner) end
 				end
@@ -588,6 +626,16 @@ local function ApplySettingToggle(skey)
 		if ns.NotifySetting then ns.NotifySetting("focusQuest") end
 		if ns.UpdateFocus then ns.UpdateFocus(true) end
 		if ns.Refresh then ns.Refresh() end
+	elseif skey == "groupQuestCount" then
+		db.groupQuestCount = not (db.groupQuestCount ~= false)
+		Sound(db.groupQuestCount and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		if ns.NotifySetting then ns.NotifySetting("groupQuestCount") end
+		if ns.RefreshGroupQuestCounts then
+			ns.RefreshGroupQuestCounts()
+		else
+			if ns.OnGroupQuestsChanged then ns.OnGroupQuestsChanged() end
+			ns.OnLayerChanged()
+		end
 	elseif skey == "hideCompleted" then
 		db.hideCompleted = not db.hideCompleted
 		Sound(db.hideCompleted and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
@@ -911,6 +959,11 @@ MakeRow = function(r)
 	end)
 	cBtn:Hide()
 	row.chainBtn = cBtn
+
+	local gBadge = ns.CreateGroupCountPill(row, 21, 10, "GameFontHighlightSmall", "ANCHOR_RIGHT", true)
+	gBadge:SetFrameLevel(row:GetFrameLevel() + 2)
+	gBadge:SetScript("OnClick", function(_, button) OnRowClick(row, button) end)
+	row.groupBadge = gBadge
 
 	-- Dedicated clickable Starter column link button (navigates straight to the starter pickup without toggling chains)
 	local sBtn = CreateFrame("Button", nil, row)

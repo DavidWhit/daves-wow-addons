@@ -132,7 +132,7 @@ ns.NO_DATA = "Tell Dave to give me the data file."   -- shown in chat and on the
 
 local DEFAULTS = {
 	enabled = true,         -- draw the layer on the world map
-	panelTab = "layers",    -- active left-rail tab: "layers" | "zone" | "dungeon"
+	panelTab = "layers",    -- active left-rail tab: "layers" | "tracker" | "zone" | "dungeon"
 	pinScale = 1.0,         -- pin size
 	panelScale = 1.0,       -- Dave's Map window scale (0.5..1.5, matching daves_sack)
 	background = 0.8,       -- Dave's Map background opacity (0.2..1.0, matching daves_sack)
@@ -140,6 +140,7 @@ local DEFAULTS = {
 	hideCompleted = false,  -- completed quests show a green checkmark; hidden when this is on
 	trackMyZone = true,     -- the quest tracker follows only your log's quests for the zone you're in (Tracker.lua)
 	focusQuest = true,      -- a click on a tracked quest focuses it (again: unfocuses); the map then shows only its pins
+	groupQuestCount = true, -- show party/raid quest-count number pills on Dave's Map & the Objective Tracker
 	mapBanner = true,       -- top-center zone level bracket & coordinates pill on the map canvas
 	questSort = "lvl",      -- "lvl" | "xp" | "starter" | "name"
 	questSortAsc = true,    -- sort direction for questSort
@@ -174,6 +175,14 @@ end
 
 function ns.IsLayerCatOn(catId)
 	return (ns.db and ns.db.layerOn and ns.db.layerOn[catId]) == true
+end
+
+function ns.IsTrackerTab()
+	return (ns.db and ns.db.panelTab == "tracker") == true
+end
+
+function ns.ShowGroupQuestCount()
+	return (ns.db and ns.db.groupQuestCount ~= false) == true
 end
 
 function ns.SetAllOptionalLayers(on)
@@ -307,6 +316,7 @@ function ns:PLAYER_LOGIN()
 	end
 	ns.factions = daves_mapCharDB.factions
 	ns.EnforceWindowedOpaqueMap()
+	if ns.InitQuests then ns.InitQuests() end
 	ns.InitTracker()
 	if ns.StartStitch then ns.StartStitch() end   -- the seamless map (Stitch\Base.lua)
 	if ns.RefreshControls then ns.RefreshControls() end

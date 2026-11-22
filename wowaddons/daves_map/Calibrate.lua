@@ -60,6 +60,15 @@ local function MapToMap(srcMap, sx, sy, dstMap)
 	if srcMap == dstMap then return sx, sy end
 	local r = RectOnMap(srcMap, dstMap)
 	if r then return r[1] + sx * r[2], r[3] + sy * r[4] end
+	local cont = ContinentOf(srcMap)
+	if cont and cont ~= srcMap and cont ~= dstMap then
+		local r1 = RectOnMap(srcMap, cont)
+		local r2 = RectOnMap(cont, dstMap)
+		if r1 and r2 then
+			local cx, cy = r1[1] + sx * r1[2], r1[3] + sy * r1[4]
+			return r2[1] + cx * r2[2], r2[3] + cy * r2[4]
+		end
+	end
 	return nil, nil
 end
 
@@ -127,7 +136,7 @@ function ns.PinsOnMap(mapID)
 	local wide = info.mapType < Enum.UIMapType.Continent
 	for i = 1, #D.x do
 		local z = P.zone[i]
-		if z and (z == mapID or P.cont[i] == mapID or wide or Ancestors(z)[mapID]) then
+		if z and z ~= 0 and (z == mapID or P.cont[i] == mapID or wide or Ancestors(z)[mapID]) then
 			local x, y
 			if z == mapID then
 				x, y = D.x[i], D.y[i]
@@ -311,6 +320,7 @@ function ns.WorldUV(i)
 	local stitch, S = ns.StitchWorld()
 	local D = ns.DATA
 	if not (stitch and S and D and i) then return nil end
+	if not calibrated and not ns.Calibrate() then return nil end
 	local u = stitchState.U[i]
 	if u == nil then
 		u = false

@@ -62,7 +62,7 @@ local view = {
 	checkedScale = nil, checkedX = nil, checkedY = nil, checkedW = nil, checkedH = nil,
 	wasAnimating = false,
 	curMap = nil, curViewZone = nil, curScale = nil, curZoom = nil, curStitchZoom = nil, curW = nil, curH = nil,
-	dirty = true, hoverPin = nil, lastCX = nil, lastCY = nil, searchSet = nil,
+	dirty = true, panelNotified = false, hoverPin = nil, lastCX = nil, lastCY = nil, searchSet = nil,
 }
 
 ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ local function CanLoadPin(i, skipInstance)
 	local D = ns.DATA
 	local ci = D.cat[i]
 	local cat = D.cats[ci]
-	if skipInstance and cat.icon == "instance" and i ~= ns.FocusedPin() then return false end
+	if skipInstance and cat.icon == "instance" and not ns.TrackedContains(i) and i ~= ns.FocusedPin() then return false end
 	if view.searchSet then return view.searchSet[i] == true end
 	if IsFocusOnly() then return ns.FocusContains(i) or i == ns.FocusedPin() end
 	if ns.TrackedContains(i) or i == ns.FocusedPin() then return true end
@@ -129,10 +129,10 @@ local function Passes(i)
 		if not view.searchSet[i] or not ns.PassesPlayerFilter(i) then return false end
 		return not (db.hideCompleted and ns.PinDone(i))
 	elseif IsFocusOnly() then
-		return (ns.FocusContains(i) or i == ns.FocusedPin()) and ns.PassesPlayerFilter(i)
+		return ns.FocusContains(i) or i == ns.FocusedPin()
 	end
 	if ns.TrackedContains(i) or i == ns.FocusedPin() then
-		return ns.PassesPlayerFilter(i)
+		return true
 	end
 	if not ns.PassesPlayerFilter(i) then return false end
 	local cat = D.cats[D.cat[i]]
@@ -228,10 +228,6 @@ end
 local function PaintIcon(t, i, alpha)
 	local D = ns.DATA
 	local ic = D.cats[D.cat[i]].icon
-	if (ic == "quest" or ic == "repeatable") and ns.PinDone(i) then
-		ns.PaintDoneIcon(t, alpha)
-		return
-	end
 	if ic == "quest" or ic == "repeatable" or ic == "turnin" then
 		local tq = ns.TrackedQuestForPin and ns.TrackedQuestForPin(i)
 		if tq then
@@ -242,6 +238,10 @@ local function PaintIcon(t, i, alpha)
 				return
 			end
 		end
+	end
+	if (ic == "quest" or ic == "repeatable") and ns.PinDone(i) then
+		ns.PaintDoneIcon(t, alpha)
+		return
 	end
 	PaintCategory(t, D.cat[i], alpha)
 end
@@ -281,7 +281,9 @@ end
 ---------------------------------------------------------------------------
 local function PinSize(i)
 	local zoomK = 0.75 + 0.5 * (view.curZoom or 0)
-	local done = (not ns.TrackedContains(i)) and ns.PinDone(i)
+	local isTracked = ns.TrackedContains(i) or i == ns.FocusedPin()
+	if isTracked and zoomK < 0.95 then zoomK = 0.95 end
+	local done = (not isTracked) and ns.PinDone(i)
 	local mult = done and 0.9 or 1
 	return BASE * ns.db.pinScale * zoomK * Style(ns.DATA.cat[i]).size * mult / (view.curScale or 1)
 end
@@ -430,6 +432,17 @@ local function Rebuild(duringFlight)
 		end
 	end
 
+	local canBuild = ns.db.enabled and D ~= nil and view.curMap ~= nil and ns.Calibrate()
+	if canBuild then
+		ns.SyncDoneQuests()
+		if ns.UpdateFocus and ((ns.IsTrackerTab and ns.IsTrackerTab()) or not (ns.RefLayerMode and ns.RefLayerMode())) then
+			ns.UpdateFocus(false)
+		end
+		if ns.RefreshRefLayerSet then ns.RefreshRefLayerSet(zMap) end
+	elseif ns.RefreshRefLayerSet then
+		ns.RefreshRefLayerSet(nil)
+	end
+
 	local openMapDungeons = false
 	if stitch and S and S.GetPinSet then
 		local dset = S.GetPinSet("dungeons")
@@ -449,9 +462,7 @@ local function Rebuild(duringFlight)
 		end
 	end
 
-	if ns.db.enabled and D and view.curMap and ns.Calibrate() then
-		ns.SyncDoneQuests()
-		if ns.RefreshRefLayerSet then ns.RefreshRefLayerSet(zMap) end
+	if canBuild then
 		local u, v, zoom
 		if Seamless() and stitch then u, v, zoom = stitch.ViewNow() end
 		if u and stitch then
@@ -466,7 +477,8 @@ local function Rebuild(duringFlight)
 			for i = 1, #D.x do
 				if CanLoadPin(i, skipInstance) then
 					local pu, pv = ns.WorldUV(i)
-					if pu and pu >= w[1] and pu <= w[2] and pv >= w[3] and pv <= w[4] and Passes(i) then
+					local alwaysOn = view.searchSet == nil and (ns.TrackedContains(i) or i == ns.FocusedPin())
+					if pu and (alwaysOn or (pu >= w[1] and pu <= w[2] and pv >= w[3] and pv <= w[4])) and Passes(i) then
 						local x, y = stitch.FromWorld(view.curMap, pu, pv)
 						view.posX[i], view.posY[i] = x, y
 						QueuePin(i, x, y)
@@ -483,8 +495,6 @@ local function Rebuild(duringFlight)
 		view.nDone = view.nIcons
 		for k = 1, nAct do Add(actPin[k], actX[k], actY[k], false) end
 		for k = 1, nTrk do Add(trkPin[k], trkX[k], trkY[k], false) end
-	elseif ns.RefreshRefLayerSet then
-		ns.RefreshRefLayerSet(nil)
 	end
 	for n = view.nIcons + 1, #view.icons do view.icons[n]:Hide() end
 	if ns.FocusedPin() and not ns.db.enabled then ns.ClearDisabledSelection() end
@@ -502,7 +512,10 @@ local function Rebuild(duringFlight)
 			ns.ShowTooltip(view.hot, view.hoverPin)
 		end
 	end
-	if not duringFlight and ns.OnLayerChanged then ns.OnLayerChanged() end
+	if not duringFlight and ns.OnLayerChanged then
+		view.panelNotified = true
+		ns.OnLayerChanged()
+	end
 end
 
 local function Resize()
@@ -623,7 +636,11 @@ OnUpdate = function()
 					ns.OnUserMapNavigate(true)
 				end
 			end
-			view.dirty = true
+			if ns.IsTrackerTab and ns.IsTrackerTab() then
+				view.curViewZone = vz
+			else
+				view.dirty = true
+			end
 		end
 	end
 	UpdateLodFades(seamless, sz, zoom)
@@ -665,8 +682,12 @@ end
 
 function ns.Refresh()
 	view.dirty = true
+	view.panelNotified = false
 	if view.overlay and view.overlay:IsVisible() then OnUpdate() end
-	if view.dirty and ns.OnLayerChanged then ns.OnLayerChanged() end
+	if not view.panelNotified and ns.OnLayerChanged then
+		view.panelNotified = true
+		ns.OnLayerChanged()
+	end
 end
 
 function ns.SetSearch(set)
@@ -710,6 +731,9 @@ local function OnHotClick()
 		end
 	else
 		local tq = ns.TrackedQuestForPin and ns.TrackedQuestForPin(pin) or nil
+		if not tq and ns.IsTrackerTab and ns.IsTrackerTab() and ns.LogQuestIDForPin then
+			tq = ns.LogQuestIDForPin(pin)
+		end
 		if tq and ns.QuestClicked then
 			ns.QuestClicked(tq, "toggle", true, true)
 			return
@@ -722,7 +746,7 @@ local function OnHotClick()
 			questPin = (D.qid[pin] ~= 0 and ns.QuestPin and ns.QuestPin(D.qid[pin])) or nil
 		end
 		local focusTarget = questPin or pin
-		if sel and focusTarget == sel and (not questPin or (ns.db and (ns.db.panelTab == "zone" or ns.db.panelTab == "dungeon"))) then
+		if sel and focusTarget == sel and (not questPin or (ns.db and (ns.db.panelTab == "zone" or ns.db.panelTab == "dungeon" or ns.db.panelTab == "tracker"))) then
 			ns.SetFocusedPin(nil)
 			if ns.CloseQuestDetailsIfShown then ns.CloseQuestDetailsIfShown() end
 		else

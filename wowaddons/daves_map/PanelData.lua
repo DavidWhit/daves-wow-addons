@@ -16,7 +16,7 @@ local ZONE_SECTIONS = {
 	{ key = "done", title = "Completed" },
 }
 
-local STATE_ORDER = { ready = 1, log = 2, avail = 3, locked = 4, done = 5 }
+local STATE_ORDER = { ready = 1, log = 2, avail = 3, locked = 3, done = 4 }
 
 local ROW_HEIGHTS = {
 	zsec = 25,
@@ -215,7 +215,7 @@ local function FormatLvlCell(lvl)
 	return "|cff666666-|r"
 end
 
-local function MakeQuestEntry(pin, _viewZone, allowAutoExpand)
+local function MakeQuestEntry(pin, _viewZone, allowAutoExpand, liveQid)
 	local D = ns.DATA
 	local ch = ns.ChainFor(pin)
 	if ch and #ch.steps > 1 then
@@ -256,6 +256,7 @@ local function MakeQuestEntry(pin, _viewZone, allowAutoExpand)
 		local starterName, starterZone = StarterInfo(starter)
 		return {
 			pin = starter,
+			liveQid = liveQid,
 			sortLvl = dispLvl > 0 and dispLvl or 999,
 			sortXP = xpVal,
 			starterName = starterName,
@@ -295,6 +296,7 @@ local function MakeQuestEntry(pin, _viewZone, allowAutoExpand)
 	local starterName, starterZone = StarterInfo(pin)
 	return {
 		pin = pin,
+		liveQid = liveQid,
 		sortLvl = dispLvl > 0 and dispLvl or 999,
 		sortXP = xpVal,
 		starterName = starterName,
@@ -328,8 +330,20 @@ end
 
 local function EmitQuestEntry(out, entry)
 	local D = ns.DATA
+	local inGroup = IsInGroup and IsInGroup()
 	if entry.hasChain then
 		local ch = entry.chain
+		local headGCnt, headGQid = nil, nil
+		if not entry.expanded and inGroup and ns.GroupQuestCountForPin then
+			local gCnt, gQid = ns.GroupQuestCountForPin(entry.inLogPin or entry.activePin, entry.liveQid)
+			if gCnt == 0 then
+				for _, s in ipairs(ch.steps) do
+					local sc, sq = ns.GroupQuestCountForPin(s)
+					if sc > gCnt then gCnt, gQid = sc, sq end
+				end
+			end
+			if gCnt > 0 then headGCnt, headGQid = gCnt, gQid end
+		end
 		out[#out + 1] = {
 			kind = "quest",
 			i = entry.pin,
@@ -343,6 +357,8 @@ local function EmitQuestEntry(out, entry)
 			chainDone = entry.chainDone or 0,
 			chainSet = ch.set,
 			expanded = entry.expanded,
+			groupCount = headGCnt,
+			groupQuestID = headGQid,
 			lvlTxt = entry.lvlTxt,
 			xpColTxt = entry.xpColTxt,
 		}
@@ -367,6 +383,11 @@ local function EmitQuestEntry(out, entry)
 				else
 					stepXP = "|cff666666-|r"
 				end
+				local stepLiveQ = (entry.liveQid and stepPin == entry.inLogPin) and entry.liveQid or nil
+				local stepGCnt, stepGQid = 0, nil
+				if inGroup and ns.GroupQuestCountForPin then
+					stepGCnt, stepGQid = ns.GroupQuestCountForPin(stepPin, stepLiveQ)
+				end
 				out[#out + 1] = {
 					kind = "cstep",
 					i = stepPin,
@@ -380,6 +401,8 @@ local function EmitQuestEntry(out, entry)
 					state = sst,
 					isDone = isDone,
 					isCurrent = isCurrent,
+					groupCount = stepGCnt > 0 and stepGCnt or nil,
+					groupQuestID = stepGCnt > 0 and stepGQid or nil,
 					xpColTxt = stepXP,
 				}
 				AppendRewardsForQuest(out, stepPin, 2, isDone, nil)
@@ -392,6 +415,10 @@ local function EmitQuestEntry(out, entry)
 			end
 		end
 	else
+		local gCnt, gQid = 0, nil
+		if inGroup and ns.GroupQuestCountForPin then
+			gCnt, gQid = ns.GroupQuestCountForPin(entry.pin, entry.liveQid)
+		end
 		out[#out + 1] = {
 			kind = "quest",
 			i = entry.pin,
@@ -401,6 +428,8 @@ local function EmitQuestEntry(out, entry)
 			starterZone = entry.starterZone,
 			state = entry.state,
 			here = IsHere(entry.pin),
+			groupCount = gCnt > 0 and gCnt or nil,
+			groupQuestID = gCnt > 0 and gQid or nil,
 			lvlTxt = entry.lvlTxt,
 			xpColTxt = entry.xpColTxt,
 		}
@@ -408,15 +437,23 @@ local function EmitQuestEntry(out, entry)
 	end
 end
 
+local function CompareDirected(va, vb, asc)
+	if va == vb then return nil end
+	if asc then return va < vb else return va > vb end
+end
+
 local function CompareLevel(la, lb, asc)
-	if la == lb then return nil end
 	-- Always keep unknown level (999) at the bottom regardless of sort direction.
-	if la >= 999 then return false end
-	if lb >= 999 then return true end
-	if asc then return la < lb else return la > lb end
+	local ua, ub = la >= 999, lb >= 999
+	if ua or ub then
+		if ua == ub then return nil end
+		return not ua
+	end
+	return CompareDirected(la, lb, asc)
 end
 
 local function SortQuestEntries(list)
+	if #list < 2 then return end
 	local D = ns.DATA
 	local mode = (ns.db and ns.db.questSort) or "lvl"
 	if mode ~= "lvl" and mode ~= "xp" and mode ~= "name" and mode ~= "starter" then
@@ -424,26 +461,26 @@ local function SortQuestEntries(list)
 	end
 	local asc = not (ns.db and ns.db.questSortAsc == false)
 	table.sort(list, function(a, b)
-		-- Keep completed quests below uncompleted ones (and Ready above In Log inside active).
-		local doneA, doneB = a.state == "done", b.state == "done"
-		if doneA ~= doneB then return not doneA end
-		if (a.state == "ready" or a.state == "log") and (b.state == "ready" or b.state == "log") then
-			local oa, ob = STATE_ORDER[a.state] or 9, STATE_ORDER[b.state] or 9
-			if oa ~= ob then return oa < ob end
-		end
+		if a == b then return false end
+		-- Strict weak order by state group: Ready -> In Log -> Available/Locked -> Completed.
+		local oa, ob = STATE_ORDER[a.state] or 3, STATE_ORDER[b.state] or 3
+		if oa ~= ob then return oa < ob end
 		if mode == "xp" then
-			local xa, xb = a.sortXP or 0, b.sortXP or 0
-			if xa ~= xb then return asc and (xa < xb) or (xa > xb) end
+			local xc = CompareDirected(a.sortXP or 0, b.sortXP or 0, asc)
+			if xc ~= nil then return xc end
 			local lc = CompareLevel(a.sortLvl or 999, b.sortLvl or 999, true)
 			if lc ~= nil then return lc end
 		elseif mode == "name" then
-			local ta, tb = (D.title[a.pin] or ""):lower(), (D.title[b.pin] or ""):lower()
-			if ta ~= tb then return asc and (ta < tb) or (ta > tb) end
+			local tc = CompareDirected((D.title[a.pin] or ""):lower(), (D.title[b.pin] or ""):lower(), asc)
+			if tc ~= nil then return tc end
 			local lc = CompareLevel(a.sortLvl or 999, b.sortLvl or 999, true)
 			if lc ~= nil then return lc end
 		elseif mode == "starter" then
 			local sa, sb = (a.starterName or ""):lower(), (b.starterName or ""):lower()
-			if sa ~= sb then return asc and (sa < sb) or (sa > sb) end
+			local emptyA, emptyB = sa == "", sb == ""
+			if emptyA ~= emptyB then return not emptyA end
+			local sc = CompareDirected(sa, sb, asc)
+			if sc ~= nil then return sc end
 			local lc = CompareLevel(a.sortLvl or 999, b.sortLvl or 999, true)
 			if lc ~= nil then return lc end
 		else
@@ -454,7 +491,7 @@ local function SortQuestEntries(list)
 		end
 		local ta, tb = (D.title[a.pin] or ""):lower(), (D.title[b.pin] or ""):lower()
 		if ta ~= tb then return ta < tb end
-		return a.pin < b.pin
+		return (a.pin or 0) < (b.pin or 0)
 	end)
 end
 
@@ -513,6 +550,14 @@ local function BuildLayersItems()
 		tipTitle = "Click a tracked quest to focus it",
 		tip = "Clicking a quest in the objective tracker, quest log, or Ready to Turn In focuses the map on that quest's objectives and turn-in (and shows its chain in Dave's Map).",
 		checked = db.focusQuest ~= false,
+	}
+	ui.items[#ui.items + 1] = {
+		kind = "setting_check",
+		skey = "groupQuestCount",
+		label = "Show party quest numbers",
+		tipTitle = "Show party quest numbers",
+		tip = "While in a party or raid, show a brass number badge beside quests in Dave's Map and the objective tracker (hover the number to see group member names).",
+		checked = db.groupQuestCount ~= false,
 	}
 	ui.items[#ui.items + 1] = {
 		kind = "setting_check",
@@ -775,34 +820,8 @@ end
 
 local function BuildTrackerItems()
 	local D = ns.DATA
-	if not (D and ns.Calibrate()) then return end
-	local pinned = (ns.db and ns.db.pinned) or {}
-	local focusOn = ns.db and ns.db.focusQuest ~= false
-	local clickFocus = focusOn and ns.ClickFocus and ns.ClickFocus() or nil
-	local uiFocus = focusOn and ns.TrackerFocusQuestID and ns.TrackerFocusQuestID() or nil
-	local focusQ = (clickFocus and ns.QuestInLog(clickFocus)) and clickFocus
-		or ((uiFocus and ns.QuestInLog(uiFocus)) and uiFocus or nil)
-
-	local bucketQuests = { focused = {}, ready = {}, pinned = {}, tracking = {} }
-	local seenQ = {}
-	for idx = 1, ns.NumQuestLogEntries() do
-		local info = ns.QuestInfo(idx)
-		if info and not info.isHeader and not info.isHidden and info.questID and info.questID ~= 0 and not issecretvalue(info.questID) then
-			local q = info.questID
-			if not seenQ[q] then
-				seenQ[q] = true
-				if focusQ and q == focusQ then
-					bucketQuests.focused[#bucketQuests.focused + 1] = q
-				elseif ns.QuestReady(q) then
-					bucketQuests.ready[#bucketQuests.ready + 1] = q
-				elseif pinned[q] then
-					bucketQuests.pinned[#bucketQuests.pinned + 1] = q
-				elseif ns.QuestWatched(q) then
-					bucketQuests.tracking[#bucketQuests.tracking + 1] = q
-				end
-			end
-		end
-	end
+	if not (D and ns.Calibrate() and ns.CollectTrackerQuests) then return end
+	local bucketQuests = ns.CollectTrackerQuests()
 
 	-- Deduplicate chain starters in strict priority order (Focused -> Ready -> Pinned -> Tracking)
 	-- so two active steps of the same branched chain never render duplicate chain blocks.
@@ -813,7 +832,7 @@ local function BuildTrackerItems()
 		for _, q in ipairs(bucketQuests[sec.key]) do
 			local pin = ResolveTrackerPin(q)
 			if pin then
-				local entry = MakeQuestEntry(pin, nil, true)
+				local entry = MakeQuestEntry(pin, nil, true, q)
 				if entry and not seenStarter[entry.pin] then
 					seenStarter[entry.pin] = true
 					entries[#entries + 1] = entry
@@ -836,8 +855,11 @@ local function BuildTrackerItems()
 					end
 				end
 				for _, nd in ipairs(noData) do
+					local gCnt = ns.GroupQuestCount and ns.GroupQuestCount(nd.q) or 0
 					ui.items[#ui.items + 1] = {
 						kind = "note",
+						groupCount = gCnt > 0 and gCnt or nil,
+						groupQuestID = gCnt > 0 and nd.q or nil,
 						title = "No map data for: " .. nd.title,
 						sub = "QuestieDB Forever has no pin data for this quest yet.",
 					}

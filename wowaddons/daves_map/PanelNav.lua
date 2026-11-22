@@ -40,6 +40,7 @@ local ui = {
 	zoneContextLock = nil,
 	dungeonZoneLock = nil,
 	haystack = nil,
+	trackerPinCache = {},
 	found = nil,
 	searchOriginMap = nil,
 	trackerFocusQ = nil,
@@ -123,12 +124,135 @@ function ns.AddBrassPillSlices(parent, layer, capW, blend, alpha, r, g, b)
 	end
 	return {
 		SetShown = function(_, on) for _, t in ipairs(parts) do t:SetShown(on) end end,
+		Show = function() for _, t in ipairs(parts) do t:Show() end end,
 		Hide = function() for _, t in ipairs(parts) do t:Hide() end end,
 		SetAlpha = function(_, a) for _, t in ipairs(parts) do t:SetAlpha(a) end end,
 		SetVertexColor = function(_, vr, vg, vb, va)
 			for _, t in ipairs(parts) do t:SetVertexColor(vr, vg, vb, va) end
 		end,
 	}
+end
+
+-- Compact beveled brass number pill matching the chain step pill (`Media/pill.tga`),
+-- used in both Dave's Map quest rows and the on-screen Objective Tracker to show how many
+-- group members currently have a quest, with a hover tooltip listing those group members.
+local function ResolveTooltipAnchor(owner, anchorSide)
+	if anchorSide ~= "AUTO" then return anchorSide or "ANCHOR_RIGHT" end
+	local cx = owner and owner.GetCenter and owner:GetCenter()
+	local os = owner and owner.GetEffectiveScale and owner:GetEffectiveScale()
+	local uw = UIParent and UIParent.GetWidth and UIParent:GetWidth()
+	local us = UIParent and UIParent.GetEffectiveScale and UIParent:GetEffectiveScale()
+	if type(cx) == "number" and not issecretvalue(cx)
+		and type(os) == "number" and not issecretvalue(os)
+		and type(uw) == "number" and not issecretvalue(uw) and uw > 0
+		and type(us) == "number" and not issecretvalue(us) and us > 0 then
+		return (cx * os) >= (uw * us * 0.5) and "ANCHOR_LEFT" or "ANCHOR_RIGHT"
+	end
+	return "ANCHOR_LEFT"
+end
+
+function ns.ShowGroupQuestTooltip(owner, questID, anchorSide)
+	if not (owner and not issecretvalue(questID) and type(questID) == "number" and questID ~= 0) then
+		if owner and GameTooltip:GetOwner() == owner then GameTooltip:Hide() end
+		return
+	end
+	local units = ns.GroupQuestMembers and ns.GroupQuestMembers(questID) or nil
+	if not (units and #units > 0) then
+		if GameTooltip:GetOwner() == owner then GameTooltip:Hide() end
+		return
+	end
+	GameTooltip:SetOwner(owner, ResolveTooltipAnchor(owner, anchorSide))
+	local qTitle = ns.QuestTitle and ns.QuestTitle(questID)
+	if (type(qTitle) ~= "string" or issecretvalue(qTitle) or qTitle == "") and ns.DATA and ns.QuestPin then
+		local pin = ns.QuestPin(questID)
+		qTitle = pin and ns.DATA.title and ns.DATA.title[pin] or nil
+	end
+	if type(qTitle) == "string" and not issecretvalue(qTitle) and qTitle ~= "" then
+		GameTooltip:AddLine(qTitle, 1, 0.82, 0.2, true)
+	end
+	GameTooltip:AddLine(("Group members on quest (%d):"):format(#units), 0.5, 0.83, 1)
+	for _, unit in ipairs(units) do
+		local name = UnitName and UnitName(unit)
+		local classFile
+		if UnitClass then
+			_, classFile = UnitClass(unit)
+		end
+		local r, g, b = 1, 1, 1
+		if type(classFile) == "string" and not issecretvalue(classFile) and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile] then
+			local cc = RAID_CLASS_COLORS[classFile]
+			r, g, b = cc.r, cc.g, cc.b
+		end
+		if not issecretvalue(name) then
+			if type(name) == "string" and name ~= "" then
+				GameTooltip:AddLine(unit == "player" and (name .. " (You)") or name, r, g, b)
+			else
+				GameTooltip:AddLine(unit == "player" and "You" or "Group member", r, g, b)
+			end
+		else
+			if not pcall(GameTooltip.AddLine, GameTooltip, name, r, g, b) then
+				GameTooltip:AddLine("Group member", r, g, b)
+			end
+		end
+	end
+	GameTooltip:Show()
+end
+
+function ns.CreateGroupCountPill(parent, height, capW, fontObj, anchorSide, clickable)
+	local h = height or 21
+	local c = capW or 10
+	local f = CreateFrame(clickable and "Button" or "Frame", nil, parent)
+	f:SetSize(h + 4, h)
+	f:EnableMouse(true)
+	if clickable then
+		f:RegisterForClicks("LeftButtonUp", "Button4Up")
+	end
+	f.baseH = h
+	f.anchorSide = anchorSide or "ANCHOR_RIGHT"
+	f.frame = ns.AddBrassPillSlices(f, "BACKGROUND", c)
+	f.hl = ns.AddBrassPillSlices(f, "ARTWORK", c, "ADD", 0.28)
+	f.hl:Hide()
+	f.lbl = f:CreateFontString(nil, "OVERLAY")
+	if type(fontObj) == "table" then
+		f.lbl:SetFontObject(fontObj)
+	else
+		f.lbl:SetFontObject(fontObj or "GameFontHighlightSmall")
+	end
+	f.lbl:SetPoint("CENTER", 0, 0)
+	f.lbl:SetJustifyH("CENTER")
+	f.lbl:SetJustifyV("MIDDLE")
+	f.lbl:SetWordWrap(false)
+	f:SetScript("OnEnter", function(self)
+		if self.hl then self.hl:Show() end
+		if self.questID and ns.ShowGroupQuestTooltip then
+			ns.ShowGroupQuestTooltip(self, self.questID, self.anchorSide)
+		end
+	end)
+	f:SetScript("OnLeave", function(self)
+		if self.hl then self.hl:Hide() end
+		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+	end)
+	f:SetScript("OnHide", function(self)
+		if self.hl then self.hl:Hide() end
+		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+	end)
+	f:Hide()
+	return f
+end
+
+function ns.StyleGroupCountPill(badge, count)
+	if not badge then return 0 end
+	local n = tonumber(count) or 0
+	local txt = tostring(n)
+	local w = (badge.baseH or 21) + (#txt >= 2 and 10 or 4)
+	badge:SetWidth(w)
+	if n >= 2 then
+		badge.frame:SetVertexColor(0.90, 0.86, 0.72, 0.96)
+		badge.lbl:SetText("|cff7fd4ff" .. txt .. "|r")
+	else
+		badge.frame:SetVertexColor(0.74, 0.70, 0.60, 0.80)
+		badge.lbl:SetText("|cff9ea4b0" .. txt .. "|r")
+	end
+	return w
 end
 
 function ns.RefreshIfMapHidden()
@@ -243,6 +367,15 @@ function ns.FindQuestPinsForTracker(q)
 	local title = ns.QuestTitle and ns.QuestTitle(q) or nil
 	if not (D and ns.Calibrate()) then return {}, title end
 
+	local clean = type(title) == "string" and title:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ") or ""
+	local f = ns.factions
+	local facKey = f and ((f[1] and "1" or "0") .. (f[2] and "1" or "0") .. (f[3] and "1" or "0")) or "all"
+	local qMap = ns.QuestUiMapID and ns.QuestUiMapID(q) or 0
+	if type(qMap) ~= "number" or issecretvalue(qMap) then qMap = 0 end
+	local ckey = tostring(q or 0) .. "\1" .. clean .. "\1" .. facKey .. "\1" .. tostring(qMap)
+	local cached = ui.trackerPinCache[ckey]
+	if cached then return cached, title end
+
 	local out, seen = {}, {}
 	local function AddPin(i)
 		if i and not seen[i] then
@@ -264,41 +397,48 @@ function ns.FindQuestPinsForTracker(q)
 	end
 
 	-- 2. Fallback: under-the-hood search by the quest's title (exact title, then title words, then haystack)
-	local clean = type(title) == "string" and title:lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ") or ""
 	if #out == 0 and #clean >= 2 then
 		local words = {}
 		for w in clean:gmatch("%S+") do words[#words + 1] = w end
 		local exactMatch, titleWords, hayWords = {}, {}, {}
+		local exactAny, titleAny, hayAny = {}, {}, {}
 		for i = 1, #D.x do
 			local ic = D.cats[D.cat[i]] and D.cats[D.cat[i]].icon
-			if (ic == "quest" or ic == "repeatable") and ns.PassesPlayerFilter(i) then
+			if ic == "quest" or ic == "repeatable" then
 				local dt = (D.title[i] or ""):lower():gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
+				local passFac = ns.PassesPlayerFilter(i)
 				if dt == clean then
-					exactMatch[#exactMatch + 1] = i
+					exactAny[#exactAny + 1] = i
+					if passFac then exactMatch[#exactMatch + 1] = i end
 				elseif MatchWords(dt, words) then
-					titleWords[#titleWords + 1] = i
+					titleAny[#titleAny + 1] = i
+					if passFac then titleWords[#titleWords + 1] = i end
 				elseif MatchWords(Haystack(i), words) then
-					hayWords[#hayWords + 1] = i
+					hayAny[#hayAny + 1] = i
+					if passFac then hayWords[#hayWords + 1] = i end
 				end
 			end
 		end
-		local pick = (#exactMatch > 0 and exactMatch) or (#titleWords > 0 and titleWords) or hayWords
+		local pick = (#exactMatch > 0 and exactMatch)
+			or (#titleWords > 0 and titleWords)
+			or (#hayWords > 0 and hayWords)
+			or (#exactAny > 0 and exactAny)
+			or (#titleAny > 0 and titleAny)
+			or hayAny
 		for _, i in ipairs(pick) do AddPin(i) end
 	end
 
 	-- Prefer pins on the quest's active objective map when multiple candidates match
-	if #out > 1 and ns.QuestUiMapID then
-		local qMap = ns.QuestUiMapID(q)
-		if type(qMap) == "number" and qMap ~= 0 and not issecretvalue(qMap) then
-			table.sort(out, function(a, b)
-				local ma = (D.map and D.map[a] == qMap)
-				local mb = (D.map and D.map[b] == qMap)
-				if ma ~= mb then return ma end
-				return a < b
-			end)
-		end
+	if #out > 1 and qMap ~= 0 then
+		table.sort(out, function(a, b)
+			local ma = (D.map and D.map[a] == qMap)
+			local mb = (D.map and D.map[b] == qMap)
+			if ma ~= mb then return ma end
+			return a < b
+		end)
 	end
 
+	ui.trackerPinCache[ckey] = out
 	return out, title
 end
 
@@ -322,6 +462,7 @@ function ns.OpenTrackerTab(q, preferredPin)
 	ui.dungeonZoneLock = nil
 	ui.trackerFocusQ = q
 	ns.db.panelTab = "tracker"
+	if ns.SetRefLayer then ns.SetRefLayer(nil, true, true) end
 	if ns.db.zoneFold then
 		ns.db.zoneFold["trk:focused"] = false
 	end
@@ -337,8 +478,13 @@ function ns.OpenTrackerTab(q, preferredPin)
 		end
 	end
 	ui.scrollPx = 0
+	if ns.UpdateFocus then ns.UpdateFocus(false) end
 	if ns.UpdatePanel then ns.UpdatePanel() end
-	if ns.OnLayerChanged then ns.OnLayerChanged() end
+	if ns.Refresh then
+		ns.Refresh()
+	elseif ns.OnLayerChanged then
+		ns.OnLayerChanged()
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -462,18 +608,20 @@ function ns.GoBack()
 	local entry = table.remove(ui.history)
 	ui.restoring = true
 	ns.db.panelTab = entry.tab or "layers"
+	local wantRef = (ns.db.panelTab == "zone" or ns.db.panelTab == "dungeon") and ns.db.panelTab or nil
 	SetSearchQuiet(entry.search or "")
 	if entry.key then ui.scrollByKey[entry.key] = entry.scrollPx or 0 end
-	if ns.SetRefLayer then ns.SetRefLayer(entry.refMode, true) end
-	ui.zoneContextLock = entry.zoneContextLock
-	ui.dungeonZoneLock = entry.dungeonZoneLock
-	ui.trackerFocusQ = entry.trackerFocusQ
-	if entry.refMode == "zone" and entry.zoneContextLock and ns.PinRefZone then
-		ns.PinRefZone(entry.zoneContextLock, true)
-	elseif entry.dungeonZoneLock and ns.PinRefZone then
-		ns.PinRefZone(entry.dungeonZoneLock, false)
+	if ns.SetRefLayer then ns.SetRefLayer(wantRef, true) end
+	ui.zoneContextLock = wantRef == "zone" and entry.zoneContextLock or nil
+	ui.dungeonZoneLock = wantRef == "dungeon" and entry.dungeonZoneLock or nil
+	if wantRef == "zone" and ui.zoneContextLock and ns.PinRefZone then
+		ns.PinRefZone(ui.zoneContextLock, true)
+	elseif wantRef == "dungeon" and ui.dungeonZoneLock and ns.PinRefZone then
+		ns.PinRefZone(ui.dungeonZoneLock, false)
 	end
 	ns.SetFocusedPin(entry.pin, true)
+	ui.trackerFocusQ = entry.trackerFocusQ
+	if not wantRef and ns.UpdateFocus then ns.UpdateFocus(false) end
 	if entry.pin then
 		if ns.SyncQuestDetailsPane then
 			ns.SyncQuestDetailsPane(ns.FocusedPin(), entry.mapState and entry.mapState.map)
@@ -490,7 +638,11 @@ function ns.GoBack()
 	elseif ns.RestoreMapState then
 		ns.RestoreMapState(entry.mapState)
 	end
-	if ns.OnLayerChanged then ns.OnLayerChanged() end
+	if ns.Refresh then
+		ns.Refresh()
+	elseif ns.OnLayerChanged then
+		ns.OnLayerChanged()
+	end
 	if entry.scrollPx then
 		ui.scrollPx = entry.scrollPx
 		if ns.RenderPanelRows then ns.RenderPanelRows() end
@@ -631,9 +783,14 @@ function ns.SelectSidebarTab(tabKey)
 			ns.OnLayerChanged()
 		end
 	else
-		-- Both `Base` and `Tracker` stay on the Base map layer (tracked/focused objectives + optional POIs).
-		if not ns.SetRefLayer(nil, true) and ns.OnLayerChanged then
-			ns.OnLayerChanged()
+		-- Both `Base` and `Tracker` stay on the Base map layer (with all Tracker tab quests always visible at any zoom).
+		if ns.UpdateFocus then ns.UpdateFocus(false) end
+		if not ns.SetRefLayer(nil, true) then
+			if ns.Refresh then
+				ns.Refresh()
+			elseif ns.OnLayerChanged then
+				ns.OnLayerChanged()
+			end
 		end
 	end
 end

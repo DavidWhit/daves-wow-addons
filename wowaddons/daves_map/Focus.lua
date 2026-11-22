@@ -50,12 +50,12 @@ function ns.ClickFocus()
 end
 
 function ns.ClickFocused(q)
-	return q == daves_mapCharDB.focusClick and q == ns.SuperTrackedQuest()
+	return q ~= nil and q == ns.ActiveFocusQuest()
 end
 
 local function HasMapPos(p)
 	local P = ns.P
-	return (p and p ~= 0 and P and (P.zone[p] ~= nil or P.cont[p] ~= nil)) == true
+	return (p and p ~= 0 and P and ((P.zone[p] and P.zone[p] ~= 0) or (P.cont[p] and P.cont[p] ~= 0))) == true
 end
 
 function ns.ActivePinTarget(pin)
@@ -76,10 +76,60 @@ function ns.ActivePinTarget(pin)
 	return pin
 end
 
+function ns.ActiveFocusQuest()
+	if not (ns.db and ns.db.focusQuest ~= false) then return nil end
+	local clickQ = daves_mapCharDB and daves_mapCharDB.focusClick or nil
+	local uiQ = ns.TrackerFocusQuestID and ns.TrackerFocusQuestID() or nil
+	local superQ = ns.SuperTrackedQuest and ns.SuperTrackedQuest() or 0
+	if issecretvalue(superQ) then superQ = 0 end
+	if clickQ and not issecretvalue(clickQ) and ns.QuestInLog(clickQ) then
+		if superQ == clickQ or (superQ == 0 and (uiQ == clickQ or (ns.KeepingFocus and ns.KeepingFocus(clickQ)))) then
+			return clickQ
+		end
+	end
+	if uiQ and not issecretvalue(uiQ) and ns.QuestInLog(uiQ) then
+		if superQ == uiQ or superQ == 0 then
+			return uiQ
+		end
+	end
+	return nil
+end
+
+function ns.CollectTrackerQuests()
+	local pinned = (ns.db and ns.db.pinned) or {}
+	local focusQ = ns.ActiveFocusQuest()
+	local buckets = { focused = {}, ready = {}, pinned = {}, tracking = {} }
+	local seenQ = {}
+	local nEntries = ns.NumQuestLogEntries() or 0
+	for idx = 1, nEntries do
+		local info = ns.QuestInfo(idx)
+		if info and not info.isHeader and not info.isHidden and info.questID and info.questID ~= 0 and not issecretvalue(info.questID) then
+			local q = info.questID
+			if not seenQ[q] then
+				seenQ[q] = true
+				if focusQ and q == focusQ then
+					buckets.focused[#buckets.focused + 1] = q
+				elseif ns.QuestReady(q) then
+					buckets.ready[#buckets.ready + 1] = q
+				elseif pinned[q] then
+					buckets.pinned[#buckets.pinned + 1] = q
+				elseif ns.QuestWatched(q) then
+					buckets.tracking[#buckets.tracking + 1] = q
+				end
+			end
+		end
+	end
+	return buckets, focusQ
+end
+
 local function AddTrackedQuestPins(q, outSet, outQuestOf, outOwnerOf)
 	local D = ns.DATA
+	if not D then return end
 	local list = ns.PinsOfQuest(q)
-	if not (D and list and list[1]) then return end
+	if not (list and list[1]) and ns.FindQuestPinsForTracker then
+		list = ns.FindQuestPinsForTracker(q)
+	end
+	if not (list and list[1]) then return end
 	local pins = list
 	if #list > 1 and ns.LogQuestIDForPin then
 		local matched = {}
@@ -88,36 +138,41 @@ local function AddTrackedQuestPins(q, outSet, outQuestOf, outOwnerOf)
 		end
 		if #matched > 0 then pins = matched end
 	end
+	if #pins > 1 then
+		local facMatched = {}
+		for _, p in ipairs(pins) do
+			if ns.PassesPlayerFilter(p) then facMatched[#facMatched + 1] = p end
+		end
+		if #facMatched > 0 then pins = facMatched end
+	end
 	local ready = ns.QuestReady(q) or ns.QuestComplete(q) == true
 	for _, p in ipairs(pins) do
-		if ns.PassesPlayerFilter(p) then
-			local endp = D.endp[p] ~= 0 and D.endp[p] or nil
-			local mappedEnd = (endp and HasMapPos(endp)) and endp or nil
-			local addedAny = false
-			if ready then
-				local turnPin = mappedEnd or (HasMapPos(p) and p or nil)
-				if turnPin then
-					outSet[turnPin] = true
-					outQuestOf[turnPin] = q
-					outOwnerOf[turnPin] = p
+		local endp = D.endp[p] ~= 0 and D.endp[p] or nil
+		local mappedEnd = (endp and HasMapPos(endp)) and endp or nil
+		local addedAny = false
+		if ready then
+			local turnPin = mappedEnd or (HasMapPos(p) and p or nil)
+			if turnPin then
+				outSet[turnPin] = true
+				outQuestOf[turnPin] = q
+				outOwnerOf[turnPin] = p
+				addedAny = true
+			end
+		else
+			for _, o in ipairs(D.obj and D.obj[p] or {}) do
+				if HasMapPos(o) then
+					outSet[o] = true
+					outQuestOf[o] = q
+					outOwnerOf[o] = p
 					addedAny = true
 				end
-			else
-				for _, o in ipairs(D.obj and D.obj[p] or {}) do
-					if HasMapPos(o) then
-						outSet[o] = true
-						outQuestOf[o] = q
-						outOwnerOf[o] = p
-						addedAny = true
-					end
-				end
-				if not addedAny then
-					local fallback = mappedEnd or (HasMapPos(p) and p or nil)
-					if fallback then
-						outSet[fallback] = true
-						outQuestOf[fallback] = q
-						outOwnerOf[fallback] = p
-					end
+			end
+			if not addedAny then
+				local fallback = mappedEnd or (HasMapPos(p) and p or nil)
+				if fallback then
+					outSet[fallback] = true
+					outQuestOf[fallback] = q
+					outOwnerOf[fallback] = p
 				end
 			end
 		end
@@ -144,23 +199,19 @@ local function UpdateFocus(force)
 		state.focusFor = nil
 		return had
 	end
-	local focusQ = ns.db.focusQuest and ns.SuperTrackedQuest() or nil
-	if not focusQ or focusQ == 0 or issecretvalue(focusQ) or focusQ ~= daves_mapCharDB.focusClick or not ns.QuestInLog(focusQ) then
-		focusQ = nil
-	end
+	local buckets, focusQ = ns.CollectTrackerQuests()
 	local nextSet, nextQuestOf, nextOwnerOf = {}, {}, {}
 	if focusQ then
 		AddTrackedQuestPins(focusQ, nextSet, nextQuestOf, nextOwnerOf)
 	else
-		local nEntries = ns.NumQuestLogEntries() or 0
-		for idx = 1, nEntries do
-			local info = ns.QuestInfo(idx)
-			if info and not info.isHeader and not info.isHidden and info.questID and info.questID ~= 0 and not issecretvalue(info.questID) then
-				local q = info.questID
-				if ns.QuestWatched(q) or ns.QuestReady(q) then
-					AddTrackedQuestPins(q, nextSet, nextQuestOf, nextOwnerOf)
-				end
-			end
+		for _, q in ipairs(buckets.ready) do
+			AddTrackedQuestPins(q, nextSet, nextQuestOf, nextOwnerOf)
+		end
+		for _, q in ipairs(buckets.pinned) do
+			AddTrackedQuestPins(q, nextSet, nextQuestOf, nextOwnerOf)
+		end
+		for _, q in ipairs(buckets.tracking) do
+			AddTrackedQuestPins(q, nextSet, nextQuestOf, nextOwnerOf)
 		end
 	end
 	local changed = force == true or focusQ ~= state.focusFor or not SameSet(state.trackedSet, nextSet)
@@ -276,10 +327,10 @@ function ns.SwitchRefZone(mapID)
 	if ns.Refresh then ns.Refresh() end
 end
 
-function ns.SetRefLayer(mode, silent)
+function ns.SetRefLayer(mode, silent, keepLockedPin)
 	if mode ~= "zone" and mode ~= "dungeon" then mode = nil end
 	local clearedPin = false
-	if mode == nil and state.lockedPin ~= nil then
+	if mode == nil and not keepLockedPin and state.lockedPin ~= nil then
 		state.lockedPin = nil
 		clearedPin = true
 	end
@@ -326,6 +377,16 @@ function ns.RefreshRefLayerSet(zMap)
 	wipe(state.refSet)
 	state.refCount = 0
 	local D, db = ns.DATA, ns.db
+	if db and (db.panelTab == "tracker" or db.panelTab == "layers") then
+		if state.refMode ~= nil or state.refPinnedMap ~= nil or state.sidebarDestZone ~= nil then
+			state.refMode = nil
+			state.refPinnedMap = nil
+			state.sidebarDestZone = nil
+			SyncSuspendAutoSwitch()
+		end
+		state.refMap = nil
+		return
+	end
 	if not (state.refMode and D and db and ns.Calibrate()) then
 		state.refMap = nil
 		return
@@ -379,6 +440,7 @@ function ns.RefreshRefLayerSet(zMap)
 end
 
 function ns.RefLayerContains(i)
+	if ns.IsTrackerTab and ns.IsTrackerTab() then return false end
 	return state.refMode ~= nil and state.refSet[i] == true
 end
 
@@ -402,10 +464,12 @@ function ns.ClearDisabledSelection()
 end
 
 function ns.RevalidateFocusOnFilterChange()
-	if state.lockedPin and not ns.PassesPlayerFilter(state.lockedPin) then
+	UpdateFocus(true)
+	if state.lockedPin and not state.trackedSet[state.lockedPin]
+		and not (ns.LogQuestIDForPin and ns.LogQuestIDForPin(state.lockedPin))
+		and not ns.PassesPlayerFilter(state.lockedPin) then
 		state.lockedPin = nil
 	end
-	UpdateFocus(true)
 end
 
 local function IsGamepadActive()
@@ -509,6 +573,10 @@ function ns.SetFocusedPin(i, silent)
 			else
 				local prevCh = ns.ChainFor(i)
 				local focusPin = ns.QuestPin(state.focusFor)
+				if not focusPin and ns.FindQuestPinsForTracker then
+					local foundPins = ns.FindQuestPinsForTracker(state.focusFor)
+					focusPin = foundPins and foundPins[1] or nil
+				end
 				keepTracked = (prevCh and focusPin and prevCh.set and prevCh.set[focusPin]) == true
 			end
 		end
@@ -866,13 +934,13 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 		return true
 	end
 
-	if focusEnabled then ns.SetClickFocus(q) end
 	if fromTracker then
 		-- Focused tracker quests stay on the Base map layer (tracked/focused objectives + base POIs)
 		-- and display in the dedicated `Tracker` tab (Focused / Ready / Pinned / Tracking).
 		ns.SetRefLayer(nil, true)
 	end
 	ns.SetFocusedPin(pin, true)
+	if focusEnabled then ns.SetClickFocus(q) end
 	if fromTracker and ns.OpenTrackerTab then
 		ns.OpenTrackerTab(focusEnabled and q or nil, pin)
 	end

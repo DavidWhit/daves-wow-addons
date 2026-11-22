@@ -35,6 +35,7 @@ local state = {
 	qlogPending = false, qlogDirty = false,
 	liveXP = {}, reqReward = {}, pendReward = {}, mergedRew = {}, reqItem = {}, pendItem = {},
 	chainCache = {}, worthCache = {}, dungQuestSet = nil, dungByNorm = nil,
+	groupQuestCount = {}, groupRefreshQueued = false, questsInited = false,
 }
 
 ---------------------------------------------------------------------------
@@ -184,6 +185,7 @@ local function RecomputeInLog()
 	state.inLogStale = false
 	wipe(state.inLogByTitle)
 	wipe(state.worthCache)
+	wipe(state.groupQuestCount)
 	local data = ns.DATA
 	if not data then return false end
 	BuildQuestIndices()
@@ -800,6 +802,135 @@ function ns.IsDungeonQuestPin(pin, zMap)
 	return false
 end
 
+local PARTY_UNITS = { "party1", "party2", "party3", "party4" }
+local RAID_UNITS = {}
+for idx = 1, 40 do RAID_UNITS[idx] = "raid" .. idx end
+
+function ns.InvalidateGroupQuestCounts()
+	wipe(state.groupQuestCount)
+end
+
+-- Total users in the player's current party or raid who have `questID` (0 when solo).
+function ns.GroupQuestCount(questID)
+	if ns.ShowGroupQuestCount and not ns.ShowGroupQuestCount() then return 0 end
+	if not (IsInGroup and IsInGroup()) then return 0 end
+	if issecretvalue(questID) or type(questID) ~= "number" or questID == 0 then return 0 end
+	local cached = state.groupQuestCount[questID]
+	if cached ~= nil then return cached end
+	local total = 0
+	local hasSelf = ns.QuestInLog(questID)
+	if C_QuestLog and C_QuestLog.IsUnitOnQuest then
+		if IsInRaid and IsInRaid() then
+			local n = GetNumGroupMembers and GetNumGroupMembers() or 0
+			local sawSelf = false
+			if type(n) == "number" and not issecretvalue(n) then
+				if n > 40 then n = 40 end
+				for idx = 1, n do
+					local u = RAID_UNITS[idx]
+					local isSelf = UnitIsUnit and UnitIsUnit(u, "player")
+					if not issecretvalue(isSelf) and isSelf == true then
+						sawSelf = true
+					else
+						local on = C_QuestLog.IsUnitOnQuest(u, questID)
+						if not issecretvalue(on) and on == true then
+							total = total + 1
+						end
+					end
+				end
+			end
+			if sawSelf then
+				if hasSelf then total = total + 1 end
+			elseif hasSelf and total < 1 then
+				total = 1
+			end
+		else
+			local n = GetNumSubgroupMembers and GetNumSubgroupMembers() or 0
+			if type(n) == "number" and not issecretvalue(n) then
+				if n > 4 then n = 4 end
+				for idx = 1, n do
+					local on = C_QuestLog.IsUnitOnQuest(PARTY_UNITS[idx], questID)
+					if not issecretvalue(on) and on == true then
+						total = total + 1
+					end
+				end
+			end
+			if hasSelf then
+				total = total + 1
+			end
+		end
+	elseif hasSelf then
+		total = 1
+	end
+	state.groupQuestCount[questID] = total
+	return total
+end
+
+function ns.GroupQuestMembers(questID)
+	local units = {}
+	if ns.ShowGroupQuestCount and not ns.ShowGroupQuestCount() then return units end
+	if not (IsInGroup and IsInGroup()) then return units end
+	if issecretvalue(questID) or type(questID) ~= "number" or questID == 0 then return units end
+	local hasSelf = ns.QuestInLog(questID)
+	if C_QuestLog and C_QuestLog.IsUnitOnQuest then
+		if IsInRaid and IsInRaid() then
+			local n = GetNumGroupMembers and GetNumGroupMembers() or 0
+			local sawSelf = false
+			if type(n) == "number" and not issecretvalue(n) then
+				if n > 40 then n = 40 end
+				for idx = 1, n do
+					local u = RAID_UNITS[idx]
+					local isSelf = UnitIsUnit and UnitIsUnit(u, "player")
+					if not issecretvalue(isSelf) and isSelf == true then
+						sawSelf = true
+					else
+						local on = C_QuestLog.IsUnitOnQuest(u, questID)
+						if not issecretvalue(on) and on == true then
+							units[#units + 1] = u
+						end
+					end
+				end
+			end
+			if (sawSelf and hasSelf) or (not sawSelf and hasSelf and #units == 0) then
+				table.insert(units, 1, "player")
+			end
+		else
+			if hasSelf then
+				units[1] = "player"
+			end
+			local n = GetNumSubgroupMembers and GetNumSubgroupMembers() or 0
+			if type(n) == "number" and not issecretvalue(n) then
+				if n > 4 then n = 4 end
+				for idx = 1, n do
+					local u = PARTY_UNITS[idx]
+					local on = C_QuestLog.IsUnitOnQuest(u, questID)
+					if not issecretvalue(on) and on == true then
+						units[#units + 1] = u
+					end
+				end
+			end
+		end
+	elseif hasSelf then
+		units[1] = "player"
+	end
+	return units
+end
+
+function ns.GroupQuestCountForPin(pin, fallbackQid)
+	if ns.ShowGroupQuestCount and not ns.ShowGroupQuestCount() then return 0, nil end
+	if not (IsInGroup and IsInGroup()) then return 0, nil end
+	if not issecretvalue(fallbackQid) and type(fallbackQid) == "number" and fallbackQid ~= 0 then
+		return ns.GroupQuestCount(fallbackQid), fallbackQid
+	end
+	if not pin then return 0, nil end
+	local q = ns.LogQuestIDForPin and ns.LogQuestIDForPin(pin) or nil
+	if not q and ns.DATA and ns.DATA.qid then
+		local dq = ns.DATA.qid[pin]
+		if dq and dq ~= 0 then q = dq end
+	end
+	if not q then return 0, nil end
+	return ns.GroupQuestCount(q), q
+end
+
 ---------------------------------------------------------------------------
 -- Cache Invalidation & Quest/Item Data Events
 ---------------------------------------------------------------------------
@@ -826,18 +957,53 @@ function ns.FlushQuestLogOnMapShow()
 end
 
 function ns.InitQuests()
+	if state.questsInited then return end
+	state.questsInited = true
 	ns.events:RegisterEvent("PLAYER_ENTERING_WORLD")
 	ns.events:RegisterEvent("QUEST_TURNED_IN")
 	ns.events:RegisterEvent("QUEST_LOG_UPDATE")
 	ns.events:RegisterEvent("PLAYER_LEVEL_UP")
+	ns.events:RegisterEvent("GROUP_ROSTER_UPDATE")
+	ns.events:RegisterEvent("UNIT_QUEST_LOG_CHANGED")
+end
+
+function ns.RefreshGroupQuestCounts()
+	wipe(state.groupQuestCount)
+	if ns.OnGroupQuestsChanged then ns.OnGroupQuestsChanged() end
+	if ns.OnLayerChanged then ns.OnLayerChanged() end
+end
+
+local function QueueGroupQuestRefresh()
+	wipe(state.groupQuestCount)
+	if ns.ShowGroupQuestCount and not ns.ShowGroupQuestCount() then return end
+	if state.groupRefreshQueued then return end
+	state.groupRefreshQueued = true
+	C_Timer.After(0.15, function()
+		state.groupRefreshQueued = false
+		ns.RefreshGroupQuestCounts()
+	end)
+end
+
+function ns:GROUP_ROSTER_UPDATE()
+	QueueGroupQuestRefresh()
+end
+
+function ns:UNIT_QUEST_LOG_CHANGED()
+	if not (IsInGroup and IsInGroup()) then return end
+	QueueGroupQuestRefresh()
 end
 
 local function ResetCharCompletionCache()
 	wipe(state.done)
 	wipe(state.worthCache)
+	wipe(state.groupQuestCount)
 	state.inLogStale = true
+	if (not ns.ShowGroupQuestCount or ns.ShowGroupQuestCount()) and IsInGroup and IsInGroup() and ns.OnGroupQuestsChanged then
+		ns.OnGroupQuestsChanged()
+	end
 	if WorldMapFrame and WorldMapFrame:IsVisible() then
 		RecomputeInLog()
+		if ns.UpdateFocus then ns.UpdateFocus(false) end
 		if ns.Refresh then ns.Refresh() end
 	else
 		state.qlogDirty = true
@@ -918,6 +1084,7 @@ function ns:QUEST_LOG_UPDATE()
 	state.inLogStale = true
 	wipe(state.done)
 	wipe(state.worthCache)
+	wipe(state.groupQuestCount)
 	if WorldMapFrame and WorldMapFrame:IsVisible() then
 		if not state.qlogPending then
 			state.qlogPending = true

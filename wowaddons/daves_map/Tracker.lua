@@ -165,9 +165,16 @@ ns.TrackZoneQuests = function() TrackZoneQuests(); ns.UpdateReady() end
 -- anchored beside the tracker's quest blocks (read from QuestObjectiveTracker.usedBlocks, never changed). A pin goes
 -- when its quest leaves the log or you untrack it yourself.
 ---------------------------------------------------------------------------
+local function FontObject(name, fallback)
+	local f = _G[name]
+	if type(f) == "table" and f.GetObjectType and f:GetObjectType() == "Font" then return f end
+	return fallback
+end
+
 local PIN_ATLAS = (C_Texture.GetAtlasInfo("friendslist-recentallies-pin-yellow") and "friendslist-recentallies-pin-yellow")
 	or (C_Texture.GetAtlasInfo("friends-icon-pinned") and "friends-icon-pinned") or nil
 local pinButtons = {}   -- pool, one per quest shown in the tracker
+local groupBadges = {}  -- pool of taint-free group quest-count pills beside tracker blocks
 
 -- Pinned down: upright, in full colour. Not pinned: tipped over and grey, brighter under the mouse.
 local function PaintPin(b)
@@ -193,7 +200,10 @@ local function PinButton(n)
 			ns.Sound(ns.db.pinned[q] and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF", true)
 		end
 		if Watched(q) then PaintPin(self) end
-		if ns.db and ns.db.panelTab == "tracker" and ns.OnLayerChanged then
+		if ns.UpdateFocus then ns.UpdateFocus(false) end
+		if ns.Refresh then
+			ns.Refresh()
+		elseif ns.db and ns.db.panelTab == "tracker" and ns.OnLayerChanged then
 			ns.OnLayerChanged()
 		end
 	end)
@@ -201,6 +211,28 @@ local function PinButton(n)
 	b:SetScript("OnLeave", function(self) PaintPin(self) end)
 	pinButtons[n] = b
 	return b
+end
+
+local function GroupBadge(n)
+	local gb = groupBadges[n]
+	if gb then return gb end
+	if not ns.CreateGroupCountPill then return nil end
+	gb = ns.CreateGroupCountPill(UIParent, 17, 8, "GameFontHighlightSmall", "AUTO", false)
+	groupBadges[n] = gb
+	return gb
+end
+
+local function SyncBadgeTooltip(badge, refresh)
+	if not (badge and GameTooltip:IsShown() and GameTooltip:GetOwner() == badge) then return end
+	local over = badge:IsShown() and badge:IsMouseOver()
+	if not issecretvalue(over) and over then
+		if refresh and badge.questID and ns.ShowGroupQuestTooltip then
+			ns.ShowGroupQuestTooltip(badge, badge.questID, badge.anchorSide)
+		end
+	else
+		if badge.hl then badge.hl:Hide() end
+		GameTooltip:Hide()
+	end
 end
 
 local PIN_MODULES = { "QuestObjectiveTracker", "CampaignQuestObjectiveTracker" }
@@ -236,11 +268,13 @@ local function RestoreBlockAlpha(block)
 	end
 end
 
-local function UpdatePins()
-	local n = 0
+local function UpdatePins(refreshTooltip)
+	local n, gn = 0, 0
 	local tracker = ObjectiveTrackerFrame
 	if tracker and tracker:IsVisible() then
-		local scale = tracker:GetEffectiveScale() / UIParent:GetEffectiveScale()
+		local ts, us = tracker:GetEffectiveScale(), UIParent:GetEffectiveScale()
+		local scale = (type(ts) == "number" and type(us) == "number" and not issecretvalue(ts) and not issecretvalue(us) and us > 0) and (ts / us) or 1
+		local inGroup = (not ns.ShowGroupQuestCount or ns.ShowGroupQuestCount()) and IsInGroup and IsInGroup()
 		for _, name in ipairs(PIN_MODULES) do
 			local m = _G[name]
 			if m and m.usedBlocks and m:IsVisible() then
@@ -248,24 +282,64 @@ local function UpdatePins()
 					for id, block in pairs(blocks) do
 						if type(id) == "number" and block:IsVisible() and Watched(id) and not block.cached then
 							RestoreBlockAlpha(block)
+							local poi = block.poiButton
+							local blockLvl = block:GetFrameLevel()
+							local badgeLvl = (type(blockLvl) == "number" and not issecretvalue(blockLvl)) and (blockLvl + 10) or nil
+							local pinBtn
 							if ns.db.trackMyZone then
 								n = n + 1
 								local b = PinButton(n)
+								pinBtn = b
 								-- just left of the quest's map icon (its POI button sits left of the title:
 								-- ObjectiveTrackerQuestPOIBlockMixin:AddPOIButton); left of the title when it has none
-								local poi = block.poiButton
 								local anchor = (poi and poi:IsShown()) and poi or (block.HeaderText or block)
 								if b.block ~= block or b.questID ~= id or b.anchor ~= anchor then
 									b.block, b.questID, b.anchor = block, id, anchor
 									b:SetFrameStrata(tracker:GetFrameStrata())
-									b:SetFrameLevel(block:GetFrameLevel() + 10)
+									if badgeLvl then b:SetFrameLevel(badgeLvl) end
 									b:ClearAllPoints()
 									if anchor == poi then b:SetPoint("RIGHT", poi, "LEFT", -1, 0)
 									else b:SetPoint("RIGHT", anchor, "TOPLEFT", -6, -7) end
 								end
-								b:SetScale(scale)
+								if b.scale ~= scale then
+									b.scale = scale
+									b:SetScale(scale)
+								end
 								PaintPin(b)
 								b:Show()
+							end
+							if inGroup and ns.GroupQuestCount then
+								local gCnt = ns.GroupQuestCount(id)
+								if gCnt > 0 then
+									gn = gn + 1
+									local gb = GroupBadge(gn)
+									if gb then
+										local gAnchor = pinBtn or ((poi and poi:IsShown()) and poi or (block.HeaderText or block))
+										local changed = gb.block ~= block or gb.questID ~= id or gb.anchor ~= gAnchor
+										if changed then
+											gb.block, gb.questID, gb.anchor = block, id, gAnchor
+											gb:SetFrameStrata(tracker:GetFrameStrata())
+											if badgeLvl then gb:SetFrameLevel(badgeLvl) end
+											gb:ClearAllPoints()
+											if gAnchor == pinBtn or gAnchor == poi then
+												gb:SetPoint("RIGHT", gAnchor, "LEFT", -2, 0)
+											else
+												gb:SetPoint("RIGHT", gAnchor, "TOPLEFT", -6, -7)
+											end
+										end
+										local countChanged = gb.count ~= gCnt
+										if countChanged then
+											gb.count = gCnt
+											ns.StyleGroupCountPill(gb, gCnt)
+										end
+										if gb.scale ~= scale then
+											gb.scale = scale
+											gb:SetScale(scale)
+										end
+										gb:Show()
+										SyncBadgeTooltip(gb, changed or countChanged or refreshTooltip)
+									end
+								end
 							end
 						end
 					end
@@ -274,6 +348,11 @@ local function UpdatePins()
 		end
 	end
 	for k = n + 1, #pinButtons do pinButtons[k]:Hide(); pinButtons[k].block = nil end
+	for k = gn + 1, #groupBadges do
+		groupBadges[k]:Hide()
+		groupBadges[k].block = nil
+		groupBadges[k].questID = nil
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -288,12 +367,6 @@ local function TurnInPin(q)
 	local i = ns.DATA and ns.QuestPin(q)
 	local e = i and ns.DATA.endp[i]
 	return (e and e ~= 0) and e or nil
-end
-
-local function FontObject(name, fallback)
-	local f = _G[name]
-	if type(f) == "table" and f.GetObjectType and f:GetObjectType() == "Font" then return f end
-	return fallback
 end
 
 -- A Ready to Turn In row clicked: as a quest in Blizzard's tracker (Layer.lua: ns.QuestClicked): focused, its details
@@ -342,6 +415,17 @@ local function Row(n)
 	r.where:SetJustifyH("LEFT")
 	r.where:SetWordWrap(false)
 	r.where:SetTextColor(.8, .8, .8)
+	if ns.CreateGroupCountPill then
+		r.groupBadge = ns.CreateGroupCountPill(r, 17, 8, "GameFontHighlightSmall", "AUTO", true)
+		local rl = r:GetFrameLevel()
+		if type(rl) == "number" and not issecretvalue(rl) then
+			r.groupBadge:SetFrameLevel(rl + 2)
+		end
+		r.groupBadge:SetPoint("RIGHT", r.title, "LEFT", -4, 0)
+		r.groupBadge:SetScript("OnClick", function(_, button)
+			if button == "LeftButton" then OnRowClick(r) end
+		end)
+	end
 	r:RegisterForClicks("LeftButtonUp")
 	r:SetScript("OnClick", OnRowClick)
 	r:SetScript("OnEnter", function(self)
@@ -524,16 +608,41 @@ function ns.UpdateReady()
 		local where = r.turnIn and ns.DATA.title[r.turnIn]
 		local zone = r.turnIn and ns.IsCalibrated and ns.IsCalibrated() and ns.ZoneName(r.turnIn)
 		r.where:SetText(where and ("Turn in: " .. where .. (zone and (" (" .. zone .. ")") or "")) or "Turn in")
+		if r.groupBadge then
+			local gCnt = ns.GroupQuestCount and ns.GroupQuestCount(q) or 0
+			if gCnt > 0 then
+				r.groupBadge.questID = q
+				ns.StyleGroupCountPill(r.groupBadge, gCnt)
+				r.groupBadge:Show()
+			else
+				r.groupBadge.questID = nil
+				r.groupBadge:Hide()
+			end
+		end
 		r:ClearAllPoints()
 		r:SetPoint("TOPLEFT", 0, y)
 		r:SetPoint("RIGHT")
 		r:Show()
 		y = y - ROW_H * 2 - 2
 	end
-	for n = (collapsed and 0 or #ready) + 1, #rows do rows[n]:Hide() end
+	for n = (collapsed and 0 or #ready) + 1, #rows do
+		rows[n]:Hide()
+		if rows[n].groupBadge then
+			rows[n].groupBadge.questID = nil
+			rows[n].groupBadge:Hide()
+		end
+	end
 	section:SetHeight(-y)
 	section.want = true   -- Place shows it, unless the tracker is collapsed
 	Place(true)
+	for n = 1, (collapsed and 0 or #ready) do
+		SyncBadgeTooltip(rows[n].groupBadge, true)
+	end
+end
+
+function ns.OnGroupQuestsChanged()
+	UpdatePins(true)
+	ns.UpdateReady()
 end
 
 ---------------------------------------------------------------------------

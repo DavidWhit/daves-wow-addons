@@ -24,7 +24,7 @@ local TAB_DEFS = {
 		key = "tracker",
 		label = "Tracker",
 		icon = "tab_tracker",
-		tip = "View your Focused, Ready to Turn In, Pinned, and Tracking quests on the Base map layer with chain steps, starters, and rewards.",
+		tip = "View your Focused, Ready to Turn In, Pinned, and Tracking quests with chain steps, starters, and rewards. Tracked quest pins stay visible on the map at every zoom level.",
 	},
 	{
 		key = "zone",
@@ -81,11 +81,9 @@ local function UpdateChromeLayout()
 	ui.layerBar:Hide()
 	ui.zoneBar:Hide()
 
-	local focusOn = ns.db and ns.db.focusQuest ~= false
 	local onBaseLayer = tab == "layers" or tab == "tracker"
-	local clickQ = (focusOn and onBaseLayer) and ((ns.ClickFocus and ns.ClickFocus()) or (ns.TrackerFocusQuestID and ns.TrackerFocusQuestID())) or nil
-	if clickQ and not ns.QuestInLog(clickQ) then clickQ = nil end
-	local focused = focusOn and onBaseLayer and ((ns.Focused and ns.Focused()) or (clickQ ~= nil))
+	local clickQ = (onBaseLayer and ns.ActiveFocusQuest) and ns.ActiveFocusQuest() or nil
+	local focused = onBaseLayer and ((ns.Focused and ns.Focused()) or (clickQ ~= nil))
 	if searching then
 		ui.layerBar:ClearAllPoints()
 		ui.layerBar:SetPoint("TOPLEFT", LIST_PAD, curY)
@@ -170,11 +168,14 @@ function ns.OnLayerChanged()
 		return
 	end
 	ui.dirtyHidden = false
-	local map = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
-	wipe(ui.counts)
-	if map then
-		local idx = ns.PinsOnMap(map).idx
-		for _, i in ipairs(idx) do ui.counts[D.cat[i]] = (ui.counts[D.cat[i]] or 0) + 1 end
+	local tab = ns.db and ns.db.panelTab or "layers"
+	if tab == "layers" and not ui.found then
+		local map = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
+		wipe(ui.counts)
+		if map then
+			local idx = ns.PinsOnMap(map).idx
+			for _, i in ipairs(idx) do ui.counts[D.cat[i]] = (ui.counts[D.cat[i]] or 0) + 1 end
+		end
 	end
 	ns.BuildPanelItems()
 	UpdateChromeLayout()
