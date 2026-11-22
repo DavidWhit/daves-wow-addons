@@ -606,7 +606,7 @@ local function FirstVisibleIndex(items, scrollY)
 end
 
 local function Render()
-	if not ui.list then return end
+	if not ui.list or (ui.detailsPane and ui.detailsPane:IsShown()) then return end
 	local listH = ui.list:GetHeight()
 	if not listH or listH <= 0 then return end
 	local items = ui.items

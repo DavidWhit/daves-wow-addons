@@ -42,6 +42,7 @@ local ui = {
 	haystack = nil,
 	trackerPinCache = {},
 	found = nil,
+	lastSearchText = "",
 	searchOriginMap = nil,
 	trackerFocusQ = nil,
 	detailQuestID = nil,
@@ -302,9 +303,14 @@ local function Haystack(i)
 	return h
 end
 
+local function NormalizeSearchText(raw)
+	return (raw and not issecretvalue(raw) and raw or ""):lower():match("^%s*(.-)%s*$") or ""
+end
+
 local function ApplySearchText(raw)
 	local D = ns.DATA
-	local text = (raw and not issecretvalue(raw) and raw or ""):lower():match("^%s*(.-)%s*$")
+	local text = NormalizeSearchText(raw)
+	ui.lastSearchText = text
 	if #text < 2 or not D then
 		ui.found = nil
 		ui.searchOriginMap = nil
@@ -349,12 +355,17 @@ ns.SetSearchQuiet = SetSearchQuiet
 
 function ns.RunSearch()
 	if ui.quietSearch or not ui.search then return end
-	if ui.detailQuestID then
+	local raw = ui.search:GetText()
+	local text = NormalizeSearchText(raw)
+	-- WoW fires OnTextChanged(self, false) when an EditBox resizes or re-layouts even with unchanged text;
+	-- ignore no-op events so resizing/scaling the window never closes Quest Text or rebuilds the list.
+	if text == (ui.lastSearchText or "") then return end
+	if ui.detailQuestID and (#text >= 2 or ui.found ~= nil) then
 		ui.detailQuestID = nil
 		ui.detailPin = nil
 	end
 	ns.Calibrate()
-	ApplySearchText(ui.search:GetText())
+	ApplySearchText(raw)
 	ns.RefreshIfMapHidden()
 end
 

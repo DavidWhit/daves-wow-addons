@@ -311,8 +311,11 @@ local function StopWidthResize(btn, commit)
 	if commit and ns.SetUnifiedContentWidth then
 		ns.SetUnifiedContentWidth(resizeState.lastW, true)
 	end
-	if ns.LayoutPanelRows then ns.LayoutPanelRows() end
-	if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
+	if ui.detailsPane and ui.detailsPane:IsShown() then
+		if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
+	elseif ns.LayoutPanelRows then
+		ns.LayoutPanelRows()
+	end
 end
 
 local function OnResizeUpdate(self)
@@ -329,7 +332,9 @@ local function OnResizeUpdate(self)
 	if nextW ~= resizeState.lastW then
 		resizeState.lastW = nextW
 		if ns.SetUnifiedContentWidth then ns.SetUnifiedContentWidth(nextW, false) end
-		if ns.LayoutPanelRows then ns.LayoutPanelRows() end
+		if not (ui.detailsPane and ui.detailsPane:IsShown()) and ns.LayoutPanelRows then
+			ns.LayoutPanelRows()
+		end
 	end
 end
 
@@ -380,8 +385,11 @@ function ns.ResetPanelPosition()
 		ns.db.panelH = nil
 	end
 	AnchorPanelToChrome()
-	if ns.LayoutPanelRows then ns.LayoutPanelRows() end
-	if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
+	if ui.detailsPane and ui.detailsPane:IsShown() then
+		if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
+	elseif ns.LayoutPanelRows then
+		ns.LayoutPanelRows()
+	end
 end
 
 function ns.ApplyPanelStyle()

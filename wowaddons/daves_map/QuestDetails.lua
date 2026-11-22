@@ -453,7 +453,8 @@ local function RefreshDetails(resetScroll)
 	dState.groupBadge:Hide()
 	dState.groupBadge.questID = nil
 
-	local scrollW = dState.scroll:GetWidth() or 460
+	local rawScrollW = dState.scroll:GetWidth()
+	local scrollW = (type(rawScrollW) == "number" and not issecretvalue(rawScrollW) and rawScrollW > 0) and rawScrollW or 460
 	local bodyW = math.max(220, math.floor(scrollW - 8))
 	dState.lastBodyW = bodyW
 	dState.body:SetWidth(bodyW)
@@ -939,7 +940,8 @@ function ns.InitQuestDetailsPane(content)
 		SyncDetailsScroll()
 	end)
 	scroll:SetScript("OnSizeChanged", function(_, w)
-		if dState.pane:IsShown() and w and math.abs(w - (dState.lastBodyW + 8)) > 2 then
+		local safeW = (type(w) == "number" and not issecretvalue(w)) and w or nil
+		if dState.pane:IsShown() and safeW and math.abs(safeW - (dState.lastBodyW + 8)) > 2 then
 			RefreshDetails(false)
 		else
 			SyncDetailsScroll()
