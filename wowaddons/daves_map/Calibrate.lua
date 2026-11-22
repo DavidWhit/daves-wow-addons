@@ -408,6 +408,17 @@ function ns.ClearUserWaypoint()
 	end
 end
 
+function ns.DisarmPinMode()
+	local stitch = ns.StitchWorld()
+	local pinBtn = WorldMapFrame and WorldMapFrame.WorldMapTrackingPinButton
+	if stitch and stitch.SetPinMode then
+		stitch.SetPinMode(false)
+	end
+	if pinBtn and pinBtn.isActive and pinBtn.SetActive then
+		pinBtn:SetActive(false)
+	end
+end
+
 function ns.TogglePinMode(rightClick)
 	local stitch = ns.StitchWorld()
 	local pinBtn = WorldMapFrame and WorldMapFrame.WorldMapTrackingPinButton

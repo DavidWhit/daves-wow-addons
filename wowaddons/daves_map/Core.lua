@@ -303,6 +303,9 @@ function ns:ADDON_LOADED(name)
 	daves_mapDB.lowLevelGap = nil      -- removed in 0.7.3
 	daves_mapDB.factions = nil         -- moved per-character on daves_mapCharDB in 0.7.3
 	daves_mapDB.panelOpen = nil        -- removed in 0.8.9: Dave's Map always opens/closes with WorldMapFrame
+	daves_mapDB.panelPos = nil         -- removed in 0.9.1: unified single window anchored via WorldMapFrame
+	daves_mapDB.panelW = nil           -- replaced by contentW in 0.9.1
+	daves_mapDB.panelH = nil           -- removed in 0.9.1: unified window matches WorldMapFrame height
 	ns.db = daves_mapDB
 	daves_mapCharDB = type(daves_mapCharDB) == "table" and daves_mapCharDB or {}
 	if type(daves_mapCharDB.doneQuests) ~= "table" then daves_mapCharDB.doneQuests = {} end
@@ -399,7 +402,7 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
 	elseif msg == "reset" or msg == "dock" then
 		if ns.ResetPanelPosition then ns.ResetPanelPosition() end
-		ns.Print("window docked beside the world map at default width.")
+		ns.Print("window width reset to default.")
 	elseif msg == "" or msg == "toggle" then
 		ns.db.enabled = not ns.db.enabled
 		ns.Print(ns.db.enabled and "map layer on." or "map layer off.")
@@ -462,7 +465,7 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 			mod:Diag()
 		end
 	else
-		ns.Print("commands: /dmap [toggle | dock | options | style | check [questID] | calib | zone | seamless | version]")
+		ns.Print("commands: /dmap [toggle | reset | options | style | check [questID] | calib | zone | seamless | version]")
 	end
 end
 

@@ -198,7 +198,7 @@ function ns:InitOptions()
 	pScaleOpts:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
 		return ("%d%%"):format(value * 100 + 0.5)
 	end)
-	Settings.CreateSlider(category, panelScale, pScaleOpts, "Scale of the Dave's Map window.")
+	Settings.CreateSlider(category, panelScale, pScaleOpts, "Scale of the unified Dave's Map window.")
 	panelScale:SetValueChangedCallback(function()
 		if syncingSettings then return end
 		if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
@@ -211,7 +211,7 @@ function ns:InitOptions()
 	bgOpts:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
 		return ("%d%%"):format(value * 100 + 0.5)
 	end)
-	Settings.CreateSlider(category, bgAlpha, bgOpts, "Opacity of the Dave's Map window background.")
+	Settings.CreateSlider(category, bgAlpha, bgOpts, "Opacity of the unified Dave's Map window background.")
 	bgAlpha:SetValueChangedCallback(function()
 		if syncingSettings then return end
 		if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
@@ -524,17 +524,26 @@ do
 		for _, c in ipairs(controls) do c:Refresh() end
 	end
 
+	local function SafeNum(v)
+		return (type(v) == "number" and not issecretvalue(v)) and v or nil
+	end
+
 	local function PlaceStyleDialog()
 		if not opt then return end
 		opt:ClearAllPoints()
-		local p = ns.PanelFrame and ns.PanelFrame()
+		local p = (ns.WorldMapChrome and ns.WorldMapChrome()) or (ns.PanelFrame and ns.PanelFrame())
 		if p and p:IsShown() then
-			local pr, pl, pt = p:GetRight(), p:GetLeft(), p:GetTop()
-			local ps = p:GetEffectiveScale()
-			local os = opt:GetEffectiveScale()
-			local sw = UIParent:GetWidth() * UIParent:GetEffectiveScale()
-			local sh = UIParent:GetHeight() * UIParent:GetEffectiveScale()
-			if pr and pl and pt and ps and os and os > 0 then
+			local pr = SafeNum(p:GetRight())
+			local pl = SafeNum(p:GetLeft())
+			local pt = SafeNum(p:GetTop())
+			local ps = SafeNum(p:GetEffectiveScale())
+			local os = SafeNum(opt:GetEffectiveScale())
+			local uw = SafeNum(UIParent:GetWidth())
+			local uh = SafeNum(UIParent:GetHeight())
+			local us = SafeNum(UIParent:GetEffectiveScale())
+			if pr and pl and pt and ps and os and os > 0 and uw and uh and us then
+				local sw = uw * us
+				local sh = uh * us
 				-- Anchor to UIParent (never to `p`) so dragging the Window scale slider
 				-- never shifts this dialog underneath the cursor.
 				local topY = math.min(-16, (pt * ps - sh) / os)
@@ -610,7 +619,7 @@ do
 				if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
 				if ns.OnLayerChanged then ns.OnLayerChanged() end
 			end,
-			"Scale of the Dave's Map window (50% to 150%).")
+			"Scale of the unified Dave's Map window (50% to 150%).")
 
 		StyleSlider(opt, PAD_X, -118, COL_W, "Pin size", 0.5, 2.0, 0.05,
 			function(v) return ("%d%%"):format(math.floor(v * 100 + 0.5)) end,
@@ -631,7 +640,7 @@ do
 				if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
 				if ns.OnLayerChanged then ns.OnLayerChanged() end
 			end,
-			"Opacity / darkness of the World Map and Dave's Map window background (20% to 100%).")
+			"Opacity / darkness of the unified Dave's Map window background (20% to 100%).")
 
 		StyleDropdown(opt, PAD_X, -214, COL_W, "Background style", ns.BACKGROUND_STYLES,
 			function() return db.backgroundStyle or "dark" end,
@@ -641,7 +650,7 @@ do
 				if ns.ApplyPanelStyle then ns.ApplyPanelStyle() end
 				if ns.OnLayerChanged then ns.OnLayerChanged() end
 			end,
-			"Which of Blizzard's standard backgrounds shows behind the World Map and Dave's Map.")
+			"Which of Blizzard's standard backgrounds shows behind the unified Dave's Map window.")
 
 		Header(opt, "Map Tracking & Filters", COL2_X, -48, COL_W)
 		local ty = -70
@@ -684,8 +693,9 @@ do
 			end,
 			"While grouped, show a brass number badge beside quests showing how many group members are on that quest.")
 
-		local dockBtn = PanelButton(opt, "Dock to Map (Reset Size)", COL_W)
+		local dockBtn = PanelButton(opt, "Reset Window Width", COL_W)
 		dockBtn:SetPoint("BOTTOMLEFT", PAD_X, 46)
+		AddTip(dockBtn, "Reset the right panel back to its default width.")
 		dockBtn:SetScript("OnClick", function()
 			ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 			if ns.ResetPanelPosition then ns.ResetPanelPosition() end

@@ -1,17 +1,37 @@
 -- daves_map / Panel.lua
--- Horizontal-split Dave's Map frame beside Blizzard's World Map:
---   * HUD Edit Mode dialog chrome (`DialogBorderTranslucentTemplate`) with the same styling options
---     as daves_sack (`Window scale`, `Background` opacity, `Background style`).
---   * Left-side tab rail (`Layers`, `Zone`, `Dungeon` + `< Back`).
---   * Right-side visual content pane (search + Find Me + Waypoint + Window Style gear, Search / Focus bar,
---     Zone progress bar, and clipped variable-height virtualized list with native MinimalScrollBar).
+-- Single unified Dave's Map window layout inside `DavesMapWorldChrome` (`MapChrome.lua`):
+--   * Layout: `[ Far-Left Tab Rail (B / T / Z / D / < Back) | Live World Map | Right Content Pane ]`.
+--   * `ui.panel` is a mouse-transparent container matching `DavesMapWorldChrome` so the live World Map
+--     canvas and NavBar in the middle stay 100% interactive, while `leftRail` and `content` capture clicks.
+--   * Bottom-right grip resizes the right content pane live horizontally (persisted in `ns.db.contentW`),
+--     and `Window scale` scales the entire unified window uniformly.
 
 local _, ns = ...
 
 local ui = ns.PanelUI
 local C = ns.PANEL_CONST
-local WIDTH, MIN_H, RAIL_W, LIST_PAD, SCROLL_GUTTER = C.WIDTH, C.MIN_H or 380, C.RAIL_W, C.LIST_PAD, C.SCROLL_GUTTER
+local L = ns.UNIFIED_LAYOUT or {}
+local OUTER_PAD = L.OUTER_PAD or 12
+local HEADER_H = L.HEADER_H or 34
+local CHROME_TOP = L.CHROME_TOP or 6
+local RAIL_W = L.RAIL_W or C.RAIL_W or 46
+local MAP_CONTENT_GAP = L.MAP_CONTENT_GAP or 8
+local CONTENT_MIN_W = L.CONTENT_MIN_W or 480
+local CONTENT_MAX_W = L.CONTENT_MAX_W or 1000
+local LIST_PAD, SCROLL_GUTTER = C.LIST_PAD, C.SCROLL_GUTTER
 local Sound = ns.Sound
+
+local resizeState = { active = false, startX = 0, startW = 0, lastW = 0 }
+
+local function SafeNum(v)
+	return (type(v) == "number" and not issecretvalue(v)) and v or nil
+end
+
+local function PollPinMode(btn)
+	if not (ns.PinModeActive and ns.PinModeActive()) then
+		btn:SetActive(false)
+	end
+end
 
 local TAB_DEFS = {
 	{
@@ -265,155 +285,103 @@ local function SetBackground(border, a, style)
 end
 ns.ApplyDialogBackground = SetBackground
 
-local function SaveFreeLayout(panel)
-	if not (panel and ns.db) then return end
-	local w = math.max(WIDTH, math.floor((panel:GetWidth() or WIDTH) + 0.5))
-	local h = math.max(MIN_H, math.floor((panel:GetHeight() or MIN_H) + 0.5))
-	ns.db.panelW = w
-	ns.db.panelH = h
-	local l, t = panel:GetLeft(), panel:GetTop()
-	local ps = panel:GetEffectiveScale()
-	local us = UIParent:GetEffectiveScale()
-	if l and t and ps and us and us > 0 then
-		ns.db.panelPos = {
-			x = math.floor(l * ps / us + 0.5),
-			y = math.floor(t * ps / us + 0.5),
-		}
-	end
+local function AbovePins()
+	return WorldMapFrame:GetPinFrameLevelsManager():GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST") + 10
 end
 
-local function RestoreFreeLayout(panel)
-	if not (panel and ns.db and ns.db.panelPos) then return false end
-	local pos = ns.db.panelPos
-	if type(pos.x) ~= "number" or type(pos.y) ~= "number" then return false end
-	local ps = panel:GetEffectiveScale()
-	local us = UIParent:GetEffectiveScale()
-	if not (ps and ps > 0 and us and us > 0) then return false end
-	local w = math.max(WIDTH, ns.db.panelW or WIDTH)
-	local h = math.max(MIN_H, ns.db.panelH or (WorldMapFrame and WorldMapFrame:GetHeight()) or 540)
-	panel:ClearAllPoints()
-	panel:SetSize(w, h)
-	panel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", pos.x * us / ps, pos.y * us / ps)
-	ui.docked = "free"
-	return true
+local function ComputeMaxContentWidth()
+	local chrome = ns.WorldMapChrome and ns.WorldMapChrome()
+	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
+	if not (chrome and sc) then return CONTENT_MAX_W end
+	local scR = SafeNum(sc:GetRight())
+	local effScale = SafeNum(chrome:GetEffectiveScale())
+	local uw = SafeNum(UIParent:GetWidth()) or 1365
+	local us = SafeNum(UIParent:GetEffectiveScale()) or 1
+	local uiW = uw * us
+	if not (scR and effScale and effScale > 0) then return CONTENT_MAX_W end
+	local avail = math.floor((uiW - 6) / effScale - scR - MAP_CONTENT_GAP - OUTER_PAD)
+	return math.max(CONTENT_MIN_W, math.min(CONTENT_MAX_W, avail))
 end
 
-local function DetachForDragOrResize(panel)
-	if not panel or ui.docked == "free" then return end
-	local l, t = panel:GetLeft(), panel:GetTop()
-	local w = math.max(WIDTH, panel:GetWidth() or WIDTH)
-	local h = math.max(MIN_H, panel:GetHeight() or MIN_H)
-	panel:ClearAllPoints()
-	panel:SetSize(w, h)
-	if l and t then
-		panel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
-	else
-		panel:SetPoint("CENTER", UIParent, "CENTER")
-	end
-	ui.docked = "free"
-end
-
-local function BeginPanelMove(panel)
-	if not panel or (panel:IsProtected() and InCombatLockdown()) then return end
-	DetachForDragOrResize(panel)
-	ui.dragging = true
-	panel:StartMoving()
-end
-
-local function BeginPanelResize(panel)
-	if not panel or (panel:IsProtected() and InCombatLockdown()) then return end
-	DetachForDragOrResize(panel)
-	local ps = panel:GetEffectiveScale() or 1
-	local us = UIParent:GetEffectiveScale() or 1
-	local ratio = (ps > 0) and (us / ps) or 1
-	local maxW = math.max(WIDTH, math.floor((UIParent:GetWidth() or 1600) * 0.92 * ratio))
-	local maxH = math.max(MIN_H, math.floor((UIParent:GetHeight() or 900) * 0.92 * ratio))
-	if panel.SetResizeBounds then
-		panel:SetResizeBounds(WIDTH, MIN_H, maxW, maxH)
-	end
-	ui.dragging = true
-	panel:StartSizing("BOTTOMRIGHT")
-end
-
-local function EndPanelDragOrResize(panel)
-	if not (panel and ui.dragging) then return end
+local function StopWidthResize(btn, commit)
+	if not resizeState.active then return end
+	resizeState.active = false
 	ui.dragging = false
-	panel:StopMovingOrSizing()
-	local w = math.max(WIDTH, panel:GetWidth() or WIDTH)
-	local h = math.max(MIN_H, panel:GetHeight() or MIN_H)
-	panel:SetSize(w, h)
-	SaveFreeLayout(panel)
-	RestoreFreeLayout(panel)
+	if btn then btn:SetScript("OnUpdate", nil) end
+	if commit and ns.SetUnifiedContentWidth then
+		ns.SetUnifiedContentWidth(resizeState.lastW, true)
+	end
 	if ns.LayoutPanelRows then ns.LayoutPanelRows() end
+	if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
 end
 
-local function Dock()
-	if not ui.panel or ui.dragging then return end
+local function OnResizeUpdate(self)
+	if not resizeState.active or (IsMouseButtonDown and not IsMouseButtonDown("LeftButton")) then
+		StopWidthResize(self, true)
+		return
+	end
+	local cx = GetCursorPosition()
+	local effScale = (ui.panel and SafeNum(ui.panel:GetEffectiveScale())) or 1
+	if effScale <= 0 then effScale = 1 end
+	local dx = (cx - resizeState.startX) / effScale
+	local maxW = ComputeMaxContentWidth()
+	local nextW = math.max(CONTENT_MIN_W, math.min(maxW, math.floor(resizeState.startW + dx + 0.5)))
+	if nextW ~= resizeState.lastW then
+		resizeState.lastW = nextW
+		if ns.SetUnifiedContentWidth then ns.SetUnifiedContentWidth(nextW, false) end
+		if ns.LayoutPanelRows then ns.LayoutPanelRows() end
+	end
+end
+
+local function StartWidthResize(btn)
+	if not (ui.panel and ns.GetUnifiedContentWidth) then return end
+	local cx = GetCursorPosition()
+	resizeState.active = true
+	resizeState.startX = cx
+	resizeState.startW = ns.GetUnifiedContentWidth()
+	resizeState.lastW = resizeState.startW
+	ui.dragging = true
+	btn:SetScript("OnUpdate", OnResizeUpdate)
+end
+
+local function AnchorPanelToChrome()
+	if not (ui.panel and WorldMapFrame) then return end
+	local chrome = ns.WorldMapChrome and ns.WorldMapChrome()
+	local lvl = AbovePins()
+	ui.panel:SetFrameStrata(WorldMapFrame:GetFrameStrata() or "MEDIUM")
+	ui.panel:SetFrameLevel(lvl)
+	if ui.headerBar then ui.headerBar:SetFrameLevel(lvl + 2) end
+	if ui.resizeBtn then ui.resizeBtn:SetFrameLevel(lvl + 10) end
+	ui.panel:ClearAllPoints()
+	if chrome then
+		ui.panel:SetAllPoints(chrome)
+	else
+		ui.panel:SetAllPoints(WorldMapFrame)
+	end
 	if ui.pinBtn and ui.pinBtn.SetActive and ns.PinModeActive then
 		ui.pinBtn:SetActive(ns.PinModeActive())
 	end
 	if ui.styleBtn and ui.styleBtn.SetActive and ns.IsStyleDialogOpen then
 		ui.styleBtn:SetActive(ns.IsStyleDialogOpen())
 	end
-	if ns.db and ns.db.panelPos then
-		if ui.docked ~= "free" then
-			RestoreFreeLayout(ui.panel)
-		end
-		return
-	end
-	local anchor = (ns.WorldMapChrome and ns.WorldMapChrome()) or WorldMapFrame
-	local effW = math.max(WIDTH, (ns.db and ns.db.panelW) or WIDTH)
-	local s = ui.panel:GetScale() or 1
-	local room = (effW * s) + 4
-	local where
-	if WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized() then
-		where = "inside"
-	elseif (anchor:GetLeft() or 0) >= room then
-		where = "left"
-	else
-		where = "right"
-	end
-	if where == ui.docked and ui.dockAnchor == anchor then return end
-	ui.docked = where
-	ui.dockAnchor = anchor
-	ui.panel:ClearAllPoints()
-	ui.panel:SetWidth(effW)
-	if where == "inside" then
-		local sc = WorldMapFrame.ScrollContainer
-		ui.panel:SetPoint("TOPLEFT", sc, "TOPLEFT", 10, -48)
-		ui.panel:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 10, 10)
-	elseif where == "left" then
-		if anchor ~= WorldMapFrame then
-			ui.panel:SetPoint("TOPRIGHT", anchor, "TOPLEFT", 6, 0)
-			ui.panel:SetPoint("BOTTOMRIGHT", anchor, "BOTTOMLEFT", 6, 0)
-		else
-			ui.panel:SetPoint("TOPRIGHT", WorldMapFrame, "TOPLEFT", -10, 2)
-			ui.panel:SetPoint("BOTTOMRIGHT", WorldMapFrame, "BOTTOMLEFT", -10, -2)
-		end
-	else
-		if anchor ~= WorldMapFrame then
-			ui.panel:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -6, 0)
-			ui.panel:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", -6, 0)
-		else
-			ui.panel:SetPoint("TOPLEFT", WorldMapFrame, "TOPRIGHT", -4, 2)
-			ui.panel:SetPoint("BOTTOMLEFT", WorldMapFrame, "BOTTOMRIGHT", -4, -2)
-		end
-	end
 end
-ns.SyncPanelDock = Dock
+ns.SyncPanelDock = AnchorPanelToChrome
 
 function ns.ResetPanelPosition()
-	if not ns.db then return end
-	ns.db.panelPos = nil
-	ns.db.panelW = nil
-	ns.db.panelH = nil
-	ui.docked = nil
-	ui.dockAnchor = nil
-	if ui.panel then
-		ui.panel:SetWidth(WIDTH)
-		Dock()
-		if ns.LayoutPanelRows then ns.LayoutPanelRows() end
+	if resizeState.active then
+		StopWidthResize(ui.resizeBtn, false)
 	end
+	if ns.ResetUnifiedLayout then
+		ns.ResetUnifiedLayout()
+	elseif ns.db then
+		ns.db.contentW = nil
+		ns.db.panelPos = nil
+		ns.db.panelW = nil
+		ns.db.panelH = nil
+	end
+	AnchorPanelToChrome()
+	if ns.LayoutPanelRows then ns.LayoutPanelRows() end
+	if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
 end
 
 function ns.ApplyPanelStyle()
@@ -424,8 +392,8 @@ function ns.ApplyPanelStyle()
 	SetBackground(ns.styleDialogBorder, a, style)
 	if ns.ApplyMapChromeStyle then ns.ApplyMapChromeStyle(a, style) end
 	if ns.ApplyDetailsStyle then ns.ApplyDetailsStyle(a, style) end
+	if ns.ApplyUnifiedScale then ns.ApplyUnifiedScale(scale) end
 	if not ui.panel then return end
-	SetBackground(ui.border, a, style)
 	local railA, listA
 	if style.key == "marble" then
 		railA, listA = 0.50, 0.48
@@ -440,10 +408,9 @@ function ns.ApplyPanelStyle()
 	if ui.listBg then
 		ui.listBg:SetColorTexture(0, 0, 0, listA)
 	end
-	if math.abs((ui.panel:GetScale() or 1) - scale) > 0.001 then
-		ui.panel:SetScale(scale)
-		ui.docked = nil
-		Dock()
+	local curScale = SafeNum(ui.panel:GetScale()) or 1
+	if math.abs(curScale - 1) > 0.001 then
+		ui.panel:SetScale(1)
 	end
 end
 
@@ -497,11 +464,7 @@ function ns.SyncPanelScrollBar(scrollPx, listH, totalH)
 end
 
 function ns.IsPanelDockedInside()
-	return ui.docked == "inside"
-end
-
-local function AbovePins()
-	return WorldMapFrame:GetPinFrameLevelsManager():GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST") + 10
+	return false
 end
 
 function ns.PanelFrame()
@@ -593,91 +556,73 @@ end
 function ns.InitPanel()
 	local panel = CreateFrame("Frame", nil, WorldMapFrame)
 	ui.panel = panel
-	panel:SetWidth(math.max(WIDTH, (ns.db and ns.db.panelW) or WIDTH))
-	panel:SetFrameStrata(WorldMapFrame:GetFrameStrata())
-	panel:SetFrameLevel(AbovePins())
-	panel:SetClampedToScreen(true)
-	panel:EnableMouse(true)
-	panel:SetMovable(true)
-	panel:SetResizable(true)
-	if panel.SetResizeBounds then
-		panel:SetResizeBounds(WIDTH, MIN_H, 1400, 1000)
-	end
-	if panel.SetDontSavePosition then
-		panel:SetDontSavePosition(true)
-	end
-	panel:RegisterForDrag("LeftButton")
-	panel:SetScript("OnDragStart", BeginPanelMove)
-	panel:SetScript("OnDragStop", EndPanelDragOrResize)
-	panel:SetScript("OnSizeChanged", function(self, w, h)
-		if ui.dragging then return end
-		local needW = w and w < WIDTH - 0.5
-		local needH = ui.docked == "free" and h and h < MIN_H - 0.5
-		if needW or needH then
-			self:SetSize(needW and WIDTH or (w or WIDTH), needH and MIN_H or (h or MIN_H))
-		end
-	end)
-	panel:SetScript("OnUpdate", Dock)
+	panel:EnableMouse(false)
+	AnchorPanelToChrome()
 	local level = panel:GetFrameLevel()
 
-	local border = TryTemplate("Frame", nil, panel, "DialogBorderTranslucentTemplate")
-	if border then
-		border:SetAllPoints()
-	else
-		border = CreateFrame("Frame", nil, panel, BackdropTemplateMixin and "BackdropTemplate" or nil)
-		border:SetAllPoints()
-		border:SetFrameLevel(level)
-		border:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8X8",
-			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-			edgeSize = 32,
-			insets = { left = 11, right = 12, top = 12, bottom = 11 },
-		})
-		border:SetBackdropColor(0, 0, 0, 0.8)
-	end
-	ui.border = border
-
-	local title = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightLarge")
-	title:SetPoint("TOP", 0, -15)
-	title:SetText("Dave's Map")
-
-	-- Title-bar drag strip: drag anywhere along the top header to move freely (double-click to re-dock beside map).
-	local dragBar = CreateFrame("Button", nil, panel)
-	dragBar:SetPoint("TOPLEFT", 12, -4)
-	dragBar:SetPoint("TOPRIGHT", -12, -4)
-	dragBar:SetHeight(32)
-	dragBar:SetFrameLevel(level + 2)
-	dragBar:RegisterForDrag("LeftButton")
-	dragBar:SetScript("OnDragStart", function() BeginPanelMove(panel) end)
-	dragBar:SetScript("OnDragStop", function() EndPanelDragOrResize(panel) end)
-	dragBar:SetScript("OnDoubleClick", function()
+	-- Double-click header strip across the unified title bar (leaves top-right clear for Blizzard's CloseButton).
+	local headerBar = CreateFrame("Button", nil, panel)
+	ui.headerBar = headerBar
+	headerBar:SetPoint("TOPLEFT", panel, "TOPLEFT", OUTER_PAD, -4)
+	headerBar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -34, -4)
+	headerBar:SetHeight(HEADER_H - 6)
+	headerBar:SetFrameLevel(level + 2)
+	headerBar:RegisterForClicks("LeftButtonUp", "Button4Up")
+	headerBar:SetScript("OnClick", function(_, button)
+		if button == "Button4" then ns.GoBack() end
+	end)
+	headerBar:SetScript("OnDoubleClick", function(_, button)
+		if button == "Button4" then
+			ns.GoBack()
+			return
+		end
+		if button ~= "LeftButton" then return end
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		ns.ResetPanelPosition()
 	end)
 
-	-- Bottom-right resize grip (enforces current width 628px as minimum width).
+	-- Bottom-right horizontal width resize grip for the right content pane.
 	local resizeBtn = CreateFrame("Button", nil, panel)
+	ui.resizeBtn = resizeBtn
 	resizeBtn:SetSize(14, 14)
-	resizeBtn:SetPoint("BOTTOMRIGHT", -3, 3)
+	resizeBtn:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -3, 3)
 	resizeBtn:SetFrameLevel(level + 10)
 	resizeBtn:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
 	resizeBtn:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
 	resizeBtn:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
-	resizeBtn:SetScript("OnMouseDown", function(_, button)
-		if button == "LeftButton" then BeginPanelResize(panel) end
+	resizeBtn:SetScript("OnMouseDown", function(self, button)
+		if button == "LeftButton" then StartWidthResize(self) end
 	end)
-	resizeBtn:SetScript("OnMouseUp", function(_, button)
-		if button == "LeftButton" then EndPanelDragOrResize(panel) end
+	resizeBtn:SetScript("OnMouseUp", function(self, button)
+		if button == "LeftButton" then StopWidthResize(self, true) end
 	end)
+	resizeBtn:SetScript("OnDoubleClick", function(self, button)
+		if button ~= "LeftButton" then return end
+		StopWidthResize(self, false)
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		ns.ResetPanelPosition()
+	end)
+	resizeBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine("Resize Panel Width", 1, .82, .2)
+		GameTooltip:AddLine("Drag left or right to widen or narrow the right panel.\nDouble-click to reset to default width.", .9, .9, .9, true)
+		GameTooltip:Show()
+	end)
+	resizeBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	-----------------------------------------------------------------------
-	-- Slim Left Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon` + `Back`)
+	-- Far-Left Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon` + `Back`)
 	-----------------------------------------------------------------------
 	local leftRail = CreateFrame("Frame", nil, panel, "BackdropTemplate")
 	ui.leftRail = leftRail
+	leftRail:EnableMouse(true)
+	leftRail:EnableMouseWheel(true)
+	leftRail:SetScript("OnMouseUp", function(_, button)
+		if button == "Button4" then ns.GoBack() end
+	end)
 	leftRail:SetWidth(RAIL_W)
-	leftRail:SetPoint("TOPLEFT", 12, -38)
-	leftRail:SetPoint("BOTTOMLEFT", 12, 12)
+	leftRail:SetPoint("TOPLEFT", panel, "TOPLEFT", OUTER_PAD, -HEADER_H)
+	leftRail:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", OUTER_PAD, OUTER_PAD)
 	leftRail:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	leftRail:SetBackdropColor(0.03, 0.03, 0.05, 0.50)
 	leftRail:SetBackdropBorderColor(0.35, 0.28, 0.18, 0.55)
@@ -783,12 +728,22 @@ function ns.InitPanel()
 	backBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	-----------------------------------------------------------------------
-	-- Right Visual Content Pane
+	-- Right Visual Content Pane (to the right of the live World Map canvas)
 	-----------------------------------------------------------------------
 	local content = CreateFrame("Frame", nil, panel)
 	ui.content = content
-	content:SetPoint("TOPLEFT", leftRail, "TOPRIGHT", 2, 0)
-	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 12)
+	content:EnableMouse(true)
+	content:EnableMouseWheel(true)
+	content:SetScript("OnMouseUp", function(_, button)
+		if button == "Button4" then ns.GoBack() end
+	end)
+	local spacer = WorldMapFrame and WorldMapFrame.TitleCanvasSpacerFrame
+	if spacer then
+		content:SetPoint("TOPLEFT", spacer, "TOPRIGHT", MAP_CONTENT_GAP, CHROME_TOP - HEADER_H)
+	else
+		content:SetPoint("TOPLEFT", leftRail, "TOPRIGHT", MAP_CONTENT_GAP, 0)
+	end
+	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -OUTER_PAD, OUTER_PAD)
 
 	ui.styleBtn = ToolbarIconButton(content, ns.MEDIA .. "gear", "Map Settings", "Customize Map Tracking & Filters, Window scale, Pin size, Background opacity, and Background style.", function()
 		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
@@ -800,6 +755,19 @@ function ns.InitPanel()
 		RefreshControls()
 	end, true)
 	ui.pinBtn:SetPoint("RIGHT", ui.styleBtn, "LEFT", -4, 0)
+	local origPinSetActive = ui.pinBtn.SetActive
+	function ui.pinBtn:SetActive(on)
+		origPinSetActive(self, on)
+		if on then
+			if self:GetScript("OnUpdate") ~= PollPinMode then
+				self:SetScript("OnUpdate", PollPinMode)
+			end
+		else
+			if self:GetScript("OnUpdate") ~= nil then
+				self:SetScript("OnUpdate", nil)
+			end
+		end
+	end
 
 	ui.findBtn = ToolbarIconButton(content, ns.MEDIA .. "findme", "Find Me", "Glide the map to your character's current position.", function()
 		ns.FindPlayer()
@@ -944,11 +912,8 @@ function ns.InitPanel()
 	end
 
 	ui.ready = true
-	panel:SetScript("OnMouseUp", function(_, button)
-		if button == "Button4" then ns.GoBack() end
-	end)
 	panel:SetScript("OnShow", function()
-		Dock()
+		AnchorPanelToChrome()
 		if ui.dirtyHidden or #ui.items == 0 or ui.detailQuestID then
 			ns.OnLayerChanged()
 		else
@@ -956,7 +921,9 @@ function ns.InitPanel()
 		end
 	end)
 	panel:SetScript("OnHide", function()
-		if ui.dragging then EndPanelDragOrResize(panel) end
+		if resizeState.active then StopWidthResize(ui.resizeBtn, true) end
+		if ui.pinBtn then ui.pinBtn:SetActive(false) end
+		if ns.DisarmPinMode then ns.DisarmPinMode() end
 		if ns.HideStyleDialog then ns.HideStyleDialog() end
 	end)
 	ns.ApplyPanelStyle()
