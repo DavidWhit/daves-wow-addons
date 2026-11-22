@@ -1,8 +1,9 @@
 -- daves_map / Panel.lua
 -- Single unified Dave's Map window layout inside `DavesMapWorldChrome` (`MapChrome.lua`):
---   * Layout: `[ Far-Left Tab Rail (B / T / Z / D / < Back) | Live World Map | Right Content Pane ]`.
+--   * Layout: `[ Far-Left Tab Rail (B / T / Z / D) | Live World Map | Right Content Pane ]`.
 --   * `ui.panel` is a mouse-transparent container matching `DavesMapWorldChrome` so the live World Map
 --     canvas and NavBar in the middle stay 100% interactive, while `leftRail` and `content` capture clicks.
+--   * Top content toolbar: `[ <- Back | Search... | Find Me | Drop Waypoint | Map Settings ]`.
 --   * Bottom-right grip resizes the right content pane live horizontally (persisted in `ns.db.contentW`),
 --     and `Window scale` scales the entire unified window uniformly.
 
@@ -70,9 +71,11 @@ local function UpdateChromeLayout()
 	local canBack = ns.DescribeBackTarget()
 	if ui.backBtn then
 		ui.backBtn.isDisabled = not canBack
-		ui.backBtn:SetAlpha(canBack and 1 or 0.42)
-		if ui.backBtn.hl then ui.backBtn.hl:SetAlpha(canBack and 0.35 or 0) end
-		ui.backBtn.activeBg:SetShown(canBack and (ns.IsDungeonViewShown and ns.IsDungeonViewShown() or false))
+		ui.backBtn:SetAlpha(canBack and 1 or 0.36)
+		if ui.backBtn.hl then ui.backBtn.hl:SetAlpha(canBack and 0.45 or 0) end
+		if ui.backBtn.activeGlow then
+			ui.backBtn.activeGlow:SetShown(canBack and (ns.IsDungeonViewShown and ns.IsDungeonViewShown() or false))
+		end
 	end
 	if ui.pinBtn and ui.pinBtn.SetActive and ns.PinModeActive then
 		ui.pinBtn:SetActive(ns.PinModeActive())
@@ -619,7 +622,7 @@ function ns.InitPanel()
 	resizeBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	-----------------------------------------------------------------------
-	-- Far-Left Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon` + `Back`)
+	-- Far-Left Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon`)
 	-----------------------------------------------------------------------
 	local leftRail = CreateFrame("Frame", nil, panel, "BackdropTemplate")
 	ui.leftRail = leftRail
@@ -694,47 +697,6 @@ function ns.InitPanel()
 		ui.tabs[td.key] = b
 	end
 
-	local backBtn = CreateFrame("Button", nil, leftRail)
-	ui.backBtn = backBtn
-	backBtn:SetSize(34, 34)
-	backBtn:SetPoint("BOTTOM", leftRail, "BOTTOM", 0, 6)
-	backBtn:RegisterForClicks("LeftButtonUp", "Button4Up")
-	backBtn.frame = backBtn:CreateTexture(nil, "BACKGROUND")
-	backBtn.frame:SetAllPoints()
-	backBtn.frame:SetTexture(slotTex)
-	backBtn.frame:SetVertexColor(0.86, 0.80, 0.66, 0.94)
-	backBtn.activeBg = backBtn:CreateTexture(nil, "BORDER")
-	backBtn.activeBg:SetAllPoints()
-	backBtn.activeBg:SetTexture(slotTex)
-	backBtn.activeBg:SetBlendMode("ADD")
-	backBtn.activeBg:SetAlpha(0.28)
-	backBtn.activeBg:Hide()
-	backBtn.icon = backBtn:CreateTexture(nil, "ARTWORK")
-	backBtn.icon:SetSize(20, 20)
-	backBtn.icon:SetPoint("CENTER", 0, 0)
-	backBtn.icon:SetTexture(ns.MEDIA .. "back")
-	backBtn.hl = backBtn:CreateTexture(nil, "HIGHLIGHT")
-	backBtn.hl:SetAllPoints()
-	backBtn.hl:SetTexture(slotTex)
-	backBtn.hl:SetBlendMode("ADD")
-	backBtn.hl:SetAlpha(0.35)
-	backBtn:SetScript("OnClick", function(self)
-		if self.isDisabled then return end
-		ns.GoBack()
-		if GameTooltip:IsShown() and GameTooltip:GetOwner() == self then
-			local onEnter = self:GetScript("OnEnter")
-			if onEnter then onEnter(self) end
-		end
-	end)
-	backBtn:SetScript("OnEnter", function(self)
-		local _, tTitle, tBody = ns.DescribeBackTarget()
-		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-		GameTooltip:AddLine(tTitle, 1, .82, .2)
-		GameTooltip:AddLine(tBody, .9, .9, .9, true)
-		GameTooltip:Show()
-	end)
-	backBtn:SetScript("OnLeave", GameTooltip_Hide)
-
 	-----------------------------------------------------------------------
 	-- Right Visual Content Pane (to the right of the live World Map canvas)
 	-----------------------------------------------------------------------
@@ -782,10 +744,50 @@ function ns.InitPanel()
 	end)
 	ui.findBtn:SetPoint("RIGHT", ui.pinBtn, "LEFT", -4, 0)
 
+	local backBtn = CreateFrame("Button", nil, content)
+	ui.backBtn = backBtn
+	backBtn:SetSize(22, 22)
+	backBtn:SetPoint("TOPLEFT", LIST_PAD, -4)
+	backBtn:RegisterForClicks("LeftButtonUp", "Button4Up")
+	backBtn.icon = backBtn:CreateTexture(nil, "ARTWORK")
+	backBtn.icon:SetPoint("CENTER")
+	backBtn.icon:SetSize(18, 18)
+	backBtn.icon:SetTexture(ns.MEDIA .. "back")
+	backBtn.icon:SetAlpha(0.85)
+	backBtn.activeGlow = backBtn:CreateTexture(nil, "OVERLAY")
+	backBtn.activeGlow:SetPoint("CENTER")
+	backBtn.activeGlow:SetSize(18, 18)
+	backBtn.activeGlow:SetTexture(ns.MEDIA .. "back")
+	backBtn.activeGlow:SetBlendMode("ADD")
+	backBtn.activeGlow:SetAlpha(0.35)
+	backBtn.activeGlow:Hide()
+	backBtn.hl = backBtn:CreateTexture(nil, "HIGHLIGHT")
+	backBtn.hl:SetPoint("CENTER")
+	backBtn.hl:SetSize(18, 18)
+	backBtn.hl:SetTexture(ns.MEDIA .. "back")
+	backBtn.hl:SetBlendMode("ADD")
+	backBtn.hl:SetAlpha(0.45)
+	backBtn:SetScript("OnClick", function(self)
+		if self.isDisabled then return end
+		ns.GoBack()
+		if GameTooltip:IsShown() and GameTooltip:GetOwner() == self then
+			local onEnter = self:GetScript("OnEnter")
+			if onEnter then onEnter(self) end
+		end
+	end)
+	backBtn:SetScript("OnEnter", function(self)
+		local _, tTitle, tBody = ns.DescribeBackTarget()
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine(tTitle, 1, .82, .2)
+		GameTooltip:AddLine(tBody, .9, .9, .9, true)
+		GameTooltip:Show()
+	end)
+	backBtn:SetScript("OnLeave", GameTooltip_Hide)
+
 	local search = CreateFrame("EditBox", nil, content, "SearchBoxTemplate")
 	ui.search = search
 	search:SetHeight(20)
-	search:SetPoint("TOPLEFT", LIST_PAD + 4, -5)
+	search:SetPoint("LEFT", backBtn, "RIGHT", 9, 0)
 	search:SetPoint("RIGHT", ui.findBtn, "LEFT", -6, 0)
 	search:HookScript("OnTextChanged", ns.RunSearch)
 
