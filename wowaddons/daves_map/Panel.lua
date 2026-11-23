@@ -312,10 +312,6 @@ local function SetBackground(border, a, style)
 end
 ns.ApplyDialogBackground = SetBackground
 
-local function AbovePins()
-	return WorldMapFrame:GetPinFrameLevelsManager():GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST") + 10
-end
-
 local function ComputeScreenResizeCaps()
 	local chrome = ns.WorldMapChrome and ns.WorldMapChrome()
 	local maxTotalW = MAP_MAX_W + CONTENT_MAX_W
@@ -561,16 +557,23 @@ end
 local function AnchorPanelToChrome()
 	if not (ui.panel and WorldMapFrame) then return end
 	local chrome = ns.WorldMapChrome and ns.WorldMapChrome()
-	local lvl = AbovePins()
+	local sc = WorldMapFrame.ScrollContainer
+	local scLevel = (sc and SafeNum(sc:GetFrameLevel())) or 2
+	local pinMgr = WorldMapFrame.GetPinFrameLevelsManager and WorldMapFrame:GetPinFrameLevelsManager()
+	local pinTop = (pinMgr and pinMgr.GetValidFrameLevel and SafeNum(pinMgr:GetValidFrameLevel("PIN_FRAME_LEVEL_TOPMOST"))) or 2500
+	local lvl = math.min(9900, math.max(pinTop + 10, scLevel + 9000))
 	ui.panel:SetFrameStrata(WorldMapFrame:GetFrameStrata() or "MEDIUM")
 	ui.panel:SetFrameLevel(lvl)
-	if ui.splitter then ui.splitter:SetFrameLevel(lvl + 8) end
-	if ui.resizeBtn then ui.resizeBtn:SetFrameLevel(lvl + 10) end
+	if ui.splitter then ui.splitter:SetFrameLevel(lvl + 6) end
+	if ui.resizeBtn then ui.resizeBtn:SetFrameLevel(lvl + 8) end
 	ui.panel:ClearAllPoints()
 	if chrome then
 		ui.panel:SetAllPoints(chrome)
 	else
 		ui.panel:SetAllPoints(WorldMapFrame)
+	end
+	if ui.content and ns.GetUnifiedContentWidth then
+		ui.content:SetWidth(ns.GetUnifiedContentWidth())
 	end
 	if ui.pinBtn and ui.pinBtn.SetActive and ns.PinModeActive then
 		ui.pinBtn:SetActive(ns.PinModeActive())
@@ -823,13 +826,9 @@ function ns.InitPanel()
 		if button == "Button4" then ns.GoBack() end
 	end)
 	if ns.AttachWindowDrag then ns.AttachWindowDrag(content) end
-	local spacer = WorldMapFrame and WorldMapFrame.TitleCanvasSpacerFrame
-	if spacer then
-		content:SetPoint("TOPLEFT", spacer, "TOPRIGHT", SPLITTER_W + RAIL_W + RAIL_CONTENT_GAP, TOP_CONTENT_Y)
-	else
-		content:SetPoint("TOPLEFT", panel, "TOPLEFT", OUTER_PAD + MAP_MIN_W + SPLITTER_W + RAIL_W + RAIL_CONTENT_GAP, -OUTER_PAD)
-	end
+	content:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -OUTER_PAD, -OUTER_PAD)
 	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -OUTER_PAD, OUTER_PAD)
+	content:SetWidth((ns.GetUnifiedContentWidth and ns.GetUnifiedContentWidth()) or (L.CONTENT_DEFAULT_W or 516))
 
 	-----------------------------------------------------------------------
 	-- Middle Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon`)

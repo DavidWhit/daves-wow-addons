@@ -423,6 +423,9 @@ local function UpdateChromeBounds()
 	if ns.LayoutMapStage then
 		ns.LayoutMapStage(L.MAP_LEFT_X, L.TOP_CONTENT_Y, L.NAV_BAR_H, L.STAGE_TOP_Y, mw, bh)
 	end
+	if ns.SyncPanelDock then
+		ns.SyncPanelDock()
+	end
 end
 
 local function ApplySpacerAndScrollBounds(mw, mh, bh)
@@ -698,8 +701,9 @@ local function LayoutCloseButton()
 	if close and state.mapChrome then
 		close:ClearAllPoints()
 		close:SetPoint("TOPRIGHT", state.mapChrome, "TOPRIGHT", -2, -2)
-		if state.mapOverlay and close.SetFrameLevel then
-			close:SetFrameLevel(math.max(close:GetFrameLevel() or 1, (state.mapOverlay:GetFrameLevel() or 1) + 2))
+		if close.SetFrameLevel and not (close:IsProtected() and InCombatLockdown()) then
+			local base = (state.mapOverlay and SafeNum(state.mapOverlay:GetFrameLevel())) or 11
+			close:SetFrameLevel(math.max(SafeNum(close:GetFrameLevel()) or 1, base + 35, 45))
 		end
 	end
 end
@@ -749,11 +753,15 @@ SyncMapChromeStrata = function()
 		state.mapOverlay:SetFrameLevel((WorldMapFrame.BorderFrame:GetFrameLevel() or 10) + 1)
 	end
 	local close = WorldMapFrame.BorderFrame and WorldMapFrame.BorderFrame.CloseButton
-	if close and state.mapOverlay and close.SetFrameLevel and not (close:IsProtected() and InCombatLockdown()) then
-		close:SetFrameLevel(math.max(close:GetFrameLevel() or 1, (state.mapOverlay:GetFrameLevel() or 1) + 2))
+	if close and close.SetFrameLevel and not (close:IsProtected() and InCombatLockdown()) then
+		local base = (state.mapOverlay and SafeNum(state.mapOverlay:GetFrameLevel())) or 11
+		close:SetFrameLevel(math.max(SafeNum(close:GetFrameLevel()) or 1, base + 35, 45))
 	end
 	if ns.SyncMapStageStrata then
 		ns.SyncMapStageStrata()
+	end
+	if ns.SyncPanelDock then
+		ns.SyncPanelDock()
 	end
 end
 

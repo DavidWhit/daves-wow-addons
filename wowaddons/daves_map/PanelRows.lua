@@ -151,8 +151,12 @@ local function RenderRow(row, item, yTop)
 
 	if item.kind == "qcols" then
 		local qc = row.qcols
+		local minimal = ns.db and ns.db.minimalQuestInfo == true
 		local mode = (ns.db and ns.db.questSort) or "lvl"
 		if mode ~= "lvl" and mode ~= "xp" and mode ~= "name" and mode ~= "starter" then
+			mode = "lvl"
+		end
+		if minimal and (mode == "xp" or mode == "starter") then
 			mode = "lvl"
 		end
 		local asc = not (ns.db and ns.db.questSortAsc == false)
@@ -169,9 +173,22 @@ local function RenderRow(row, item, yTop)
 		StyleCol(qc.starterBtn, mode == "starter" and ("Starter" .. arrow) or "Starter", mode == "starter")
 		StyleCol(qc.lvlBtn, mode == "lvl" and ("Lvl" .. arrow) or "Lvl", mode == "lvl")
 		StyleCol(qc.xpBtn, mode == "xp" and ("XP" .. arrow) or "XP", mode == "xp")
+		qc.lvlBtn:ClearAllPoints()
 		qc.nameBtn:ClearAllPoints()
-		qc.nameBtn:SetPoint("LEFT", qc, "LEFT", (not ui.found and ns.db and ns.db.panelTab == "tracker") and 44 or 26, 0)
-		qc.nameBtn:SetPoint("RIGHT", qc.starterBtn, "LEFT", -COL_STR_GAP, 0)
+		local nameLeft = (not ui.found and ns.db and ns.db.panelTab == "tracker") and 44 or 26
+		if minimal then
+			qc.xpBtn:Hide()
+			qc.starterBtn:Hide()
+			qc.lvlBtn:SetPoint("RIGHT", qc, "RIGHT", -ROW_PAD, 0)
+			qc.nameBtn:SetPoint("LEFT", qc, "LEFT", nameLeft, 0)
+			qc.nameBtn:SetPoint("RIGHT", qc.lvlBtn, "LEFT", -COL_GAP, 0)
+		else
+			qc.xpBtn:Show()
+			qc.starterBtn:Show()
+			qc.lvlBtn:SetPoint("RIGHT", qc.xpBtn, "LEFT", -COL_GAP, 0)
+			qc.nameBtn:SetPoint("LEFT", qc, "LEFT", nameLeft, 0)
+			qc.nameBtn:SetPoint("RIGHT", qc.starterBtn, "LEFT", -COL_STR_GAP, 0)
+		end
 		qc:Show()
 		return
 	end
@@ -340,13 +357,18 @@ local function RenderRow(row, item, yTop)
 			row.selBar:Show()
 		end
 
+		local minimal = ns.db and ns.db.minimalQuestInfo == true
 		row.colXP:ClearAllPoints()
 		row.colLvl:ClearAllPoints()
 		row.starterBtn:ClearAllPoints()
 		row.label:ClearAllPoints()
-		row.colXP:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
-		row.colLvl:SetPoint("RIGHT", row.colXP, "LEFT", -COL_GAP, 0)
-		row.starterBtn:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_STR_GAP, 0)
+		if minimal then
+			row.colLvl:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
+		else
+			row.colXP:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
+			row.colLvl:SetPoint("RIGHT", row.colXP, "LEFT", -COL_GAP, 0)
+			row.starterBtn:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_STR_GAP, 0)
+		end
 		if item.groupCount and item.groupCount > 0 then
 			local gb = row.groupBadge
 			gb.questID = item.groupQuestID
@@ -357,18 +379,24 @@ local function RenderRow(row, item, yTop)
 		else
 			row.label:SetPoint("LEFT", row, "LEFT", 44, 0)
 		end
-		row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
+		if minimal then
+			row.label:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_GAP, 0)
+		else
+			row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
+		end
 		row.sub:Hide()
 
 		local titleColor = selected and (onTracker and "|cff59ff73" or "|cffffd200") or (onTracker and "|cffffd200" or nil)
 		local rawTitle = item.title or ("Quest #" .. tostring(item.questID))
 		row.label:SetText(titleColor and (titleColor .. rawTitle .. "|r") or rawTitle)
-		row.starterBtn.lbl:SetText(item.zone and ("|cff9ea4b0" .. item.zone .. "|r") or "|cff666666-|r")
-		row.starterBtn:Show()
 		row.colLvl:SetText(item.lvlTxt or "|cff666666-|r")
-		row.colXP:SetText(item.xpColTxt or "|cff7fd4ffIn Log|r")
 		row.colLvl:Show()
-		row.colXP:Show()
+		if not minimal then
+			row.starterBtn.lbl:SetText(item.zone and ("|cff9ea4b0" .. item.zone .. "|r") or "|cff666666-|r")
+			row.starterBtn:Show()
+			row.colXP:SetText(item.xpColTxt or "|cff7fd4ffIn Log|r")
+			row.colXP:Show()
+		end
 		return
 	end
 
@@ -537,14 +565,19 @@ local function RenderRow(row, item, yTop)
 
 	local hasSub = item.sub ~= nil and item.sub ~= ""
 	if item.kind == "quest" and item.lvlTxt then
-		-- Structured 4-column quest grid: Quest | Starter (clickable link) | Lvl | XP
+		local minimal = ns.db and ns.db.minimalQuestInfo == true
+		-- Structured quest grid: 4 columns (`Quest | Starter | Lvl | XP`) or minimal (`Quest | Lvl`)
 		row.colXP:ClearAllPoints()
 		row.colLvl:ClearAllPoints()
 		row.starterBtn:ClearAllPoints()
 		row.label:ClearAllPoints()
-		row.colXP:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
-		row.colLvl:SetPoint("RIGHT", row.colXP, "LEFT", -COL_GAP, 0)
-		row.starterBtn:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_STR_GAP, 0)
+		if minimal then
+			row.colLvl:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
+		else
+			row.colXP:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
+			row.colLvl:SetPoint("RIGHT", row.colXP, "LEFT", -COL_GAP, 0)
+			row.starterBtn:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_STR_GAP, 0)
+		end
 		if item.hasChain then
 			local cb = row.chainBtn
 			cb:ClearAllPoints()
@@ -586,7 +619,11 @@ local function RenderRow(row, item, yTop)
 		else
 			row.label:SetPoint("LEFT", row, "LEFT", 26 + checkShift, 0)
 		end
-		row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
+		if minimal then
+			row.label:SetPoint("RIGHT", row.colLvl, "LEFT", -COL_GAP, 0)
+		else
+			row.label:SetPoint("RIGHT", row.starterBtn, "LEFT", -COL_STR_GAP, 0)
+		end
 		row.sub:Hide()
 
 		local rawName = D.title[i] or ""
@@ -604,17 +641,19 @@ local function RenderRow(row, item, yTop)
 			nameTxt = rawName
 		end
 		row.label:SetText(nameTxt)
-		if item.starterName then
-			local sHex = (item.state == "done" and not selected) and "ff778899" or "ff7fd4ff"
-			row.starterBtn.lbl:SetText("|c" .. sHex .. item.starterName .. "|r")
-		else
-			row.starterBtn.lbl:SetText("|cff666666-|r")
-		end
-		row.starterBtn:Show()
 		row.colLvl:SetText(item.lvlTxt)
-		row.colXP:SetText(item.xpColTxt or "|cff666666-|r")
 		row.colLvl:Show()
-		row.colXP:Show()
+		if not minimal then
+			if item.starterName then
+				local sHex = (item.state == "done" and not selected) and "ff778899" or "ff7fd4ff"
+				row.starterBtn.lbl:SetText("|c" .. sHex .. item.starterName .. "|r")
+			else
+				row.starterBtn.lbl:SetText("|cff666666-|r")
+			end
+			row.starterBtn:Show()
+			row.colXP:SetText(item.xpColTxt or "|cff666666-|r")
+			row.colXP:Show()
+		end
 		return
 	end
 
@@ -783,6 +822,18 @@ local function ApplySettingToggle(skey)
 		Sound(db.hideCompleted and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
 		if ns.NotifySetting then ns.NotifySetting("hideCompleted") end
 		if ns.Refresh then ns.Refresh() end
+	elseif skey == "trackerTrackedOnly" then
+		db.trackerTrackedOnly = not (db.trackerTrackedOnly == true)
+		Sound(db.trackerTrackedOnly and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		if ns.NotifySetting then ns.NotifySetting("trackerTrackedOnly") end
+		if ns.RefreshStyleDialog then ns.RefreshStyleDialog() end
+		ns.OnLayerChanged()
+	elseif skey == "minimalQuestInfo" then
+		db.minimalQuestInfo = not (db.minimalQuestInfo == true)
+		Sound(db.minimalQuestInfo and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		if ns.NotifySetting then ns.NotifySetting("minimalQuestInfo") end
+		if ns.RefreshStyleDialog then ns.RefreshStyleDialog() end
+		ns.OnLayerChanged()
 	elseif skey == "enabled" then
 		db.enabled = not (db.enabled ~= false)
 		Sound(db.enabled and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")

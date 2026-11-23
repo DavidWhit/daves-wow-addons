@@ -18,7 +18,6 @@ local dState = {
 	scrollBar = nil,
 	nativeScroll = false,
 	syncingScroll = false,
-	backBtn = nil,
 	trackBtn = nil,
 	shareBtn = nil,
 	linkBtn = nil,
@@ -874,43 +873,11 @@ function ns.InitQuestDetailsPane(content)
 	bg:SetColorTexture(0, 0, 0, 0.14)
 	dState.bg = bg
 
-	-- Top bar: `< Back` pill on left, `Track` / `Link` / `Share` / `Abandon` on right
+	-- Top bar: `Track` / `Link` / `Share` on left, destructive `Abandon` separated on right (toolbar Back arrow lives beside Search)
 	local topBar = CreateFrame("Frame", nil, pane)
 	topBar:SetHeight(28)
 	topBar:SetPoint("TOPLEFT", 0, 0)
 	topBar:SetPoint("TOPRIGHT", 0, 0)
-
-	dState.backBtn = MakeActionPill(topBar, "|cffe8d8a8< Back|r", 66, function()
-		if ns.GoBack then
-			ns.GoBack()
-		elseif ns.CloseQuestDetails then
-			ns.CloseQuestDetails(false)
-		end
-	end, "Return to the quest list (or press Mouse Back).")
-	dState.backBtn:SetPoint("LEFT", 4, 0)
-
-	dState.abandonBtn = MakeActionPill(topBar, "|cffff8888Abandon|r", 70, function()
-		PromptAbandonQuest(ui.detailQuestID)
-	end, "Abandon this quest (asks for confirmation first).")
-	dState.abandonBtn:SetPoint("RIGHT", -4, 0)
-
-	dState.shareBtn = MakeActionPill(topBar, "|cffe8d8a8Share|r", 54, function()
-		local q = ui.detailQuestID
-		local idx = q and ns.QuestLogIndex(q)
-		if idx and QuestLogPushQuest then
-			QuestLogPushQuest(idx)
-			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		end
-	end, "Share this quest with your party or raid.")
-	dState.shareBtn:SetPoint("RIGHT", dState.abandonBtn, "LEFT", -4, 0)
-
-	dState.linkBtn = MakeActionPill(topBar, "|cffe8d8a8Link|r", 48, function()
-		if ns.LinkQuestInChat and ui.detailQuestID then
-			ns.LinkQuestInChat(ui.detailQuestID, true)
-			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		end
-	end, "Insert a clickable quest link into chat.")
-	dState.linkBtn:SetPoint("RIGHT", dState.shareBtn, "LEFT", -4, 0)
 
 	dState.trackBtn = MakeActionPill(topBar, "|cffe8d8a8Track|r", 58, function()
 		if ui.detailQuestID and ns.ToggleQuestTrack then
@@ -920,7 +887,30 @@ function ns.InitQuestDetailsPane(content)
 			if ns.Refresh then ns.Refresh() end
 		end
 	end, "Track or untrack this quest on the Objective Tracker.")
-	dState.trackBtn:SetPoint("RIGHT", dState.linkBtn, "LEFT", -4, 0)
+	dState.trackBtn:SetPoint("LEFT", 4, 0)
+
+	dState.linkBtn = MakeActionPill(topBar, "|cffe8d8a8Link|r", 48, function()
+		if ns.LinkQuestInChat and ui.detailQuestID then
+			ns.LinkQuestInChat(ui.detailQuestID, true)
+			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		end
+	end, "Insert a clickable quest link into chat.")
+	dState.linkBtn:SetPoint("LEFT", dState.trackBtn, "RIGHT", 4, 0)
+
+	dState.shareBtn = MakeActionPill(topBar, "|cffe8d8a8Share|r", 54, function()
+		local q = ui.detailQuestID
+		local idx = q and ns.QuestLogIndex(q)
+		if idx and QuestLogPushQuest then
+			QuestLogPushQuest(idx)
+			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		end
+	end, "Share this quest with your party or raid.")
+	dState.shareBtn:SetPoint("LEFT", dState.linkBtn, "RIGHT", 4, 0)
+
+	dState.abandonBtn = MakeActionPill(topBar, "|cffff8888Abandon|r", 70, function()
+		PromptAbandonQuest(ui.detailQuestID)
+	end, "Abandon this quest (asks for confirmation first).")
+	dState.abandonBtn:SetPoint("RIGHT", -4, 0)
 
 	local div = pane:CreateTexture(nil, "ARTWORK")
 	div:SetHeight(1)

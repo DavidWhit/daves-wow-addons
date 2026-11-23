@@ -27,6 +27,8 @@ function ns.RestoreDefaultSettings()
 	db.trackMyZone = true
 	db.focusQuest = true
 	db.groupQuestCount = true
+	db.trackerTrackedOnly = false
+	db.minimalQuestInfo = false
 	db.pinScale = 1.0
 	db.panelScale = 1.0
 	db.background = 0.8
@@ -65,7 +67,8 @@ function ns.RestoreDefaultSettings()
 	if ns.RefreshControls then ns.RefreshControls() end
 	if ns.Refresh then ns.Refresh() end
 	for _, k in ipairs({
-		"enabled", "trackMyZone", "hideCompleted", "focusQuest", "groupQuestCount", "mapBanner",
+		"enabled", "trackMyZone", "hideCompleted", "focusQuest", "groupQuestCount",
+		"trackerTrackedOnly", "minimalQuestInfo", "mapBanner",
 		"pinScale", "panelScale", "background", "backgroundStyle",
 		"seamless", "dungeonMaps", "autoSwitch", "openZoomed",
 	}) do
@@ -168,6 +171,22 @@ function ns:InitOptions()
 			if ns.OnGroupQuestsChanged then ns.OnGroupQuestsChanged() end
 			ns.RefreshOptions()
 		end
+	end)
+
+	local trackerTrackedOnly = Settings.RegisterAddOnSetting(category, ADDON .. "_trackerTrackedOnly", "trackerTrackedOnly", ns.db,
+		Settings.VarType.Boolean, "Show only tracked quests", false)
+	Settings.CreateCheckbox(category, trackerTrackedOnly, "In Tracker & Log, hide untracked Quest Log quests and show only currently tracked, pinned, focused, and ready quests.")
+	trackerTrackedOnly:SetValueChangedCallback(function()
+		if syncingSettings then return end
+		ns.RefreshOptions()
+	end)
+
+	local minimalQuestInfo = Settings.RegisterAddOnSetting(category, ADDON .. "_minimalQuestInfo", "minimalQuestInfo", ns.db,
+		Settings.VarType.Boolean, "Minimal quest info", false)
+	Settings.CreateCheckbox(category, minimalQuestInfo, "Show only the quest row itself in quest lists (hides quest chains, chain steps, reward items, and extra Starter/XP columns).")
+	minimalQuestInfo:SetValueChangedCallback(function()
+		if syncingSettings then return end
+		ns.RefreshOptions()
 	end)
 
 	local mapBanner = Settings.RegisterAddOnSetting(category, ADDON .. "_mapBanner", "mapBanner", ns.db,
@@ -311,7 +330,7 @@ end
 -- Map Settings & Style Dialog (two-column HUD Edit Mode dialog: Look + Map Tracking)
 ---------------------------------------------------------------------------
 do
-	local STYLE_W, STYLE_H = 540, 354
+	local STYLE_W, STYLE_H = 540, 382
 	local PAD_X, COL_W, COL_GAP = 22, 236, 24
 	local COL2_X = PAD_X + COL_W + COL_GAP
 	local opt, controls
@@ -692,6 +711,28 @@ do
 				if ns.RefreshGroupQuestCounts then ns.RefreshGroupQuestCounts() elseif ns.OnLayerChanged then ns.OnLayerChanged() end
 			end,
 			"While grouped, show a brass number badge beside quests showing how many group members are on that quest.")
+		ty = ty - 32
+		Header(opt, "Quest List", COL2_X, ty, COL_W)
+		ty = ty - 22
+		StyleCheckbox(opt, COL2_X, ty, COL_W, "Show only tracked quests",
+			function() return db.trackerTrackedOnly == true end,
+			function(v)
+				db.trackerTrackedOnly = v
+				ns.Sound(v and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+				if ns.NotifySetting then ns.NotifySetting("trackerTrackedOnly") end
+				if ns.OnLayerChanged then ns.OnLayerChanged() end
+			end,
+			"In Tracker & Log, hide untracked Quest Log quests and show only currently tracked, pinned, focused, and ready quests.")
+		ty = ty - 26
+		StyleCheckbox(opt, COL2_X, ty, COL_W, "Minimal quest info",
+			function() return db.minimalQuestInfo == true end,
+			function(v)
+				db.minimalQuestInfo = v
+				ns.Sound(v and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+				if ns.NotifySetting then ns.NotifySetting("minimalQuestInfo") end
+				if ns.OnLayerChanged then ns.OnLayerChanged() end
+			end,
+			"Show only the quest row itself in quest lists (hides quest chains, chain steps, reward items, and extra Starter/XP columns).")
 
 		local dockBtn = PanelButton(opt, "Reset Window", COL_W)
 		dockBtn:SetPoint("BOTTOMLEFT", PAD_X, 46)

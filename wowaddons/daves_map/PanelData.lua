@@ -216,9 +216,13 @@ local function FormatLvlCell(lvl)
 	return "|cff666666-|r"
 end
 
+local function MinimalInfo()
+	return (ns.db and ns.db.minimalQuestInfo == true) == true
+end
+
 local function MakeQuestEntry(pin, _viewZone, allowAutoExpand, liveQid)
 	local D = ns.DATA
-	local ch = ns.ChainFor(pin)
+	local ch = (not MinimalInfo()) and ns.ChainFor(pin) or nil
 	if ch and #ch.steps > 1 then
 		local starter = ch.steps[1]
 		local activePin, _, inLogPin, allDone = ns.ChainProgress(ch, starter)
@@ -452,7 +456,9 @@ local function EmitQuestEntry(out, entry, showTrackCheck)
 			lvlTxt = entry.lvlTxt,
 			xpColTxt = entry.xpColTxt,
 		}
-		AppendRewardsForQuest(out, entry.pin, 1, entry.state == "done", nil)
+		if not MinimalInfo() then
+			AppendRewardsForQuest(out, entry.pin, 1, entry.state == "done", nil)
+		end
 	end
 end
 
@@ -476,6 +482,9 @@ local function SortQuestEntries(list)
 	local D = ns.DATA
 	local mode = (ns.db and ns.db.questSort) or "lvl"
 	if mode ~= "lvl" and mode ~= "xp" and mode ~= "name" and mode ~= "starter" then
+		mode = "lvl"
+	end
+	if MinimalInfo() and (mode == "xp" or mode == "starter") then
 		mode = "lvl"
 	end
 	local asc = not (ns.db and ns.db.questSortAsc == false)
@@ -585,6 +594,22 @@ local function BuildLayersItems()
 		tipTitle = "Hide completed quests",
 		tip = "Hide completed quests from the Zone and Dungeon reference layers and lists.",
 		checked = db.hideCompleted == true,
+	}
+	ui.items[#ui.items + 1] = {
+		kind = "setting_check",
+		skey = "trackerTrackedOnly",
+		label = "Show only tracked quests",
+		tipTitle = "Show only tracked quests",
+		tip = "In Tracker & Log, hide untracked Quest Log quests and show only currently tracked, pinned, focused, and ready quests.",
+		checked = db.trackerTrackedOnly == true,
+	}
+	ui.items[#ui.items + 1] = {
+		kind = "setting_check",
+		skey = "minimalQuestInfo",
+		label = "Minimal quest info",
+		tipTitle = "Minimal quest info",
+		tip = "Show only the quest row itself in quest lists (hides quest chains, chain steps, reward items, and extra Starter/XP columns).",
+		checked = db.minimalQuestInfo == true,
 	}
 
 	ui.items[#ui.items + 1] = { kind = "head", title = "Map Display", right = "" }
@@ -885,24 +910,27 @@ local function BuildTrackerItems()
 	-- so two active steps of the same branched chain never render duplicate chain blocks.
 	local seenStarter = {}
 	local fold = (ns.db and ns.db.zoneFold) or {}
+	local trackedOnly = ns.db and ns.db.trackerTrackedOnly == true
 	for _, sec in ipairs(TRACKER_SECTIONS) do
 		local entries, logOnly = {}, {}
-		for _, q in ipairs(bucketQuests[sec.key] or {}) do
-			local pin = ResolveTrackerPin(q)
-			if pin then
-				local entry = MakeQuestEntry(pin, nil, true, q)
-				if entry and not seenStarter[entry.pin] then
-					seenStarter[entry.pin] = true
-					entries[#entries + 1] = entry
+		if not (trackedOnly and sec.key == "log") then
+			for _, q in ipairs(bucketQuests[sec.key] or {}) do
+				local pin = ResolveTrackerPin(q)
+				if pin then
+					local entry = MakeQuestEntry(pin, nil, true, q)
+					if entry and not seenStarter[entry.pin] then
+						seenStarter[entry.pin] = true
+						entries[#entries + 1] = entry
+					end
+				else
+					local lm = logMeta[q]
+					logOnly[#logOnly + 1] = {
+						q = q,
+						title = (lm and lm.title) or (ns.QuestTitle and ns.QuestTitle(q)) or ("Quest #" .. tostring(q)),
+						level = lm and lm.level or 0,
+						zone = lm and lm.zone or nil,
+					}
 				end
-			else
-				local lm = logMeta[q]
-				logOnly[#logOnly + 1] = {
-					q = q,
-					title = (lm and lm.title) or (ns.QuestTitle and ns.QuestTitle(q)) or ("Quest #" .. tostring(q)),
-					level = lm and lm.level or 0,
-					zone = lm and lm.zone or nil,
-				}
 			end
 		end
 		local total = #entries + #logOnly
@@ -910,6 +938,9 @@ local function BuildTrackerItems()
 			SortQuestEntries(entries)
 			if #logOnly > 1 then
 				local mode = (ns.db and ns.db.questSort) or "lvl"
+				if MinimalInfo() and (mode == "xp" or mode == "starter") then
+					mode = "lvl"
+				end
 				local asc = not (ns.db and ns.db.questSortAsc == false)
 				table.sort(logOnly, function(a, b)
 					if a == b then return false end
@@ -966,11 +997,20 @@ local function BuildTrackerItems()
 	end
 
 	if #ui.items == 0 then
-		ui.items[1] = {
-			kind = "note",
-			title = "Your Quest Log is empty",
-			sub = "Accept quests in the world or browse the Zone / Dungeon tabs to see available quests.",
-		}
+		local logCount = (ns.QuestLogCounts and ns.QuestLogCounts()) or 0
+		if trackedOnly and logCount > 0 then
+			ui.items[1] = {
+				kind = "note",
+				title = "No tracked quests",
+				sub = "Uncheck 'Show only tracked quests' in Map Settings to show all Quest Log quests.",
+			}
+		else
+			ui.items[1] = {
+				kind = "note",
+				title = "Your Quest Log is empty",
+				sub = "Accept quests in the world or browse the Zone / Dungeon tabs to see available quests.",
+			}
+		end
 	end
 end
 
@@ -991,6 +1031,7 @@ function ns.BuildPanelItems()
 		local originMap = ui.searchOriginMap
 		local originPins = originMap and ns.PinsOnMap(originMap) or nil
 		local all = {}
+		local minimal = MinimalInfo()
 		for _, i in ipairs(ui.found) do
 			local icon = D.cats[D.cat[i]].icon
 			local isQ = icon == "quest" or icon == "repeatable"
@@ -1003,7 +1044,7 @@ function ns.BuildPanelItems()
 				state = st,
 				here = IsHere(i),
 				atOrigin = (originPins and originPins.x[i] ~= nil) == true,
-				sub = isQ and QuestSubtitle(i, st, blk) or NonQuestSubtitle(i),
+				sub = isQ and ((not minimal) and QuestSubtitle(i, st, blk) or nil) or NonQuestSubtitle(i),
 			}
 		end
 		-- Sort by the frozen zone where the search began (not live CurrentMap) so clicking
@@ -1017,7 +1058,7 @@ function ns.BuildPanelItems()
 		for n = 1, math.min(#all, MAX_RESULTS) do
 			local r = all[n]
 			ui.items[#ui.items + 1] = r
-			if r.isQuest then
+			if r.isQuest and not minimal then
 				AppendRewardsForQuest(ui.items, r.i, 1, r.state == "done", nil)
 			end
 		end
@@ -1040,7 +1081,7 @@ function ns.BuildPanelItems()
 	local wantQid = (wantPin and D.qid[wantPin] ~= 0) and D.qid[wantPin] or nil
 	local fallbackIdx, qidFallbackIdx = nil, nil
 	for idx, item in ipairs(ui.items) do
-		local h = ROW_HEIGHTS[item.kind] or 34
+		local h = (item.kind == "result" and not item.sub) and 28 or (ROW_HEIGHTS[item.kind] or 34)
 		item.h = h
 		item.top = top
 		top = top + h

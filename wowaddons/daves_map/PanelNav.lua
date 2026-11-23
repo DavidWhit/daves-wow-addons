@@ -926,7 +926,8 @@ function ns.RevealQuestInPanel(pin, forceTab, _enableRefLayer, exactPin)
 		ui.dungeonZoneLock = nil
 		ui.zoneContextLock = (zMap and zMap ~= viewZ) and zMap or nil
 	end
-	local ch = ns.ChainFor and ns.ChainFor(pin)
+	local minimal = ns.db and ns.db.minimalQuestInfo == true
+	local ch = (not minimal) and ns.ChainFor and ns.ChainFor(pin) or nil
 	local bucketState = ns.PinQuestState and ns.PinQuestState(pin) or nil
 	if ch and #ch.steps > 1 then
 		ui.expandedChains[ch.steps[1]] = true
@@ -951,7 +952,7 @@ function ns.RevealQuestInPanel(pin, forceTab, _enableRefLayer, exactPin)
 		end
 		if dName then ns.db.zoneFold["dung:" .. dName] = false end
 	end
-	ui.revealPin = exactPin and pin or ((ns.ResolveActiveChainPin and ns.ResolveActiveChainPin(pin)) or pin)
+	ui.revealPin = (exactPin or minimal) and pin or ((ns.ResolveActiveChainPin and ns.ResolveActiveChainPin(pin)) or pin)
 	local lockMap = targetTab == "dungeon" and ui.dungeonZoneLock or ui.zoneContextLock
 	if lockMap and ns.NoteSidebarNavTarget then
 		ns.NoteSidebarNavTarget(lockMap)
