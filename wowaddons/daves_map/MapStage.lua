@@ -1,7 +1,7 @@
 -- daves_map / MapStage.lua
 -- Compact WowStyle1DropdownTemplate map navigation bar replacing WorldMapFrame.NavBar,
--- subtle muted zone-themed map stage backdrop behind ScrollContainer, and delicate
--- two-layer inner hairline border with corner ticks framing ScrollContainer.
+-- and full-bleed subtly zone-tinted map backdrop filling the entire map stage behind
+-- ScrollContainer (no inner frame border around the map).
 
 local _, ns = ...
 
@@ -11,7 +11,7 @@ local DEFAULT_NAV_TOP_Y = L.TOP_CONTENT_Y or -6
 local DEFAULT_NAV_H = L.NAV_BAR_H or 26
 local DEFAULT_STAGE_TOP_Y = L.STAGE_TOP_Y or -38
 local DEFAULT_MAP_W = L.MAP_DEFAULT_W or 697
-local DEFAULT_BODY_H = L.BODY_DEFAULT_H or 473
+local DEFAULT_BODY_H = L.BODY_DEFAULT_H or 467
 local DD_GAP = 6
 local DD_HEIGHT = 24
 local FALLBACK_WORLD_ID = 947
@@ -30,19 +30,21 @@ local function TryTemplate(kind, name, parent, template)
 end
 
 ---------------------------------------------------------------------------
--- Muted Zone Biome Palettes (dark, desaturated RGB 0.05..0.28)
+-- Muted Zone Biome Palettes
+-- `tile` gently shifts the native dark map backdrop (AdventureMap_TileBg)
+-- without crushing its brightness; `base`/`top`/`bot` add a quiet wash.
 ---------------------------------------------------------------------------
 local BIOMES = {
-	world    = { base = { 0.09, 0.08, 0.07 }, top = { 0.16, 0.14, 0.11 }, bot = { 0.08, 0.07, 0.06 }, tile = { 0.25, 0.22, 0.18 } },
-	forest   = { base = { 0.07, 0.09, 0.07 }, top = { 0.12, 0.17, 0.13 }, bot = { 0.06, 0.09, 0.07 }, tile = { 0.18, 0.24, 0.19 } },
-	snow     = { base = { 0.08, 0.10, 0.12 }, top = { 0.17, 0.20, 0.24 }, bot = { 0.08, 0.10, 0.13 }, tile = { 0.22, 0.25, 0.28 } },
-	desert   = { base = { 0.11, 0.09, 0.06 }, top = { 0.22, 0.17, 0.11 }, bot = { 0.11, 0.08, 0.06 }, tile = { 0.27, 0.22, 0.16 } },
-	volcanic = { base = { 0.10, 0.06, 0.06 }, top = { 0.20, 0.10, 0.08 }, bot = { 0.12, 0.06, 0.05 }, tile = { 0.26, 0.16, 0.14 } },
-	swamp    = { base = { 0.07, 0.09, 0.08 }, top = { 0.12, 0.16, 0.14 }, bot = { 0.06, 0.10, 0.08 }, tile = { 0.17, 0.23, 0.20 } },
-	shadow   = { base = { 0.08, 0.07, 0.10 }, top = { 0.14, 0.12, 0.18 }, bot = { 0.07, 0.06, 0.09 }, tile = { 0.20, 0.18, 0.24 } },
-	coast    = { base = { 0.07, 0.09, 0.11 }, top = { 0.13, 0.17, 0.21 }, bot = { 0.06, 0.09, 0.11 }, tile = { 0.18, 0.23, 0.26 } },
-	autumn   = { base = { 0.11, 0.08, 0.06 }, top = { 0.21, 0.15, 0.10 }, bot = { 0.10, 0.07, 0.05 }, tile = { 0.26, 0.20, 0.15 } },
-	city     = { base = { 0.09, 0.09, 0.09 }, top = { 0.17, 0.16, 0.15 }, bot = { 0.09, 0.08, 0.08 }, tile = { 0.24, 0.22, 0.20 } },
+	world    = { base = { 0.09, 0.07, 0.05 }, top = { 0.16, 0.13, 0.09 }, bot = { 0.08, 0.06, 0.04 }, tile = { 0.96, 0.94, 0.90 } },
+	forest   = { base = { 0.06, 0.08, 0.06 }, top = { 0.11, 0.16, 0.12 }, bot = { 0.05, 0.08, 0.06 }, tile = { 0.84, 0.94, 0.84 } },
+	snow     = { base = { 0.07, 0.09, 0.11 }, top = { 0.15, 0.19, 0.24 }, bot = { 0.07, 0.09, 0.12 }, tile = { 0.84, 0.92, 1.00 } },
+	desert   = { base = { 0.10, 0.08, 0.05 }, top = { 0.21, 0.16, 0.10 }, bot = { 0.10, 0.07, 0.05 }, tile = { 1.00, 0.92, 0.80 } },
+	volcanic = { base = { 0.10, 0.05, 0.05 }, top = { 0.20, 0.09, 0.07 }, bot = { 0.11, 0.05, 0.04 }, tile = { 1.00, 0.82, 0.78 } },
+	swamp    = { base = { 0.06, 0.08, 0.07 }, top = { 0.11, 0.15, 0.13 }, bot = { 0.05, 0.09, 0.07 }, tile = { 0.80, 0.92, 0.86 } },
+	shadow   = { base = { 0.07, 0.06, 0.09 }, top = { 0.13, 0.11, 0.18 }, bot = { 0.06, 0.05, 0.09 }, tile = { 0.86, 0.82, 0.96 } },
+	coast    = { base = { 0.06, 0.08, 0.10 }, top = { 0.12, 0.16, 0.21 }, bot = { 0.05, 0.08, 0.10 }, tile = { 0.82, 0.92, 1.00 } },
+	autumn   = { base = { 0.10, 0.07, 0.05 }, top = { 0.20, 0.14, 0.09 }, bot = { 0.09, 0.06, 0.04 }, tile = { 1.00, 0.88, 0.76 } },
+	city     = { base = { 0.08, 0.08, 0.08 }, top = { 0.16, 0.15, 0.14 }, bot = { 0.08, 0.07, 0.07 }, tile = { 0.94, 0.92, 0.90 } },
 }
 
 local ZONE_BIOME = {
@@ -58,9 +60,9 @@ local ZONE_BIOME = {
 }
 
 local STYLE_ALPHAS = {
-	marble = { 0.42, 0.28, 0.26, 0.12, 0.36, 0.44 },
-	dialog = { 0.34, 0.26, 0.24, 0.13, 0.34, 0.40 },
-	dark   = { 0.28, 0.24, 0.22, 0.14, 0.32, 0.38 },
+	marble = { 0.90, 0.20, 0.22, 0.90, 0.30, 0.32 },
+	dialog = { 0.92, 0.20, 0.22, 0.92, 0.30, 0.30 },
+	dark   = { 0.94, 0.18, 0.20, 0.94, 0.28, 0.28 },
 }
 
 local state = {
@@ -69,8 +71,6 @@ local state = {
 	overlay = nil,
 	mapStage = nil,
 	mapNavBar = nil,
-	mapInnerFrame = nil,
-	innerAnchoredSC = nil,
 	stageBase = nil,
 	stageGrad = nil,
 	stageTile = nil,
@@ -80,6 +80,7 @@ local state = {
 	navW = 0,
 	lastMapID = nil,
 	lastNavW = nil,
+	lastAtlas = nil,
 	inSelect = false,
 	biome = "world",
 	styleKey = "dark",
@@ -99,7 +100,7 @@ local function ResolveBiome(mapID)
 end
 
 ---------------------------------------------------------------------------
--- Crisp 1px Hairline & Corner Tick Builders
+-- Crisp 1px Outer Stage Hairline Builder
 ---------------------------------------------------------------------------
 local function MakeLine(parent, layer, subLevel, r, g, b, a)
 	local t = parent:CreateTexture(nil, layer, nil, subLevel)
@@ -127,35 +128,64 @@ local function AddBorderRect(parent, layer, subLevel, inset, r, g, b, a, out)
 	end
 end
 
-local function AddCornerTicks(parent, inset, len, r, g, b, a)
-	local specs = {
-		{ "TOPLEFT",     inset,  -inset,  inset, -(inset + 1) },
-		{ "TOPRIGHT",   -inset,  -inset, -inset, -(inset + 1) },
-		{ "BOTTOMLEFT",  inset,   inset,  inset,  (inset + 1) },
-		{ "BOTTOMRIGHT", -inset,  inset, -inset,  (inset + 1) },
-	}
-	for _, s in ipairs(specs) do
-		local h = MakeLine(parent, "ARTWORK", 2, r, g, b, a)
-		h:SetSize(len, 1)
-		h:SetPoint(s[1], parent, s[1], s[2], s[3])
-		local v = MakeLine(parent, "ARTWORK", 2, r, g, b, a)
-		v:SetSize(1, math.max(1, len - 1))
-		v:SetPoint(s[1], parent, s[1], s[4], s[5])
+---------------------------------------------------------------------------
+-- Stage Backdrop Styling, Native Map Backdrop Sync & Biome Tinting
+---------------------------------------------------------------------------
+local function SilenceNativeTiledBackground()
+	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
+	local tiled = sc and sc.Child and sc.Child.TiledBackground
+	if tiled and tiled.SetAlpha then
+		tiled:SetAlpha(0)
+	end
+	local osbg = WorldMapFrame and WorldMapFrame.OverscrollBG
+	if osbg and osbg.SetAlpha then
+		osbg:SetAlpha(0)
 	end
 end
 
----------------------------------------------------------------------------
--- Stage Backdrop Styling & Biome Tinting
----------------------------------------------------------------------------
+local function ApplyStageAtlas(mapID)
+	local tile = state.stageTile
+	if not tile then return end
+	local atlas = (mapID and C_Map and C_Map.GetMapArtBackgroundAtlas)
+		and SafeStr(C_Map.GetMapArtBackgroundAtlas(mapID)) or nil
+	local info = (atlas and C_Texture and C_Texture.GetAtlasInfo) and C_Texture.GetAtlasInfo(atlas) or nil
+	if not info then
+		atlas = "AdventureMap_TileBg"
+		info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) or nil
+	end
+	if not info then
+		atlas = "gamepad-mapquestlog-bgtile-2k"
+		info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas) or nil
+	end
+	if info then
+		if state.lastAtlas ~= atlas then
+			state.lastAtlas = atlas
+			tile:SetHorizTile(true)
+			tile:SetVertTile(true)
+			tile:SetAtlas(atlas, false)
+			tile:SetHorizTile(true)
+			tile:SetVertTile(true)
+		end
+	elseif state.lastAtlas ~= "marble" then
+		state.lastAtlas = "marble"
+		tile:SetHorizTile(true)
+		tile:SetVertTile(true)
+		tile:SetTexture("Interface\\FrameGeneral\\UI-Background-Marble", "REPEAT", "REPEAT")
+	end
+end
+
 local function ApplyStageColors()
 	if not state.mapStage then return end
 	local pal = BIOMES[state.biome] or BIOMES.world
-	local aScale = 0.55 + 0.45 * math.max(0.2, math.min(1.0, state.styleAlpha or 0.8))
+	local aScale = 0.70 + 0.30 * math.max(0.2, math.min(1.0, state.styleAlpha or 0.8))
 	local sa = STYLE_ALPHAS[state.styleKey] or STYLE_ALPHAS.dark
 
 	if state.stageBase then
 		state.stageBase:SetColorTexture(pal.base[1], pal.base[2], pal.base[3], sa[1] * aScale)
 		state.stageBase:SetVertexColor(1, 1, 1, 1)
+	end
+	if state.stageTile then
+		state.stageTile:SetVertexColor(pal.tile[1], pal.tile[2], pal.tile[3], sa[4] * aScale)
 	end
 	if state.stageGrad and CreateColor then
 		state.stageGrad:SetGradient(
@@ -164,12 +194,9 @@ local function ApplyStageColors()
 			CreateColor(pal.top[1], pal.top[2], pal.top[3], sa[3] * aScale)
 		)
 	end
-	if state.stageTile then
-		state.stageTile:SetVertexColor(pal.tile[1], pal.tile[2], pal.tile[3], sa[4] * aScale)
-	end
 	local vigA = sa[5] * aScale
 	for _, v in ipairs(state.vignettes) do
-		v:SetVertexColor(0.05, 0.05, 0.04, vigA)
+		v:SetVertexColor(0.04, 0.04, 0.03, vigA)
 	end
 	for _, edge in ipairs(state.stageBorder) do
 		edge:SetColorTexture(0.38, 0.31, 0.19, sa[6])
@@ -478,15 +505,6 @@ end
 ---------------------------------------------------------------------------
 -- Public Lifecycle API
 ---------------------------------------------------------------------------
-local function AnchorInnerFrame()
-	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
-	if not (state.mapInnerFrame and sc) or state.innerAnchoredSC == sc then return end
-	state.innerAnchoredSC = sc
-	state.mapInnerFrame:ClearAllPoints()
-	state.mapInnerFrame:SetPoint("TOPLEFT", sc, "TOPLEFT", -2, 2)
-	state.mapInnerFrame:SetPoint("BOTTOMRIGHT", sc, "BOTTOMRIGHT", 2, -2)
-end
-
 function ns.SyncMapStageStrata()
 	if not WorldMapFrame then return end
 	local sc = WorldMapFrame.ScrollContainer
@@ -503,10 +521,6 @@ function ns.SyncMapStageStrata()
 		local overlayLevel = (overlay and SafeNum(overlay:GetFrameLevel())) or (((bf and SafeNum(bf:GetFrameLevel())) or 10) + 1)
 		state.mapNavBar:SetFrameStrata(navStrata)
 		state.mapNavBar:SetFrameLevel(math.max(scLevel + 2, overlayLevel + 1))
-	end
-	if state.mapInnerFrame and overlay then
-		state.mapInnerFrame:SetFrameStrata(overlay:GetFrameStrata() or "HIGH")
-		state.mapInnerFrame:SetFrameLevel((SafeNum(overlay:GetFrameLevel()) or 11) + 1)
 	end
 end
 
@@ -530,7 +544,6 @@ function ns.LayoutMapStage(mapLeftX, navTopY, navH, stageTopY, mapW, bodyH)
 		state.mapStage:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", mx, sy)
 		state.mapStage:SetSize(mw, bh)
 	end
-	AnchorInnerFrame()
 	if state.lastNavW ~= mw then
 		LayoutDropdowns()
 		state.lastNavW = mw
@@ -539,6 +552,7 @@ end
 
 function ns.RefreshMapStage(overrideMapID)
 	if not (state.initialized and WorldMapFrame) then return end
+	SilenceNativeTiledBackground()
 	local mapID = SafeNum(overrideMapID)
 		or (WorldMapFrame.GetMapID and SafeNum(WorldMapFrame:GetMapID()))
 		or (C_Map and C_Map.GetFallbackWorldMapID and SafeNum(C_Map.GetFallbackWorldMapID()))
@@ -548,6 +562,7 @@ function ns.RefreshMapStage(overrideMapID)
 	if mapID ~= state.lastMapID then
 		state.lastMapID = mapID
 		state.biome = ResolveBiome(mapID)
+		ApplyStageAtlas(mapID)
 		ApplyStageColors()
 		PopulateNavSlots(mapID)
 	end
@@ -560,36 +575,29 @@ function ns.InitMapStage(chrome, overlay)
 	state.chrome = chrome or state.chrome
 	state.overlay = overlay or state.overlay
 	if state.initialized then
-		AnchorInnerFrame()
+		SilenceNativeTiledBackground()
 		ns.SyncMapStageStrata()
 		ns.RefreshMapStage()
 		return
 	end
 	state.initialized = true
 
-	-- Subtle muted zone-themed map stage backdrop behind ScrollContainer.
+	-- Full-bleed subtly zone-tinted map backdrop filling mapStage behind ScrollContainer.
 	local stage = CreateFrame("Frame", nil, WorldMapFrame)
 	state.mapStage = stage
 	stage:SetClipsChildren(true)
 	stage:EnableMouse(false)
 
-	state.stageBase = stage:CreateTexture(nil, "BACKGROUND", nil, -6)
+	state.stageBase = stage:CreateTexture(nil, "BACKGROUND", nil, -7)
 	state.stageBase:SetAllPoints()
+
+	local tile = stage:CreateTexture(nil, "BACKGROUND", nil, -6)
+	tile:SetAllPoints()
+	state.stageTile = tile
 
 	state.stageGrad = stage:CreateTexture(nil, "BACKGROUND", nil, -5)
 	state.stageGrad:SetAllPoints()
 	state.stageGrad:SetColorTexture(1, 1, 1, 1)
-
-	local tile = stage:CreateTexture(nil, "BACKGROUND", nil, -4)
-	tile:SetAllPoints()
-	if C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("gamepad-mapquestlog-bgtile-2k") then
-		tile:SetAtlas("gamepad-mapquestlog-bgtile-2k", false)
-	else
-		tile:SetTexture("Interface\\FrameGeneral\\UI-Background-Marble", "REPEAT", "REPEAT")
-	end
-	tile:SetHorizTile(true)
-	tile:SetVertTile(true)
-	state.stageTile = tile
 
 	local vigInfo = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("gamepad-mapquestlog-bg-vignette")
 	if vigInfo then
@@ -601,7 +609,7 @@ function ns.InitMapStage(chrome, overlay)
 			{ "BOTTOMLEFT",  "TOPRIGHT",    uL, uR, vB, vT },
 			{ "BOTTOMRIGHT", "TOPLEFT",     uR, uL, vB, vT },
 		}) do
-			local v = stage:CreateTexture(nil, "BACKGROUND", nil, -3)
+			local v = stage:CreateTexture(nil, "BACKGROUND", nil, -4)
 			v:SetAtlas("gamepad-mapquestlog-bg-vignette", false)
 			v:SetTexCoord(c[3], c[4], c[5], c[6])
 			v:SetPoint(c[1], stage, c[1], 0, 0)
@@ -609,7 +617,7 @@ function ns.InitMapStage(chrome, overlay)
 			state.vignettes[#state.vignettes + 1] = v
 		end
 	end
-	AddBorderRect(stage, "BORDER", 1, 0, 0.38, 0.31, 0.19, 0.38, state.stageBorder)
+	AddBorderRect(stage, "BORDER", 1, 0, 0.38, 0.31, 0.19, 0.28, state.stageBorder)
 
 	-- Compact WowStyle1DropdownTemplate navigation bar above the map.
 	local navBar = CreateFrame("Frame", nil, WorldMapFrame)
@@ -620,15 +628,7 @@ function ns.InitMapStage(chrome, overlay)
 	end)
 	for i = 1, 3 do state.slots[i] = CreateDropdownSlot(navBar) end
 
-	-- Delicate two-layer inner hairline border with gold corner ticks around ScrollContainer.
-	local inner = CreateFrame("Frame", nil, state.overlay or WorldMapFrame)
-	state.mapInnerFrame = inner
-	inner:EnableMouse(false)
-	AddBorderRect(inner, "BORDER", 0, 0, 0, 0, 0, 0.65)
-	AddBorderRect(inner, "BORDER", 1, 1, 0.52, 0.42, 0.24, 0.62)
-	AddCornerTicks(inner, 1, 6, 0.72, 0.58, 0.32, 0.55)
-	AnchorInnerFrame()
-
+	SilenceNativeTiledBackground()
 	ns.ApplyMapStageStyle(ns.db and ns.db.background, ns.db and ns.db.backgroundStyle)
 	ns.LayoutMapStage(DEFAULT_MAP_LEFT_X, DEFAULT_NAV_TOP_Y, DEFAULT_NAV_H, DEFAULT_STAGE_TOP_Y, DEFAULT_MAP_W, DEFAULT_BODY_H)
 	ns.SyncMapStageStrata()

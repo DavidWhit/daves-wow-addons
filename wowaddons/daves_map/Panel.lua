@@ -4,9 +4,10 @@
 --   * `ui.panel` is a mouse-transparent container matching `DavesMapWorldChrome` so the left map nav
 --     dropdowns and live World Map canvas stay 100% interactive while `splitter`, `leftRail`, and `content` capture clicks.
 --   * Top content toolbar: `[ <- Back | Search... | Find Me | Drop Waypoint | Map Settings ]` (leaving top-right clear for Blizzard's CloseButton).
---   * Bottom-right grip resizes the unified window in 2D: the OpenMap canvas grows/shrinks freely inside
---     its fixed min/max bounds (`460..900 x 320..600`, centered vertically inside `mapStage` and scaling to fit on drop)
---     while any further drag grows the right content pane; the vertical splitter trades width between map & panel directly.
+--   * Bottom-right grip resizes the unified window in 2D: the map column & ScrollContainer grow/shrink
+--     inside `460..900` width and full window height (`322..900`, centering fixed-aspect maps vertically
+--     over the full-bleed stage backdrop with no inner map border) while extra width overflows into the
+--     right content pane; the vertical splitter trades width between map & panel directly.
 
 local _, ns = ...
 
@@ -24,8 +25,8 @@ local MAP_MIN_W = L.MAP_MIN_W or 460
 local MAP_MAX_W = L.MAP_MAX_W or 900
 local CONTENT_MIN_W = L.CONTENT_MIN_W or 480
 local CONTENT_MAX_W = L.CONTENT_MAX_W or 1000
-local BODY_MIN_H = L.BODY_MIN_H or 328
-local BODY_DEFAULT_H = L.BODY_DEFAULT_H or 473
+local BODY_MIN_H = L.BODY_MIN_H or 322
+local BODY_DEFAULT_H = L.BODY_DEFAULT_H or 467
 local BODY_MAX_H = L.BODY_MAX_H or 900
 local LIST_PAD, SCROLL_GUTTER = C.LIST_PAD, C.SCROLL_GUTTER
 local Sound = ns.Sound

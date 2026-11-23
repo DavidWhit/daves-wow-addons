@@ -18,7 +18,7 @@ local L = {
 	NAV_BAR_H = 26,          -- matches Search/toolbar & WowStyle1DropdownTemplate height
 	NAV_GAP = 6,             -- gap between map nav dropdowns and map stage
 	STAGE_TOP_Y = -38,       -- TOP_CONTENT_Y - NAV_BAR_H - NAV_GAP
-	MAP_MAT_PAD = 4,         -- subtle 4px inner mat around ScrollContainer inside mapStage
+	MAP_MAT_PAD = 1,         -- 1px inset inside mapStage's subtle outer hairline (no inner map border)
 	MAP_LEFT_X = 6,          -- CHROME_LEFT + OUTER_PAD (map is now on the LEFT!)
 	SPLITTER_W = 8,          -- draggable divider between Map column and Middle Tab Rail
 	RAIL_W = 46,             -- middle Tab Rail (`B`, `T`, `Z`, `D`) left of text/content pane
@@ -28,12 +28,12 @@ local L = {
 	MAP_MAX_W = 900,
 	MAP_MIN_H = 320,
 	MAP_DEFAULT_H = 465,
-	MAP_MAX_H = 600,
+	MAP_MAX_H = 900,         -- ScrollContainer fills mapStage full height so map backdrop extends seamlessly
 	CONTENT_MIN_W = 480,
 	CONTENT_DEFAULT_W = 516,
 	CONTENT_MAX_W = 1000,
-	BODY_MIN_H = 328,        -- MAP_MIN_H + 2 * MAP_MAT_PAD
-	BODY_DEFAULT_H = 473,    -- MAP_DEFAULT_H + 2 * MAP_MAT_PAD
+	BODY_MIN_H = 322,        -- MAP_MIN_H + 2 * MAP_MAT_PAD
+	BODY_DEFAULT_H = 467,    -- MAP_DEFAULT_H + 2 * MAP_MAT_PAD
 	BODY_MAX_H = 900,
 }
 ns.UNIFIED_LAYOUT = L
@@ -617,6 +617,7 @@ local function HideDefaultWorldMapChrome()
 		KeepHidden(bf.Tutorial)
 		KeepHidden(bf.MaximizeMinimizeFrame)
 	end
+	KeepHidden(WorldMapFrame.OverscrollBG)
 	KeepHidden(WorldMapFrame.NavBar)
 	KeepHidden(WorldMapFrame.SidePanelToggle)
 	KeepHidden(WorldMapFrame.WorldMapTrackingOptionsButton)
@@ -672,7 +673,7 @@ function ns.InitMapChrome()
 	end
 	state.mapBorder = border
 
-	-- Non-interactive overlay above the canvas for the delicate inner map frame border (`MapStage.lua`).
+	-- Non-interactive overlay above the canvas anchoring CloseButton and map nav dropdown strata (`MapStage.lua`).
 	local overlay = CreateFrame("Frame", nil, WorldMapFrame)
 	state.mapOverlay = overlay
 	overlay:EnableMouse(false)
