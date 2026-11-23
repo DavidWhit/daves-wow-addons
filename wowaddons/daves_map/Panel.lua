@@ -581,12 +581,12 @@ local function AnchorPanelToChrome()
 end
 ns.SyncPanelDock = AnchorPanelToChrome
 
-function ns.ResetPanelPosition()
+function ns.ResetPanelPosition(keepPos)
 	if resizeState.active then
 		StopResize(resizeState.btn, false)
 	end
 	if ns.ResetUnifiedLayout then
-		ns.ResetUnifiedLayout()
+		ns.ResetUnifiedLayout(keepPos)
 	elseif ns.db then
 		ns.db.mapW = nil
 		ns.db.contentW = nil
@@ -802,7 +802,7 @@ function ns.InitPanel()
 		if button ~= "LeftButton" then return end
 		StopResize(self, false)
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		ns.ResetPanelPosition()
+		ns.ResetPanelPosition(true)
 	end)
 	resizeBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -822,6 +822,7 @@ function ns.InitPanel()
 	content:SetScript("OnMouseUp", function(_, button)
 		if button == "Button4" then ns.GoBack() end
 	end)
+	if ns.AttachWindowDrag then ns.AttachWindowDrag(content) end
 	local spacer = WorldMapFrame and WorldMapFrame.TitleCanvasSpacerFrame
 	if spacer then
 		content:SetPoint("TOPLEFT", spacer, "TOPRIGHT", SPLITTER_W + RAIL_W + RAIL_CONTENT_GAP, TOP_CONTENT_Y)
@@ -841,6 +842,7 @@ function ns.InitPanel()
 	leftRail:SetScript("OnMouseUp", function(_, button)
 		if button == "Button4" then ns.GoBack() end
 	end)
+	if ns.AttachWindowDrag then ns.AttachWindowDrag(leftRail) end
 	leftRail:SetWidth(RAIL_W)
 	leftRail:SetPoint("TOPRIGHT", content, "TOPLEFT", -RAIL_CONTENT_GAP, 0)
 	leftRail:SetPoint("BOTTOMRIGHT", content, "BOTTOMLEFT", -RAIL_CONTENT_GAP, 0)
@@ -938,7 +940,7 @@ function ns.InitPanel()
 		if button ~= "LeftButton" then return end
 		StopResize(self, false)
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		ns.ResetPanelPosition()
+		ns.ResetPanelPosition(true)
 	end)
 	splitter:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")

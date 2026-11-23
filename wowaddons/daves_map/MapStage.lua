@@ -626,6 +626,7 @@ function ns.InitMapStage(chrome, overlay)
 	navBar:SetScript("OnMouseUp", function(_, button)
 		if button == "Button4" and ns.GoBack then ns.GoBack() end
 	end)
+	if ns.AttachWindowDrag then ns.AttachWindowDrag(navBar) end
 	for i = 1, 3 do state.slots[i] = CreateDropdownSlot(navBar) end
 
 	SilenceNativeTiledBackground()

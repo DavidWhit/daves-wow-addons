@@ -64,7 +64,19 @@ local state = {
 	pendingCanvasResize = false,
 	pendingReset = false,
 	pendingScale = nil,
+	pendingPosRestore = false,
 	hideScheduled = false,
+	drag = {
+		active = false,
+		moved = false,
+		startCX = 0,
+		startCY = 0,
+		startX = 0,
+		startY = 0,
+		lastX = nil,
+		lastY = nil,
+		watcher = nil,
+	},
 }
 
 ---------------------------------------------------------------------------
@@ -307,27 +319,39 @@ function ns.WasQuestLogKeyPressed()
 	return false
 end
 
-local LayoutUnifiedMapRegion, SyncMapChromeStrata
+local LayoutUnifiedMapRegion, SyncMapChromeStrata, RestoreWindowPosition, StopWindowDrag
 
 local bindEvents = CreateFrame("Frame")
 bindEvents:RegisterEvent("PLAYER_LOGIN")
 bindEvents:RegisterEvent("UPDATE_BINDINGS")
 bindEvents:RegisterEvent("PLAYER_REGEN_ENABLED")
+bindEvents:RegisterEvent("DISPLAY_SIZE_CHANGED")
+bindEvents:RegisterEvent("UI_SCALE_CHANGED")
 bindEvents:SetScript("OnEvent", function(_, event)
+	if event == "DISPLAY_SIZE_CHANGED" or event == "UI_SCALE_CHANGED" then
+		if StopWindowDrag then StopWindowDrag(true) end
+		if RestoreWindowPosition then RestoreWindowPosition() end
+		return
+	end
 	if event == "PLAYER_REGEN_ENABLED" then
 		if state.pendingKeybindSync then SyncQuestLogKeybind() end
 		if state.pendingScale then ns.ApplyUnifiedScale(state.pendingScale) end
 		if state.pendingReset then
+			local keepPos = (state.pendingReset == "size")
 			state.pendingReset = false
 			if ns.ResetPanelPosition then
-				ns.ResetPanelPosition()
+				ns.ResetPanelPosition(keepPos)
 			elseif ns.ResetUnifiedLayout then
-				ns.ResetUnifiedLayout()
+				ns.ResetUnifiedLayout(keepPos)
 			end
 		elseif state.pendingLayout then
 			state.pendingLayout = false
 			if LayoutUnifiedMapRegion then LayoutUnifiedMapRegion(true) end
 			if SyncMapChromeStrata then SyncMapChromeStrata() end
+		end
+		if state.pendingPosRestore and RestoreWindowPosition then
+			state.pendingPosRestore = false
+			RestoreWindowPosition()
 		end
 		if state.pendingCanvasResize and WorldMapFrame and WorldMapFrame:IsShown() then
 			local sc = WorldMapFrame.ScrollContainer
@@ -464,17 +488,169 @@ function ns.CommitUnifiedMapResize(mapChanged)
 	end
 end
 
-function ns.ResetUnifiedLayout()
+local function DefaultWindowPosition(s)
+	local uiTop = SafeNum(UIParent and UIParent:GetTop()) or 768
+	local _, _, _, bh = ns.GetUnifiedWindowSize()
+	local frameH = (-L.STAGE_TOP_Y + bh + L.OUTER_PAD) * s
+	local yOffset = -116
+	local bottomPos = uiTop + yOffset - frameH
+	if bottomPos < 80 then
+		yOffset = yOffset + (80 - bottomPos)
+	end
+	local maxTop = -math.ceil(L.CHROME_TOP * s) - 2
+	if yOffset > maxTop then
+		yOffset = maxTop
+	end
+	local leftX = math.max(16, math.ceil(-L.CHROME_LEFT * s) + 4)
+	return leftX, yOffset
+end
+
+local function ClampWindowPosition(x, y, s)
+	local mw, _, cw, bh = ns.GetUnifiedWindowSize()
+	local uiW = SafeNum(UIParent and UIParent:GetWidth()) or 1365
+	local uiH = SafeNum(UIParent and UIParent:GetHeight()) or 768
+	local chromeRight = L.MAP_LEFT_X + mw + L.SPLITTER_W + L.RAIL_W + L.RAIL_CONTENT_GAP + cw + L.OUTER_PAD
+	local chromeBottom = L.STAGE_TOP_Y - bh - L.OUTER_PAD
+	local chromeW = (chromeRight - L.CHROME_LEFT) * s
+	local chromeH = (L.CHROME_TOP - chromeBottom) * s
+
+	local maxY = -L.CHROME_TOP * s - 2
+	local minY
+	if chromeH <= uiH - 8 then
+		minY = -uiH + 4 - chromeBottom * s
+	else
+		minY = -uiH + 64 - L.CHROME_TOP * s
+	end
+	if minY > maxY then minY = maxY end
+
+	local minX, maxX
+	if chromeW <= uiW - 8 then
+		minX = 4 - L.CHROME_LEFT * s
+		maxX = uiW - 4 - chromeRight * s
+	else
+		minX = 160 - chromeRight * s
+		maxX = uiW - 160 - L.CHROME_LEFT * s
+	end
+	if minX > maxX then
+		local mid = (minX + maxX) / 2
+		minX, maxX = mid, mid
+	end
+	return math.max(minX, math.min(maxX, x)), math.max(minY, math.min(maxY, y))
+end
+
+local function ApplyWindowPosition(x, y)
+	if not WorldMapFrame then return nil, nil end
+	if WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized() then return nil, nil end
+	if InCombatLockdown() then
+		state.pendingPosRestore = true
+		return nil, nil
+	end
+	state.pendingPosRestore = false
+	local s = SafeNum(WorldMapFrame:GetScale()) or 1
+	if s <= 0 then s = 1 end
+	local cx, cy = ClampWindowPosition(x, y, s)
+	WorldMapFrame:ClearAllPoints()
+	WorldMapFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", cx / s, cy / s)
+	return cx, cy
+end
+
+RestoreWindowPosition = function()
+	if not (WorldMapFrame and WorldMapFrame:IsShown()) then return end
+	if state.drag.active then return end
+	if WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized() then return end
+	local pos = ns.db and ns.db.windowPos
+	if type(pos) ~= "table" or type(pos.x) ~= "number" or type(pos.y) ~= "number" then return end
+	ApplyWindowPosition(pos.x, pos.y)
+end
+ns.RestoreWindowPosition = RestoreWindowPosition
+
+StopWindowDrag = function(save)
+	if not state.drag.active then return end
+	state.drag.active = false
+	if state.drag.watcher then state.drag.watcher:SetScript("OnUpdate", nil) end
+	if save and state.drag.moved and state.drag.lastX and state.drag.lastY and ns.db then
+		ns.db.windowPos = {
+			x = math.floor(state.drag.lastX + 0.5),
+			y = math.floor(state.drag.lastY + 0.5),
+		}
+	end
+end
+ns.StopWindowDrag = StopWindowDrag
+
+local function OnDragUpdate()
+	if not state.drag.active
+		or InCombatLockdown()
+		or not (WorldMapFrame and WorldMapFrame:IsShown())
+		or (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized())
+		or (IsMouseButtonDown and not IsMouseButtonDown("LeftButton")) then
+		StopWindowDrag(true)
+		return
+	end
+	local cx, cy = GetCursorPosition()
+	local uiScale = SafeNum(UIParent and UIParent:GetEffectiveScale()) or 1
+	if uiScale <= 0 then uiScale = 1 end
+	local dx = (cx - state.drag.startCX) / uiScale
+	local dy = (cy - state.drag.startCY) / uiScale
+	if not state.drag.moved and (dx * dx + dy * dy) < 9 then return end
+	state.drag.moved = true
+	local nx, ny = ApplyWindowPosition(state.drag.startX + dx, state.drag.startY + dy)
+	if nx and ny then
+		state.drag.lastX = nx
+		state.drag.lastY = ny
+	end
+end
+
+function ns.StartWindowDrag()
+	if not (WorldMapFrame and WorldMapFrame:IsShown()) or InCombatLockdown() then return end
+	if WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized() then return end
+	if ns.PanelUI and ns.PanelUI.dragging then return end
+	if state.drag.active then StopWindowDrag(true) end
+	local left = SafeNum(WorldMapFrame:GetLeft())
+	local top = SafeNum(WorldMapFrame:GetTop())
+	local s = SafeNum(WorldMapFrame:GetScale()) or 1
+	if s <= 0 then s = 1 end
+	local uiH = SafeNum(UIParent and UIParent:GetHeight()) or 768
+	if not (left and top) then return end
+	local cx, cy = GetCursorPosition()
+	state.drag.active = true
+	state.drag.moved = false
+	state.drag.startCX = cx
+	state.drag.startCY = cy
+	state.drag.startX = left * s
+	state.drag.startY = top * s - uiH
+	state.drag.lastX = state.drag.startX
+	state.drag.lastY = state.drag.startY
+	if not state.drag.watcher then
+		state.drag.watcher = CreateFrame("Frame")
+	end
+	state.drag.watcher:SetScript("OnUpdate", OnDragUpdate)
+end
+
+function ns.AttachWindowDrag(frame)
+	if not (frame and frame.HookScript) then return end
+	frame:HookScript("OnMouseDown", function(_, button)
+		if button == "LeftButton" then ns.StartWindowDrag() end
+	end)
+	frame:HookScript("OnMouseUp", function(_, button)
+		if button == "LeftButton" then StopWindowDrag(true) end
+	end)
+end
+
+function ns.ResetUnifiedLayout(keepPos)
+	StopWindowDrag(false)
 	if ns.db then
 		ns.db.mapW = nil
 		ns.db.contentW = nil
 		ns.db.bodyH = nil
+		if not keepPos then ns.db.windowPos = nil end
 		ns.db.panelPos = nil
 		ns.db.panelW = nil
 		ns.db.panelH = nil
 	end
 	if InCombatLockdown() then
-		state.pendingReset = true
+		if state.pendingReset ~= "all" then
+			state.pendingReset = keepPos and "size" or "all"
+		end
 		ns.SetUnifiedWindowSize(nil, L.CONTENT_DEFAULT_W, nil, false)
 		return
 	end
@@ -482,6 +658,15 @@ function ns.ResetUnifiedLayout()
 	local _, _, _, _, mapChanged = ns.SetUnifiedWindowSize(L.MAP_DEFAULT_W, L.CONTENT_DEFAULT_W, L.BODY_DEFAULT_H, false)
 	if mapChanged then
 		ns.CommitUnifiedMapResize(true)
+	end
+	if WorldMapFrame and WorldMapFrame:IsShown() and not (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then
+		if keepPos then
+			RestoreWindowPosition()
+		else
+			local s = SafeNum(WorldMapFrame:GetScale()) or 1
+			if s <= 0 then s = 1 end
+			ApplyWindowPosition(DefaultWindowPosition(s))
+		end
 	end
 end
 
@@ -497,21 +682,12 @@ function ns.ApplyUnifiedScale(scale)
 	if math.abs(cur - s) > 0.001 then
 		WorldMapFrame:SetScale(s)
 		if WorldMapFrame:IsShown() and not (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then
-			local uiTop = SafeNum(UIParent and UIParent:GetTop()) or 768
-			local _, _, _, bh = ns.GetUnifiedWindowSize()
-			local frameH = (-L.STAGE_TOP_Y + bh + L.OUTER_PAD) * s
-			local yOffset = -116
-			local bottomPos = uiTop + yOffset - frameH
-			if bottomPos < 80 then
-				yOffset = yOffset + (80 - bottomPos)
+			local pos = ns.db and ns.db.windowPos
+			if type(pos) == "table" and type(pos.x) == "number" and type(pos.y) == "number" then
+				ApplyWindowPosition(pos.x, pos.y)
+			else
+				ApplyWindowPosition(DefaultWindowPosition(s))
 			end
-			local maxTop = -math.ceil(L.CHROME_TOP * s) - 2
-			if yOffset > maxTop then
-				yOffset = maxTop
-			end
-			local leftX = math.max(16, math.ceil(-L.CHROME_LEFT * s) + 4)
-			WorldMapFrame:ClearAllPoints()
-			WorldMapFrame:SetPoint("TOPLEFT", UIParent, "TOPLEFT", leftX / s, yOffset / s)
 		end
 	end
 end
@@ -638,6 +814,7 @@ function ns.InitMapChrome()
 
 	if state.initialized then
 		LayoutUnifiedMapRegion(false)
+		RestoreWindowPosition()
 		SyncMapChromeStrata()
 		RefreshStage()
 		return
@@ -656,6 +833,7 @@ function ns.InitMapChrome()
 	chrome:SetScript("OnMouseUp", function(_, button)
 		if button == "Button4" and ns.GoBack then ns.GoBack() end
 	end)
+	ns.AttachWindowDrag(chrome)
 
 	local border = TryTemplate("Frame", nil, chrome, "DialogBorderTranslucentTemplate")
 	if border then
@@ -684,11 +862,22 @@ function ns.InitMapChrome()
 	end
 
 	LayoutUnifiedMapRegion(false)
+	RestoreWindowPosition()
 	SyncMapChromeStrata()
 	RefreshStage()
 
 	if not state.navHooked then
 		state.navHooked = true
+		ns.AttachWindowDrag(WorldMapFrame)
+		if type(UpdateUIPanelPositions) == "function" then
+			hooksecurefunc("UpdateUIPanelPositions", RestoreWindowPosition)
+		end
+		if type(UpdateScaleForFitForOpenPanels) == "function" then
+			hooksecurefunc("UpdateScaleForFitForOpenPanels", RestoreWindowPosition)
+		end
+		if WorldMapFrame.SynchronizeDisplayState then
+			hooksecurefunc(WorldMapFrame, "SynchronizeDisplayState", RestoreWindowPosition)
+		end
 		if WorldMapFrame.UpdateSpacerFrameAnchoring then
 			hooksecurefunc(WorldMapFrame, "UpdateSpacerFrameAnchoring", function()
 				LayoutUnifiedMapRegion(true)
@@ -698,6 +887,7 @@ function ns.InitMapChrome()
 		hooksecurefunc(WorldMapFrame, "Minimize", function()
 			HideDefaultWorldMapChrome()
 			LayoutUnifiedMapRegion(true)
+			RestoreWindowPosition()
 			SyncMapChromeStrata()
 		end)
 		hooksecurefunc(WorldMapFrame, "OnMapChanged", function()
@@ -707,6 +897,7 @@ function ns.InitMapChrome()
 			SuppressQuestMapFrame()
 			HideDefaultWorldMapChrome()
 			LayoutUnifiedMapRegion(false)
+			RestoreWindowPosition()
 			if state.pendingCanvasResize and not InCombatLockdown() then
 				local mapSC = WorldMapFrame.ScrollContainer
 				if mapSC and mapSC.mapID and mapSC.OnCanvasSizeChanged then
@@ -719,6 +910,9 @@ function ns.InitMapChrome()
 			if ns.WasQuestLogKeyPressed() and ns.OpenTrackerTab then
 				ns.OpenTrackerTab(nil, nil, true)
 			end
+		end)
+		WorldMapFrame:HookScript("OnHide", function()
+			StopWindowDrag(true)
 		end)
 	end
 

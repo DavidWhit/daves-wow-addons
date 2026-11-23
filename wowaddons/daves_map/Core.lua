@@ -402,7 +402,7 @@ SlashCmdList["DAVES_MAP"] = function(msg)
 		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
 	elseif msg == "reset" or msg == "dock" then
 		if ns.ResetPanelPosition then ns.ResetPanelPosition() end
-		ns.Print("window size reset to default.")
+		ns.Print("window position and size reset to default.")
 	elseif msg == "" or msg == "toggle" then
 		ns.db.enabled = not ns.db.enabled
 		ns.Print(ns.db.enabled and "map layer on." or "map layer off.")
