@@ -7,6 +7,10 @@
 
 local ADDON, ns = ...
 
+local sin, cos, sqrt, atan2, exp, abs, min, max, random =
+	math.sin, math.cos, math.sqrt, math.atan2, math.exp, math.abs, math.min, math.max, math.random
+local GetCursorPosition, issecretvalue = GetCursorPosition, issecretvalue
+
 local MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 local ORB_SIZE = 150
 local GLASS_RADIUS = 0.4   -- glass radius as a fraction of ORB_SIZE (OrbMask.tga's circle)
@@ -66,6 +70,7 @@ function ns:RefreshOrbColors(orb)
 end
 
 local orbs = {}
+local orbList = {}
 ns.orbs = orbs
 
 ---------------------------------------------------------------------------
@@ -401,6 +406,7 @@ function ns.DragUpdate(orb)
 		orb.visual:ClearAllPoints()
 		orb.visual:SetPoint("CENTER", UIParent, "BOTTOMLEFT", x * ui / scale, y * ui / scale)
 	end
+	orb.glareSettled = false
 end
 
 function ns:SaveOrbPosition(orb)
@@ -437,6 +443,7 @@ function ns:ApplyOrb(orb)
 		orb.visual:SetScale(ns.db.scale)
 		orb.visual:SetShown(shown)
 	end
+	orb.glareSettled = false
 	orb.text:SetShown(ns:OrbTextShown(orb))
 	if ns.ApplyOrbHolder then ns:ApplyOrbHolder(orb) end
 	if ns.ApplyOrbDust then ns:ApplyOrbDust(orb) end
@@ -465,6 +472,7 @@ function ns:PLAYER_REGEN_ENABLED()
 		ns.pendingApply = nil
 		for _, orb in pairs(orbs) do ns:ApplyOrb(orb) end
 		ns:ApplyPlayerFrame()
+		ns:UpdateDriverState()
 	end
 end
 
@@ -514,28 +522,33 @@ local TILT_MOVE = math.rad(7)     -- extra rocking at full slosh
 local ACCENT_FADE = 0.5   -- seconds per crossfade
 
 local function RandomizeFlow(f)
-	f.ox, f.oy = math.random(), math.random()
-	f.span = 0.38 + math.random() * 0.2
-	f.tex:SetRotation(math.random() * 2 * math.pi)
+	f.ox, f.oy = random(), random()
+	f.span = 0.38 + random() * 0.2
+	f.tex:SetRotation(random() * 2 * math.pi)
 end
 
 local function AnimateAccent(orb, elapsed, flicker, s)
 	local a, b = orb.accentA, orb.accentB
 	if not ns.db.accentRandom[orb.key] then
 		a.tex:SetAlpha(a.alpha * flicker)
-		b.tex:SetAlpha(0)
+		if orb.accentBVisible ~= false then
+			b.tex:SetAlpha(0)
+			orb.accentBVisible = false
+		end
+		orb.accentFade = nil
 		orb.accentFlash = 0
 		return
 	end
 
-	orb.accentFlash = math.max(0, (orb.accentFlash or 0) - elapsed * 3)
+	orb.accentFlash = max(0, (orb.accentFlash or 0) - elapsed * 3)
 	if orb.accentFade then
 		orb.accentFade = orb.accentFade + elapsed / ACCENT_FADE
 		if orb.accentFade >= 1 then
 			orb.accentA, orb.accentB = b, a          -- the new pattern is now the main one
 			a, b = b, a
 			orb.accentFade = nil
-			orb.accentTimer = (1.5 + math.random() * 2.5) / (1 + s)
+			orb.accentBVisible = true                -- swapped-out accentA still has non-zero alpha; zero it below
+			orb.accentTimer = (1.5 + random() * 2.5) / (1 + s)
 		end
 	else
 		orb.accentTimer = orb.accentTimer - elapsed
@@ -547,7 +560,13 @@ local function AnimateAccent(orb, elapsed, flicker, s)
 	end
 	local f = orb.accentFade or 0
 	a.tex:SetAlpha(a.alpha * flicker * (1 - f))
-	b.tex:SetAlpha(b.alpha * flicker * f)
+	if f > 0 then
+		b.tex:SetAlpha(b.alpha * flicker * f)
+		orb.accentBVisible = true
+	elseif orb.accentBVisible ~= false then
+		b.tex:SetAlpha(0)
+		orb.accentBVisible = false
+	end
 end
 
 local function AnimateSurface(orb, elapsed)
@@ -556,26 +575,34 @@ local function AnimateSurface(orb, elapsed)
 	orb.scroll = (orb.scroll + elapsed * (0.12 + 0.22 * s)) % 1
 	orb.phase = (orb.phase + elapsed * (2.2 + 2.0 * s)) % (2 * math.pi)
 
-	local tilt = (TILT_REST + TILT_MOVE * s) * math.sin(orb.phase)
+	local sinPhase = sin(orb.phase)
+	orb.sinPhase = sinPhase
+	local tilt = (TILT_REST + TILT_MOVE * s) * sinPhase
 	orb.wave:SetTexCoord(orb.scroll, orb.scroll + WAVE_SPAN / 2, 0, 1)
 	orb.wave:SetRotation(tilt)
 	orb.levelMask:SetRotation(tilt)
 
 	-- Liquid body drifts faster while moving and sways in step with the surface tilt.
 	local speed = 1 + 2.5 * s
-	local sway = 0.025 * s * math.sin(orb.phase)
-	for _, f in ipairs(orb.flows) do
-		f.ox = (f.ox + elapsed * f.vx * speed) % 1
-		f.oy = (f.oy + elapsed * f.vy * speed) % 1
-		local x = f.ox + sway
-		f.tex:SetTexCoord(x, x + f.span, f.oy, f.oy + f.span)
+	local sway = 0.025 * s * sinPhase
+	local flows = orb.flows
+	for i = 1, #flows do
+		local f = flows[i]
+		if f ~= orb.accentB or orb.accentBVisible ~= false or orb.accentFade then
+			f.ox = (f.ox + elapsed * f.vx * speed) % 1
+			f.oy = (f.oy + elapsed * f.vy * speed) % 1
+			local x = f.ox + sway
+			f.tex:SetTexCoord(x, x + f.span, f.oy, f.oy + f.span)
+		end
 	end
 
 	-- Energy: the core breathes, the veins flicker a little, both livelier while moving.
 	local t = orb.time or 0
-	orb.core:SetAlpha(math.min(1, 0.65 + (0.15 + 0.1 * s) * math.sin(t * 2.1) + 0.35 * (orb.accentFlash or 0)))
-	orb.veins.tex:SetAlpha(orb.veins.alpha * (0.85 + 0.15 * math.sin(t * 7.3) * math.sin(t * 3.1)))
-	local accentFlicker = 0.85 + 0.15 * math.sin(t * 5.7 + 1) * math.sin(t * 2.3)
+	local coreSin = sin(t * 2.1)
+	orb.coreSin = coreSin
+	orb.core:SetAlpha(min(1, 0.65 + (0.15 + 0.1 * s) * coreSin + 0.35 * (orb.accentFlash or 0)))
+	orb.veins.tex:SetAlpha(orb.veins.alpha * (0.85 + 0.15 * sin(t * 7.3) * sin(t * 3.1)))
+	local accentFlicker = 0.85 + 0.15 * sin(t * 5.7 + 1) * sin(t * 2.3)
 	AnimateAccent(orb, elapsed, accentFlicker, s)
 	if ns.AnimateOrbHolder then ns:AnimateOrbHolder(orb, elapsed, s, t, accentFlicker) end
 end
@@ -590,29 +617,44 @@ local GLOSS_BASE = math.pi / 2     -- OrbGloss.tga's crescent points straight up
 local GLARE_MIN = 0.15             -- brightness when the cursor is far away
 local GLARE_FALLOFF = 250          -- pixels beyond the rim over which it fades
 
-local function AnimateGlare(orb, elapsed)
+local function AnimateGlare(orb, elapsed, cx, cy)
+	local bobY = orb.bobY or 0
+	if orb.glareSettled and cx == orb.lastGlareCX and cy == orb.lastGlareCY and bobY == orb.lastGlareBobY then
+		return
+	end
 	local targetFrame = orb.bobFrame or orb
 	local ox, oy = targetFrame:GetCenter()
 	if issecretvalue(ox) or issecretvalue(oy) or not ox then return end
 	local scale = targetFrame:GetEffectiveScale()
 	ox, oy = ox * scale, oy * scale
-	local cx, cy = GetCursorPosition()          -- already in screen pixels
 	local dx, dy = cx - ox, cy - oy
 
-	local targetAngle = math.atan2(dy, dx) - GLOSS_BASE
-	local beyondRim = math.max(0, math.sqrt(dx * dx + dy * dy) - ORB_SIZE * GLASS_RADIUS * scale)
-	local targetBright = GLARE_MIN + (1 - GLARE_MIN) * math.exp(-beyondRim / GLARE_FALLOFF)
+	local targetAngle = atan2(dy, dx) - GLOSS_BASE
+	local beyondRim = max(0, sqrt(dx * dx + dy * dy) - ORB_SIZE * GLASS_RADIUS * scale)
+	local targetBright = GLARE_MIN + (1 - GLARE_MIN) * exp(-beyondRim / GLARE_FALLOFF)
 
 	-- Ease along the shortest way round the circle so it glides rather than snaps.
 	orb.glareAngle = orb.glareAngle or targetAngle
 	orb.glareBright = orb.glareBright or targetBright
-	local k = math.min(1, elapsed * 8)
 	local diff = (targetAngle - orb.glareAngle + math.pi) % TWO_PI - math.pi
-	orb.glareAngle = (orb.glareAngle + diff * k) % TWO_PI
-	orb.glareBright = orb.glareBright + (targetBright - orb.glareBright) * k
+	local brightDiff = targetBright - orb.glareBright
+	if orb.glareApplied and abs(diff) < 0.0005 and abs(brightDiff) < 0.0005 then
+		orb.glareSettled = true
+		orb.lastGlareCX, orb.lastGlareCY, orb.lastGlareBobY = cx, cy, bobY
+		return
+	end
+	orb.glareSettled = false
+	local k = min(1, elapsed * 8)
+	local angle = (orb.glareAngle + diff * k) % TWO_PI
+	local bright = orb.glareBright + brightDiff * k
+	orb.glareAngle = angle
+	orb.glareBright = bright
+	orb.lightX = -sin(angle)
+	orb.lightY = cos(angle)
+	orb.glareApplied = true
 
-	orb.gloss:SetRotation(orb.glareAngle)
-	orb.gloss:SetAlpha(orb.glareBright)
+	orb.gloss:SetRotation(angle)
+	orb.gloss:SetAlpha(bright)
 	if ns.AnimateOrbHolderGlare then ns:AnimateOrbHolderGlare(orb) end
 end
 
@@ -620,25 +662,38 @@ local driver = CreateFrame("Frame")
 driver:SetScript("OnUpdate", function(_, elapsed)
 	local db = ns.db
 	local sloshTarget = ns.moving and 1 or 0
-	local sloshK = math.min(1, elapsed * 2.5)
-	for _, orb in pairs(orbs) do
+	local sloshK = min(1, elapsed * 2.5)
+	local doGlare, doAnimate = db.glare, db.animate
+	local cx, cy
+	if doGlare then cx, cy = GetCursorPosition() end
+	local animBob = ns.AnimateOrbBob
+	local animShadow = ns.AnimateOrbShadow
+	local animDust = ns.AnimateOrbDust
+	for i = 1, #orbList do
+		local orb = orbList[i]
 		if orb:IsVisible() then
 			orb.slosh = (orb.slosh or 0) + (sloshTarget - (orb.slosh or 0)) * sloshK
-			orb.time = (orb.time or math.random() * 10) + elapsed
-			if db.glare then AnimateGlare(orb, elapsed) end
-			if ns.AnimateOrbBob then ns:AnimateOrbBob(orb, elapsed, orb.slosh) end
-			if db.animate then AnimateSurface(orb, elapsed) end
-			if ns.AnimateOrbShadow then ns:AnimateOrbShadow(orb) end
-			if ns.AnimateOrbDust then ns:AnimateOrbDust(orb, elapsed, orb.slosh, orb.time) end
+			orb.time = (orb.time or random() * 10) + elapsed
+			if doGlare then AnimateGlare(orb, elapsed, cx, cy) end
+			if animBob then animBob(ns, orb, elapsed, orb.slosh) end
+			if doAnimate then AnimateSurface(orb, elapsed) end
+			if animShadow then animShadow(ns, orb) end
+			if animDust then animDust(ns, orb, elapsed, orb.slosh, orb.time) end
 		end
 	end
 end)
 driver:Hide()
 
 function ns:UpdateDriverState()
-	local need = ns.db.animate or ns.db.glare
+	local shown
+	if orbs.health or orbs.power then
+		shown = (orbs.health and orbs.health:IsShown()) or (orbs.power and orbs.power:IsShown())
+	else
+		shown = ns.db.enabled or ns.inEditMode
+	end
+	local need = shown and (ns.db.animate or ns.db.glare
 		or (ns.AnyOrbBobEnabled and ns:AnyOrbBobEnabled())
-		or (ns.AnyOrbDustEnabled and ns:AnyOrbDustEnabled())
+		or (ns.AnyOrbDustEnabled and ns:AnyOrbDustEnabled()))
 	driver:SetShown(need and true or false)
 end
 
@@ -654,6 +709,7 @@ local function SetMoving(moving)
 		if not ns.db.glare then
 			orb.gloss:SetRotation(0)
 			orb.gloss:SetAlpha(1)
+			orb.lightX, orb.lightY, orb.glareApplied, orb.glareSettled = 0, 1, nil, false
 		end
 		if ns.ResetOrbHolderAnim then ns:ResetOrbHolderAnim(orb) end
 	end
@@ -671,6 +727,7 @@ function ns:PLAYER_STOPPED_MOVING() SetMoving(false) end
 local function SetEditMode(active)
 	ns.inEditMode = active
 	for _, orb in pairs(orbs) do ns:ApplyOrb(orb) end
+	ns:UpdateDriverState()
 	if not active then GameTooltip:Hide() end
 end
 
@@ -711,6 +768,7 @@ function ns:InitOrbs()
 	power:RegisterEvent("PLAYER_ENTERING_WORLD")
 	power:SetScript("OnEvent", OnPowerEvent)
 	orbs.power = power
+	orbList[1], orbList[2] = health, power
 
 	SetEditMode(false)
 	SetMoving(IsPlayerMoving())

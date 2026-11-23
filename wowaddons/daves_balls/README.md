@@ -1,6 +1,6 @@
 # Dave's Balls (`daves_balls`)
 
-Diablo-style health and power orbs for WoW: Forever (`v0.2.5`), with swirling liquid that sloshes as you move, cursor-tracked glass glare, optional animated bottom holders, subtle orb bobbing, light-driven cast shadows, 3D swirling dust motes with selectable orbit patterns, rotation, spread, true sphere-rim occlusion, curved comet tails and independent shimmering dust trails, and optional Blizzard player-frame replacement.
+Diablo-style health and power orbs for WoW: Forever (`v0.2.7`), with swirling liquid that sloshes as you move, cursor-tracked glass glare, optional animated bottom holders, subtle orb bobbing, light-driven cast shadows, 3D swirling dust motes with selectable orbit patterns, rotation, spread, true sphere-rim occlusion, curved comet tails and independent shimmering dust trails, and optional Blizzard player-frame replacement.
 
 Targets: WoW: Forever (`## Interface: 16001`).
 

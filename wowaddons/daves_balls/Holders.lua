@@ -4,6 +4,9 @@
 
 local ADDON, ns = ...
 
+local sin, cos, abs, min, max, floor, random =
+	math.sin, math.cos, math.abs, math.min, math.max, math.floor, math.random
+
 local MEDIA = "Interface\\AddOns\\" .. ADDON .. "\\Media\\"
 local HOLDER_W_MULT = 1.16    -- u in [-1.16, +1.16] (174 UI units at ORB_SIZE = 150)
 local HOLDER_H_MULT = 0.58    -- v in [-1.14, +0.02] (87 UI units at ORB_SIZE = 150)
@@ -77,6 +80,7 @@ end
 
 function ns.NormalizeHolderStyle(style)
 	if type(style) == "string" then
+		if ns.HOLDER_STYLES[style] then return style end
 		local key = style:lower()
 		-- Gracefully map the replaced claws variant (or lotus alias) to Sanctum Lotus.
 		if key == "claws" or key == "lotus" then return "sanctum" end
@@ -88,7 +92,7 @@ end
 function ns.NormalizeBobIntensity(val)
 	local n = tonumber(val)
 	if not n then return 35 end
-	return math.floor(Clamp(math.floor(n + 0.5), 0, 100))
+	return floor(Clamp(floor(n + 0.5), 0, 100))
 end
 
 function ns:GetOrbHolder(orb)
@@ -143,6 +147,7 @@ function ns:AttachOrbHolder(orb, visual, holderFront, orbSize)
 	local castShadow = visual:CreateTexture(nil, "BACKGROUND", nil, -1)
 	castShadow:SetTexture(MEDIA .. "OrbCastShadow")
 	castShadow:SetBlendMode("BLEND")
+	castShadow:SetPoint("CENTER", visual, "CENTER", 0, 0)
 	castShadow:Hide()
 
 	-- Front sits on stationary holderFront above bobFrame's glass and below textFrame's numbers.
@@ -180,8 +185,14 @@ function ns:AttachOrbHolder(orb, visual, holderFront, orbSize)
 		accent = accent,
 		sheenL = sheenL,
 		sheenR = sheenR,
-		ox = math.random(),
-		oy = math.random(),
+		ox = random(),
+		oy = random(),
+		bobEnabled = nil,
+		bobFrac = 0.35,
+		lastBobY = 0,
+		shadowEnabled = nil,
+		shadowShown = false,
+		shX = 9999, shY = 9999, shW = -1, shH = -1, shA = -1,
 		regions = { back, front, liquid, flow, accent, sheenL, sheenR },
 	}
 end
@@ -221,11 +232,16 @@ end
 function ns:ApplyOrbBob(orb)
 	if not (orb and orb.bobFrame) then return end
 	local cfg = ns:GetOrbBobConfig(orb)
+	local h = orb.holder
+	if h then
+		h.bobEnabled = cfg.enabled
+		h.bobFrac = cfg.intensity * 0.01
+	end
 	if not cfg.enabled then
 		orb.bobY = 0
 		orb.bobNorm = 0
-		orb.bobFrame:ClearAllPoints()
-		orb.bobFrame:SetPoint("CENTER", orb.visual, "CENTER", 0, 0)
+		orb.bobFrame:SetPointsOffset(0, 0)
+		if h then h.lastBobY = 0 end
 	end
 	ns:AnimateOrbShadow(orb)
 end
@@ -233,11 +249,16 @@ end
 function ns:ApplyOrbShadow(orb)
 	local h = orb and orb.holder
 	if not h then return end
-	if not ns:GetOrbShadowEnabled(orb) then
-		h.castShadow:Hide()
+	local on = ns:GetOrbShadowEnabled(orb)
+	h.shadowEnabled = on
+	if not on then
+		if h.shadowShown then
+			h.castShadow:Hide()
+			h.shadowShown = false
+		end
 		return
 	end
-	h.castShadow:Show()
+	h.shX = 9999   -- force layout write after style or toggle change
 	ns:AnimateOrbShadow(orb)
 end
 
@@ -278,6 +299,7 @@ function ns:ApplyOrbHolder(orb)
 		h.accent:SetAlpha(cfg.accentAlpha * 0.86)
 		h.sheenL:SetAlpha(cfg.sheenAlpha * 0.56)
 		h.sheenR:SetAlpha(cfg.sheenAlpha * 0.40)
+		orb.glareApplied, orb.glareSettled = nil, false
 	end
 	ns:ApplyOrbBob(orb)
 	ns:ApplyOrbShadow(orb)
@@ -405,20 +427,29 @@ end
 function ns:AnyOrbBobEnabled()
 	if not ns.orbs then return false end
 	for _, orb in pairs(ns.orbs) do
-		if ns:GetOrbBobConfig(orb).enabled then return true end
+		if orb.holder and orb.holder.bobEnabled ~= nil then
+			if orb.holder.bobEnabled then return true end
+		elseif ns:GetOrbBobConfig(orb).enabled then
+			return true
+		end
 	end
 	return false
 end
 
 function ns:AnimateOrbBob(orb, elapsed, s)
-	if not (orb and orb.bobFrame) then return end
-	local cfg = ns:GetOrbBobConfig(orb)
-	if not cfg.enabled then
+	local h = orb and orb.holder
+	if not (orb and orb.bobFrame and h) then return end
+	if h.bobEnabled == nil then
+		local cfg = ns:GetOrbBobConfig(orb)
+		h.bobEnabled = cfg.enabled
+		h.bobFrac = cfg.intensity * 0.01
+	end
+	if not h.bobEnabled then
 		if orb.bobY ~= 0 then
 			orb.bobY = 0
 			orb.bobNorm = 0
-			orb.bobFrame:ClearAllPoints()
-			orb.bobFrame:SetPoint("CENTER", orb.visual, "CENTER", 0, 0)
+			orb.bobFrame:SetPointsOffset(0, 0)
+			h.lastBobY = 0
 		end
 		return
 	end
@@ -426,26 +457,33 @@ function ns:AnimateOrbBob(orb, elapsed, s)
 	-- Multi-harmonic buoyancy feels organic rather than mechanical; livelier while moving.
 	local freq = 1.40 + 0.55 * s
 	orb.bobPhase = ((orb.bobPhase or 0) + elapsed * freq) % TWO_PI
-	local wave = 0.82 * math.sin(orb.bobPhase) + 0.18 * math.sin(orb.bobPhase * 2 + 0.9)
+	local wave = 0.82 * sin(orb.bobPhase) + 0.18 * sin(orb.bobPhase * 2 + 0.9)
 	local norm = Clamp(wave, -1, 1)
-	local frac = cfg.intensity / 100
 	-- Subtlety scale: 0% = whisper-gentle 0.6px hover, 35% = ~2.8px, 100% = 7.0px float.
-	local amp = (0.6 + 6.4 * frac) * (1 + 0.16 * s)
+	local amp = (0.6 + 6.4 * h.bobFrac) * (1 + 0.16 * s)
 	-- Lift resting center slightly upward so the orb hovers cleanly above its cradle seat.
 	local bobY = amp * (0.62 + norm)
 	orb.bobNorm = norm
 	orb.bobY = bobY
 
-	orb.bobFrame:ClearAllPoints()
-	orb.bobFrame:SetPoint("CENTER", orb.visual, "CENTER", 0, bobY)
+	if abs(bobY - h.lastBobY) > 0.05 then
+		orb.bobFrame:SetPointsOffset(0, bobY)
+		h.lastBobY = bobY
+	end
 end
 
 function ns:AnimateOrbShadow(orb)
 	local h = orb and orb.holder
 	if not h then return end
+	if h.shadowEnabled == nil then
+		h.shadowEnabled = ns:GetOrbShadowEnabled(orb)
+	end
 	local sh = h.castShadow
-	if not ns:GetOrbShadowEnabled(orb) then
-		if sh:IsShown() then sh:Hide() end
+	if not h.shadowEnabled then
+		if h.shadowShown then
+			sh:Hide()
+			h.shadowShown = false
+		end
 		return
 	end
 
@@ -456,9 +494,13 @@ function ns:AnimateOrbShadow(orb)
 	-- orb.glareAngle = atan2(dy, dx) - pi/2 -> lightX = -sin(a), lightY = cos(a).
 	local lightX, lightY, lightBright
 	if ns.db.glare then
-		local a = orb.glareAngle or 0
-		lightX = -math.sin(a)
-		lightY = math.cos(a)
+		lightX = orb.lightX
+		lightY = orb.lightY
+		if not lightX then
+			local a = orb.glareAngle or 0
+			lightX = -sin(a)
+			lightY = cos(a)
+		end
 		lightBright = orb.glareBright or 0.55
 	else
 		lightX = 0
@@ -471,21 +513,36 @@ function ns:AnimateOrbShadow(orb)
 	local lightDepth = (0.24 + 0.76 * lightBright) * overhead
 
 	-- Proximity to the dish (1.0 when dipped low, 0.0 at bob peak) tightens & darkens the shadow.
-	local bobCfg = ns:GetOrbBobConfig(orb)
-	local prox = bobCfg.enabled and (0.5 - 0.5 * (orb.bobNorm or 0)) or 0.72
+	local prox = h.bobEnabled and (0.5 - 0.5 * (orb.bobNorm or 0)) or 0.72
 	local lift = 1 - prox
 
 	local offX = -lightX * cfg.shadowShiftX
 	local offY = size * cfg.shadowY - lightY * 2.4
-	local sw = size * cfg.shadowW * (0.88 + 0.24 * lift + 0.10 * math.abs(lightX))
+	local sw = size * cfg.shadowW * (0.88 + 0.24 * lift + 0.10 * abs(lightX))
 	local shH = size * cfg.shadowH * (0.86 + 0.22 * lift)
 	local alpha = Clamp(lightDepth * (0.64 + 0.38 * prox), 0.12, 0.96)
 
-	sh:SetSize(sw, shH)
-	sh:ClearAllPoints()
-	sh:SetPoint("CENTER", h.visual, "CENTER", offX, offY)
-	sh:SetAlpha(alpha)
-	sh:Show()
+	if not h.shadowShown then
+		sh:SetSize(sw, shH)
+		sh:SetPointsOffset(offX, offY)
+		sh:SetAlpha(alpha)
+		sh:Show()
+		h.shadowShown = true
+		h.shW, h.shH, h.shX, h.shY, h.shA = sw, shH, offX, offY, alpha
+	else
+		if abs(sw - h.shW) > 0.15 or abs(shH - h.shH) > 0.15 then
+			sh:SetSize(sw, shH)
+			h.shW, h.shH = sw, shH
+		end
+		if abs(offX - h.shX) > 0.08 or abs(offY - h.shY) > 0.08 then
+			sh:SetPointsOffset(offX, offY)
+			h.shX, h.shY = offX, offY
+		end
+		if abs(alpha - h.shA) > 0.005 then
+			sh:SetAlpha(alpha)
+			h.shA = alpha
+		end
+	end
 end
 
 function ns:AnimateOrbHolder(orb, elapsed, s, t, accentFlicker)
@@ -497,19 +554,19 @@ function ns:AnimateOrbHolder(orb, elapsed, s, t, accentFlicker)
 	local flash = orb.accentFlash or 0
 	-- Subtle proximity bounce: the basin & inner petals glow slightly warmer when the orb dips lower.
 	local bobProx = 1.0 - 0.14 * (orb.bobNorm or 0)
-	local pulse = 0.78 + (0.16 + 0.14 * s) * math.sin(t * 2.1)
-	h.liquid:SetAlpha(math.min(1, cfg.liquidAlpha * (pulse + 0.20 * s) * bobProx))
+	local pulse = 0.78 + (0.16 + 0.14 * s) * (orb.coreSin or sin(t * 2.1))
+	h.liquid:SetAlpha(min(1, cfg.liquidAlpha * (pulse + 0.20 * s) * bobProx))
 
 	-- Scroll OrbVeins through the holder's liquid energy channel in step with the orb's slosh sway.
 	local speed = (1 + 2.5 * s) * cfg.flowSpeed
 	h.ox = (h.ox + elapsed * 0.014 * speed) % 1
 	h.oy = (h.oy + elapsed * 0.022 * speed) % 1
-	local sway = 0.030 * s * math.sin(orb.phase or 0)
+	local sway = 0.030 * s * (orb.sinPhase or sin(orb.phase or 0))
 	local u0 = h.ox + sway
 	h.flow:SetTexCoord(u0, u0 + 0.72, h.oy, h.oy + 0.36)
-	h.flow:SetAlpha(math.min(1, cfg.flowAlpha * (0.68 + 0.32 * s + 0.28 * flash) * bobProx))
+	h.flow:SetAlpha(min(1, cfg.flowAlpha * (0.68 + 0.32 * s + 0.28 * flash) * bobProx))
 
-	h.accent:SetAlpha(math.min(1, cfg.accentAlpha * accentFlicker * (0.86 + 0.18 * s) + 0.32 * flash))
+	h.accent:SetAlpha(min(1, cfg.accentAlpha * accentFlicker * (0.86 + 0.18 * s) + 0.32 * flash))
 end
 
 function ns:AnimateOrbHolderGlare(orb)
@@ -518,10 +575,10 @@ function ns:AnimateOrbHolderGlare(orb)
 	local cfg = h.style and ns.HOLDER_STYLES[h.style]
 	if not (cfg and cfg.prefix) then return end
 
-	local dirX = -math.sin(orb.glareAngle or 0)
+	local dirX = orb.lightX or (-sin(orb.glareAngle or 0))
 	local bright = orb.glareBright or 0.55
-	local leftW = 0.24 + 0.76 * math.max(0, (1 - dirX) * 0.5)
-	local rightW = 0.24 + 0.76 * math.max(0, (1 + dirX) * 0.5)
-	h.sheenL:SetAlpha(math.min(1, cfg.sheenAlpha * bright * leftW))
-	h.sheenR:SetAlpha(math.min(1, cfg.sheenAlpha * bright * rightW))
+	local leftW = 0.24 + 0.76 * max(0, (1 - dirX) * 0.5)
+	local rightW = 0.24 + 0.76 * max(0, (1 + dirX) * 0.5)
+	h.sheenL:SetAlpha(min(1, cfg.sheenAlpha * bright * leftW))
+	h.sheenR:SetAlpha(min(1, cfg.sheenAlpha * bright * rightW))
 end
