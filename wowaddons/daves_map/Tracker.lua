@@ -580,6 +580,10 @@ local function Build()
 	end)
 end
 
+function ns.RefreshTrackerPins()
+	UpdatePins(false)
+end
+
 function ns.UpdateReady()
 	Build()
 	if not section then return end

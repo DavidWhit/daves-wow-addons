@@ -2,7 +2,7 @@
 -- Drill-in Quest Text & Details reader inside Dave's Map's right content pane.
 -- Displays live Quest Log objectives, completion text, full description, rewards (XP, coin, choice items,
 -- fixed items, currencies, spells, titles, skill points), QuestieDB turn-in/chain context, and action buttons
--- (`< Back`, `Track`/`Untrack`, `Share`, `Link`, `Abandon` with a taint-free HUD Edit Mode confirm dialog).
+-- (`Track`/`Untrack`, `Pin`/`Pinned`, `Link`, `Share`, `Abandon` with a taint-free HUD Edit Mode confirm dialog; uses the shared toolbar Back arrow beside Search).
 
 local _, ns = ...
 
@@ -19,6 +19,7 @@ local dState = {
 	nativeScroll = false,
 	syncingScroll = false,
 	trackBtn = nil,
+	pinBtn = nil,
 	shareBtn = nil,
 	linkBtn = nil,
 	abandonBtn = nil,
@@ -419,6 +420,25 @@ local function RefreshDetails(resetScroll)
 	dState.trackBtn:SetWidth(watched and 68 or 58)
 	dState.trackBtn:SetPillEnabled(true)
 
+	local isPinned = (ns.db and ns.db.pinned and ns.db.pinned[q] == true) == true
+	local isReady = ns.QuestReady(q)
+	if isPinned then
+		dState.pinBtn.text:SetText("|cff9ea4b0Pinned|r")
+		dState.pinBtn:SetWidth(58)
+		dState.pinBtn.tip = "This quest is already pinned so it stays tracked across zones. Click Untrack (or the tracker pin) to unpin it."
+		dState.pinBtn:SetPillEnabled(false)
+	elseif isReady then
+		dState.pinBtn.text:SetText("|cffe8d8a8Pin|r")
+		dState.pinBtn:SetWidth(46)
+		dState.pinBtn.tip = "Ready to turn in quests stay in the Ready to Turn In section automatically."
+		dState.pinBtn:SetPillEnabled(false)
+	else
+		dState.pinBtn.text:SetText("|cffe8d8a8Pin|r")
+		dState.pinBtn:SetWidth(46)
+		dState.pinBtn.tip = "Pin this quest so it stays tracked on the Objective Tracker even when you change zones."
+		dState.pinBtn:SetPillEnabled(true)
+	end
+
 	local canShare = (C_QuestLog.IsPushableQuest and C_QuestLog.IsPushableQuest(q) == true) and (IsInGroup and IsInGroup() == true)
 	dState.shareBtn:SetPillEnabled(canShare)
 
@@ -507,6 +527,8 @@ local function RefreshDetails(resetScroll)
 		metaParts[#metaParts + 1] = "|cffff4444Failed|r"
 	elseif isComplete then
 		metaParts[#metaParts + 1] = "|cffffd200Ready to Turn In|r"
+	elseif isPinned then
+		metaParts[#metaParts + 1] = "|cffffd200Pinned|r"
 	elseif watched then
 		metaParts[#metaParts + 1] = "|cff59ff73Tracked|r"
 	else
@@ -873,21 +895,40 @@ function ns.InitQuestDetailsPane(content)
 	bg:SetColorTexture(0, 0, 0, 0.14)
 	dState.bg = bg
 
-	-- Top bar: `Track` / `Link` / `Share` on left, destructive `Abandon` separated on right (toolbar Back arrow lives beside Search)
+	-- Top bar: `Track` / `Pin` / `Link` / `Share` on left, destructive `Abandon` separated on right (toolbar Back arrow lives beside Search)
 	local topBar = CreateFrame("Frame", nil, pane)
 	topBar:SetHeight(28)
 	topBar:SetPoint("TOPLEFT", 0, 0)
 	topBar:SetPoint("TOPRIGHT", 0, 0)
 
-	dState.trackBtn = MakeActionPill(topBar, "|cffe8d8a8Track|r", 58, function()
+	dState.trackBtn = MakeActionPill(topBar, "|cffe8d8a8Track|r", 58, function(self)
 		if ui.detailQuestID and ns.ToggleQuestTrack then
 			ns.ToggleQuestTrack(ui.detailQuestID)
 			RefreshDetails(false)
+			if ns.RefreshTrackerPins then ns.RefreshTrackerPins() end
 			if ns.UpdateFocus then ns.UpdateFocus(false) end
 			if ns.Refresh then ns.Refresh() end
+			if GameTooltip:IsShown() and GameTooltip:GetOwner() == self then
+				local onEnter = self:GetScript("OnEnter")
+				if onEnter then onEnter(self) end
+			end
 		end
 	end, "Track or untrack this quest on the Objective Tracker.")
 	dState.trackBtn:SetPoint("LEFT", 4, 0)
+
+	dState.pinBtn = MakeActionPill(topBar, "|cffe8d8a8Pin|r", 46, function(self)
+		if ui.detailQuestID and ns.PinQuest and ns.PinQuest(ui.detailQuestID) then
+			RefreshDetails(false)
+			if ns.RefreshTrackerPins then ns.RefreshTrackerPins() end
+			if ns.UpdateFocus then ns.UpdateFocus(false) end
+			if ns.Refresh then ns.Refresh() end
+			if GameTooltip:IsShown() and GameTooltip:GetOwner() == self then
+				local onEnter = self:GetScript("OnEnter")
+				if onEnter then onEnter(self) end
+			end
+		end
+	end, "Pin this quest so it stays tracked on the Objective Tracker even when you change zones.")
+	dState.pinBtn:SetPoint("LEFT", dState.trackBtn, "RIGHT", 4, 0)
 
 	dState.linkBtn = MakeActionPill(topBar, "|cffe8d8a8Link|r", 48, function()
 		if ns.LinkQuestInChat and ui.detailQuestID then
@@ -895,7 +936,7 @@ function ns.InitQuestDetailsPane(content)
 			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		end
 	end, "Insert a clickable quest link into chat.")
-	dState.linkBtn:SetPoint("LEFT", dState.trackBtn, "RIGHT", 4, 0)
+	dState.linkBtn:SetPoint("LEFT", dState.pinBtn, "RIGHT", 4, 0)
 
 	dState.shareBtn = MakeActionPill(topBar, "|cffe8d8a8Share|r", 54, function()
 		local q = ui.detailQuestID

@@ -37,6 +37,8 @@ local ui = {
 	quietSearch = false,
 	dungeonOpenPin = nil,
 	dungeonOpenName = nil,
+	dungeonBrowseOther = nil,
+	inDungeonInfo = nil,
 	zoneContextLock = nil,
 	dungeonZoneLock = nil,
 	haystack = nil,
@@ -770,11 +772,63 @@ function ns.ActiveZoneContext()
 	return (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
 end
 
-function ns.ActiveDungeonZone()
+function ns.OnInstanceChanged()
+	ui.dungeonBrowseOther = nil
+	ui.inDungeonInfo = nil
+	ui.dirtyHidden = true
+end
+
+function ns.ClearDungeonBrowseOther()
+	local had = ui.dungeonBrowseOther ~= nil
+	ui.dungeonBrowseOther = nil
+	return had
+end
+
+function ns.MarkDungeonBrowseOther()
+	if ui.dungeonBrowseOther then return false end
+	if not (ns.db and ns.db.panelTab == "dungeon") then return false end
+	if not (ns.CurrentPlayerDungeon and ns.CurrentPlayerDungeon()) then return false end
+	ui.dungeonBrowseOther = true
+	return true
+end
+
+function ns.ActiveDungeonContext()
+	local D = ns.DATA
+	local curDung = (ns.CurrentPlayerDungeon and ns.CurrentPlayerDungeon()) or nil
 	local pinned = (ns.RefLayerMode and ns.RefLayerMode() == "dungeon" and ns.PinnedRefZone and ns.PinnedRefZone()) or nil
-	if pinned then return pinned end
-	if ui.dungeonZoneLock then return ui.dungeonZoneLock end
-	return (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
+	local locked = pinned or ui.dungeonZoneLock
+	if locked then
+		if curDung and not ui.dungeonBrowseOther and curDung.zoneMap and locked == curDung.zoneMap then
+			return locked, curDung
+		end
+		return locked, nil
+	end
+	if curDung and not ui.dungeonBrowseOther then
+		return curDung.zoneMap, curDung
+	end
+	local viewZ = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
+	if viewZ and D and D.dungeons and D.dungeons[viewZ] and #D.dungeons[viewZ] > 0 then
+		return viewZ, nil
+	end
+	if ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ui.dungeonOpenName and ns.MatchDungeon then
+		local drec, zMap, instID = ns.MatchDungeon(ui.dungeonOpenName)
+		if drec then
+			return zMap, {
+				dungeon = drec,
+				zoneMap = zMap,
+				instID = instID,
+				instName = ui.dungeonOpenName,
+				bosses = ns.DungeonBosses and ns.DungeonBosses(instID, drec.name) or nil,
+				fromView = true,
+			}
+		end
+	end
+	return viewZ, nil
+end
+
+function ns.ActiveDungeonZone()
+	local zMap = ns.ActiveDungeonContext()
+	return zMap
 end
 
 function ns.LockDungeonContext(mapID)
@@ -854,6 +908,14 @@ function ns.SelectSidebarTab(tabKey)
 			if ns.OnLayerChanged then ns.OnLayerChanged() end
 			return
 		end
+		if tabKey == "dungeon" and ui.dungeonBrowseOther then
+			Sound("IG_CHARACTER_INFO_TAB")
+			ui.dungeonBrowseOther = nil
+			ui.dungeonZoneLock = nil
+			if ns.PinRefZone then ns.PinRefZone(nil) end
+			if ns.Refresh then ns.Refresh() elseif ns.OnLayerChanged then ns.OnLayerChanged() end
+			return
+		end
 		if dungShown and ns.CloseDungeonView then
 			Sound("IG_CHARACTER_INFO_TAB")
 			ns.CloseDungeonView()
@@ -877,12 +939,13 @@ function ns.SelectSidebarTab(tabKey)
 	PushNavState("tab")
 	ui.detailQuestID = nil
 	ui.detailPin = nil
-	if dungShown and ns.CloseDungeonView then ns.CloseDungeonView() end
+	if dungShown and tabKey ~= "dungeon" and ns.CloseDungeonView then ns.CloseDungeonView() end
 	ns.db.panelTab = tabKey
 	if searching then SetSearchQuiet("") end
 	Sound("IG_CHARACTER_INFO_TAB")
 	ui.zoneContextLock = nil
 	ui.dungeonZoneLock = nil
+	if tabKey == "dungeon" then ui.dungeonBrowseOther = nil end
 	if tabKey == "zone" or tabKey == "dungeon" then
 		if not ns.SetRefLayer(tabKey, true) and ns.OnLayerChanged then
 			ns.OnLayerChanged()
@@ -922,6 +985,12 @@ function ns.RevealQuestInPanel(pin, forceTab, _enableRefLayer, exactPin)
 		ui.zoneContextLock = nil
 		dMap, dName = ns.DungeonContextForPin(pin, zMap)
 		ui.dungeonZoneLock = (dMap and dMap ~= viewZ) and dMap or nil
+		local curDung = ns.CurrentPlayerDungeon and ns.CurrentPlayerDungeon() or nil
+		if curDung and curDung.dungeon and dName then
+			local nk = ns.NormDungKey
+			local same = nk and nk(dName) == nk(curDung.dungeon.name) or (dName == curDung.dungeon.name)
+			ui.dungeonBrowseOther = (not same) and true or nil
+		end
 	else
 		ui.dungeonZoneLock = nil
 		ui.zoneContextLock = (zMap and zMap ~= viewZ) and zMap or nil
@@ -950,7 +1019,10 @@ function ns.RevealQuestInPanel(pin, forceTab, _enableRefLayer, exactPin)
 		else
 			ns.db.zoneFold.avail = false
 		end
-		if dName then ns.db.zoneFold["dung:" .. dName] = false end
+		if dName then
+			ns.db.zoneFold["dung:" .. dName] = false
+			ns.db.zoneFold["in:dung:" .. dName] = false
+		end
 	end
 	ui.revealPin = (exactPin or minimal) and pin or ((ns.ResolveActiveChainPin and ns.ResolveActiveChainPin(pin)) or pin)
 	local lockMap = targetTab == "dungeon" and ui.dungeonZoneLock or ui.zoneContextLock
@@ -1006,6 +1078,23 @@ end
 function ns.OnDungeonViewChanged(shown, instName)
 	local D = ns.DATA
 	if shown then
+		local curDung = ns.CurrentPlayerDungeon and ns.CurrentPlayerDungeon() or nil
+		if not curDung then
+			ui.dungeonBrowseOther = nil
+		elseif instName then
+			local matchedD = ns.MatchDungeon and select(1, ns.MatchDungeon(instName)) or nil
+			local same = (matchedD ~= nil and matchedD == curDung.dungeon)
+			if not same and ns.NormDungKey and curDung.dungeon then
+				local ik = ns.NormDungKey(instName)
+				local ck = ns.NormDungKey(curDung.dungeon.name)
+				same = ik ~= "" and ck ~= "" and (ik == ck or ik:find(ck, 1, true) or ck:find(ik, 1, true))
+			end
+			if same then
+				ui.dungeonBrowseOther = nil
+			else
+				ui.dungeonBrowseOther = true
+			end
+		end
 		if instName then
 			ui.dungeonOpenName = instName
 			if ui.dungeonOpenPin and D and D.title[ui.dungeonOpenPin] and ns.NormDungKey then
@@ -1022,8 +1111,12 @@ function ns.OnDungeonViewChanged(shown, instName)
 	else
 		ui.dungeonOpenPin, ui.dungeonOpenName = nil, nil
 	end
-	if ui.ready and ns.RefreshControls then
-		ns.RefreshControls()
+	if ui.ready then
+		if ns.db and ns.db.panelTab == "dungeon" and not ui.found and ns.OnLayerChanged then
+			ns.OnLayerChanged()
+		elseif ns.RefreshControls then
+			ns.RefreshControls()
+		end
 	end
 end
 

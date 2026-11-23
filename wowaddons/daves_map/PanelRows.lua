@@ -314,12 +314,30 @@ local function RenderRow(row, item, yTop)
 		return
 	end
 
+	if item.kind == "boss" then
+		row.rewardBg:ClearAllPoints()
+		row.rewardBg:SetPoint("TOPLEFT", 4, -1)
+		row.rewardBg:SetPoint("BOTTOMRIGHT", -2, 1)
+		row.rewardBg:SetColorTexture(0.08, 0.07, 0.06, (item.num and item.num % 2 == 0) and 0.36 or 0.20)
+		row.rewardBg:Show()
+		row.num:SetPoint("LEFT", row, "LEFT", 10, 0)
+		row.num:SetText(("|cff998866%d.|r"):format(item.num or 1))
+		PlaceRowLabels(row, 34, false)
+		row.label:SetText("|cffe8d8a8" .. (item.title or "") .. "|r")
+		return
+	end
+
 	if item.kind == "dung_open" then
 		local i = item.i
 		row.icon:SetPoint("LEFT", 5, 0)
-		ns.PaintCategoryIcon(row.icon, D.cat[i])
+		if i and i ~= 0 and D.cat[i] then
+			ns.PaintCategoryIcon(row.icon, D.cat[i])
+		else
+			row.icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+			row.icon:SetTexCoord(.08, .92, .08, .92)
+		end
 		row.icon:Show()
-		row.count:SetText("|cff7fd4ffFloors|r")
+		row.count:SetText(item.inView and "|cff59ff73Viewing|r" or "|cff7fd4ffFloors|r")
 		PlaceRowLabels(row, 23, true)
 		row.label:SetText("|cffd2a6ff" .. item.title .. " Map|r")
 		row.sub:SetText(item.sub or "")
@@ -917,7 +935,7 @@ local function OnRowClick(row, button)
 	end
 	local D, db = ns.DATA, ns.db
 	local item = row.item
-	if not (D and db and item) or item.kind == "note" or item.kind == "qcols" then return end
+	if not (D and db and item) or item.kind == "note" or item.kind == "qcols" or item.kind == "boss" then return end
 
 	if item.kind == "head" then
 		if item.action == "toggle_all_layers" then
@@ -967,15 +985,31 @@ local function OnRowClick(row, button)
 			ns.ShowPinMap(target, true, fromRef)
 		end
 	elseif item.kind == "dung_open" then
-		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		local fromRef = LockIfRefTab(item.i)
-		if IsShiftKeyDown() or IsControlKeyDown() then
+		local hasPin = item.i and item.i ~= 0
+		if hasPin and (IsShiftKeyDown() or IsControlKeyDown()) then
+			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 			ns.SetWaypoint(item.i)
+			return
+		end
+		if item.inView then
+			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+			return
+		end
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		local fromRef = hasPin and LockIfRefTab(item.i) or false
+		if item.isCurrentInstance and ns.OpenCurrentInstanceMap then
+			ns.BeforeOpenDungeonMap(hasPin and item.i or nil, item.title)
+			if not ns.OpenCurrentInstanceMap() then
+				if not (ns.OpenInstancePin and ns.OpenInstancePin(hasPin and item.i or nil, row, item.title, true)) then
+					ns.CancelOpenDungeonMap()
+					if hasPin then ns.ShowPinMap(item.i, true, fromRef) end
+				end
+			end
 		elseif ns.OpenInstancePin then
-			ns.BeforeOpenDungeonMap(item.i, item.title)
-			if not ns.OpenInstancePin(item.i, row, item.title, true) then
+			ns.BeforeOpenDungeonMap(hasPin and item.i or nil, item.title)
+			if not ns.OpenInstancePin(hasPin and item.i or nil, row, item.title, true) then
 				ns.CancelOpenDungeonMap()
-				ns.ShowPinMap(item.i, true, fromRef)
+				if hasPin then ns.ShowPinMap(item.i, true, fromRef) end
 			end
 		end
 	elseif item.kind == "logquest" then

@@ -107,6 +107,12 @@ local function UpdateChromeLayout()
 	if ui.styleBtn and ui.styleBtn.SetActive and ns.IsStyleDialogOpen then
 		ui.styleBtn:SetActive(ns.IsStyleDialogOpen())
 	end
+	if ui.trackedBtn and ui.trackedBtn.SetToggleState then
+		ui.trackedBtn:SetToggleState(ns.db ~= nil and ns.db.trackerTrackedOnly == true, "Tracked", "All")
+	end
+	if ui.minimalBtn and ui.minimalBtn.SetToggleState then
+		ui.minimalBtn:SetToggleState(ns.db ~= nil and ns.db.minimalQuestInfo == true, "Minimal", "Full")
+	end
 
 	local tab = ns.db.panelTab or "layers"
 	local searching = ui.found ~= nil
@@ -209,6 +215,27 @@ local function UpdateChromeLayout()
 		local pct = total > 0 and math.floor(done * 100 / total + .5) or 0
 		ui.zoneBar.left:SetText(zName)
 		ui.zoneBar.right:SetText(total > 0 and ("%d/%d (%d%%)"):format(done, total, pct) or "No quests")
+		ui.zoneBar:Show()
+		curY = curY - 26
+	elseif not searching and not inDetails and tab == "dungeon" and ui.inDungeonInfo then
+		local di = ui.inDungeonInfo
+		ui.zoneBar:ClearAllPoints()
+		ui.zoneBar:SetPoint("TOPLEFT", LIST_PAD, curY)
+		ui.zoneBar:SetPoint("TOPRIGHT", -LIST_PAD, curY)
+		ui.zoneBar:SetStatusBarColor(0.45, 0.36, 0.72, 0.85)
+		local lbl = (di.isInside and "Inside: " or "Viewing: ") .. (di.name or "Dungeon")
+		if di.lo and di.lo > 0 then
+			local hi = (di.hi and di.hi > 0) and di.hi or di.lo
+			local mid = math.floor((di.lo + hi) / 2)
+			local range = di.lo == hi and tostring(di.lo) or (di.lo .. "-" .. hi)
+			lbl = ("%s |c%s(%s)|r"):format(lbl, ns.DiffHex(mid), range)
+		end
+		local done, total = di.done or 0, di.total or 0
+		ui.zoneBar:SetMinMaxValues(0, math.max(1, total))
+		ui.zoneBar:SetValue(total > 0 and done or 0)
+		local pct = total > 0 and math.floor(done * 100 / total + .5) or 0
+		ui.zoneBar.left:SetText(lbl)
+		ui.zoneBar.right:SetText(total > 0 and ("%d/%d (%d%%)"):format(done, total, pct) or (di.raid and "Raid" or "Dungeon"))
 		ui.zoneBar:Show()
 		curY = curY - 26
 	end
@@ -581,6 +608,12 @@ local function AnchorPanelToChrome()
 	if ui.styleBtn and ui.styleBtn.SetActive and ns.IsStyleDialogOpen then
 		ui.styleBtn:SetActive(ns.IsStyleDialogOpen())
 	end
+	if ui.trackedBtn and ui.trackedBtn.SetToggleState then
+		ui.trackedBtn:SetToggleState(ns.db ~= nil and ns.db.trackerTrackedOnly == true, "Tracked", "All")
+	end
+	if ui.minimalBtn and ui.minimalBtn.SetToggleState then
+		ui.minimalBtn:SetToggleState(ns.db ~= nil and ns.db.minimalQuestInfo == true, "Minimal", "Full")
+	end
 end
 ns.SyncPanelDock = AnchorPanelToChrome
 
@@ -639,6 +672,12 @@ end
 function ns.SyncStyleButton()
 	if ui.styleBtn and ui.styleBtn.SetActive and ns.IsStyleDialogOpen then
 		ui.styleBtn:SetActive(ns.IsStyleDialogOpen())
+	end
+	if ui.trackedBtn and ui.trackedBtn.SetToggleState then
+		ui.trackedBtn:SetToggleState(ns.db ~= nil and ns.db.trackerTrackedOnly == true, "Tracked", "All")
+	end
+	if ui.minimalBtn and ui.minimalBtn.SetToggleState then
+		ui.minimalBtn:SetToggleState(ns.db ~= nil and ns.db.minimalQuestInfo == true, "Minimal", "Full")
 	end
 end
 
@@ -772,6 +811,45 @@ local function SmallPillButton(parent, label, width, onClick, tip)
 		end)
 		b:SetScript("OnLeave", GameTooltip_Hide)
 	end
+	return b
+end
+
+local function ToolbarTogglePill(parent, width, onClick, getTip)
+	local b = CreateFrame("Button", nil, parent)
+	b:SetSize(width, 20)
+	b:RegisterForClicks("LeftButtonUp", "Button4Up")
+	b.frame = ns.AddBrassPillSlices(b, "BACKGROUND", 10, nil, 0.68, 0.84, 0.80, 0.72)
+	b.text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	b.text:SetPoint("CENTER", 0, 0)
+	b.hl = ns.AddBrassPillSlices(b, "HIGHLIGHT", 10, "ADD", 0.35)
+	function b:SetToggleState(on, onLabel, offLabel)
+		if on then
+			self.frame:SetVertexColor(1, 0.96, 0.78, 1)
+			self.text:SetText("|cffffd200" .. onLabel .. "|r")
+		else
+			self.frame:SetVertexColor(0.84, 0.80, 0.72, 0.68)
+			self.text:SetText("|cffe8d8a8" .. offLabel .. "|r")
+		end
+	end
+	b:SetScript("OnClick", function(self, button)
+		if button == "Button4" then
+			if ns.GoBack then ns.GoBack() end
+			return
+		end
+		onClick(self)
+		if GameTooltip:IsShown() and GameTooltip:GetOwner() == self then
+			local onEnter = self:GetScript("OnEnter")
+			if onEnter then onEnter(self) end
+		end
+	end)
+	b:SetScript("OnEnter", function(self)
+		local title, body = getTip()
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine(title, 1, .82, .2)
+		GameTooltip:AddLine(body, .9, .9, .9, true)
+		GameTooltip:Show()
+	end)
+	b:SetScript("OnLeave", GameTooltip_Hide)
 	return b
 end
 
@@ -978,6 +1056,36 @@ function ns.InitPanel()
 	end)
 	ui.findBtn:SetPoint("RIGHT", ui.pinBtn, "LEFT", -4, 0)
 
+	ui.minimalBtn = ToolbarTogglePill(content, 54, function()
+		if not ns.db then return end
+		ns.db.minimalQuestInfo = not (ns.db.minimalQuestInfo == true)
+		Sound(ns.db.minimalQuestInfo and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		if ns.NotifySetting then ns.NotifySetting("minimalQuestInfo") end
+		if ns.RefreshStyleDialog then ns.RefreshStyleDialog() end
+		ns.OnLayerChanged()
+	end, function()
+		if ns.db and ns.db.minimalQuestInfo == true then
+			return "Quest Info: Minimal", "Showing only quest rows (hides chains, chain steps, reward items, bosses, and Starter/XP columns).\nClick to switch back to full quest details."
+		end
+		return "Quest Info: Full", "Showing full quest chains, reward items, bosses, and Starter/XP columns.\nClick to switch to minimal quest-only view."
+	end)
+	ui.minimalBtn:SetPoint("RIGHT", ui.findBtn, "LEFT", -6, 0)
+
+	ui.trackedBtn = ToolbarTogglePill(content, 58, function()
+		if not ns.db then return end
+		ns.db.trackerTrackedOnly = not (ns.db.trackerTrackedOnly == true)
+		Sound(ns.db.trackerTrackedOnly and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		if ns.NotifySetting then ns.NotifySetting("trackerTrackedOnly") end
+		if ns.RefreshStyleDialog then ns.RefreshStyleDialog() end
+		ns.OnLayerChanged()
+	end, function()
+		if ns.db and ns.db.trackerTrackedOnly == true then
+			return "Quest Scope: Tracked Only", "In Tracker & Log, hiding untracked Quest Log quests and showing only tracked, pinned, focused, and ready quests.\nClick to show all Quest Log quests."
+		end
+		return "Quest Scope: All Quests", "In Tracker & Log, showing all quests in your Quest Log.\nClick to show only currently tracked quests."
+	end)
+	ui.trackedBtn:SetPoint("RIGHT", ui.minimalBtn, "LEFT", -4, 0)
+
 	local backBtn = CreateFrame("Button", nil, content)
 	ui.backBtn = backBtn
 	backBtn:SetSize(22, 22)
@@ -1022,7 +1130,7 @@ function ns.InitPanel()
 	ui.search = search
 	search:SetHeight(20)
 	search:SetPoint("LEFT", backBtn, "RIGHT", 9, 0)
-	search:SetPoint("RIGHT", ui.findBtn, "LEFT", -6, 0)
+	search:SetPoint("RIGHT", ui.trackedBtn, "LEFT", -6, 0)
 	search:HookScript("OnTextChanged", ns.RunSearch)
 
 	local layerBar = CreateFrame("Frame", nil, content, "BackdropTemplate")
@@ -1158,7 +1266,9 @@ function ns.InitPanel()
 	ui.ready = true
 	panel:SetScript("OnShow", function()
 		AnchorPanelToChrome()
-		if ui.dirtyHidden or #ui.items == 0 or ui.detailQuestID then
+		if ns.ClearDungeonBrowseOther then ns.ClearDungeonBrowseOther() end
+		local onDung = ns.db and ns.db.panelTab == "dungeon"
+		if ui.dirtyHidden or #ui.items == 0 or ui.detailQuestID or onDung then
 			ns.OnLayerChanged()
 		else
 			RefreshControls()

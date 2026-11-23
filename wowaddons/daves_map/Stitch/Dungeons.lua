@@ -309,9 +309,11 @@ local function CloseView()
 		local chain = u and S.ChainAt(u, v)
 		local zone = chain and chain[#chain]
 		if zone then
+			mod.lastSwitchAt = GetTime()   -- (daves_map: avoid Layer.lua treating CloseView's jump as manual browse-away)
 			S.OpenMap(zone)
 			if mod.IsStitched() then mod.ShowNow(u, v, zoom or math.max(mod.FitZoom(zone) * 2, 6)) end
 		elseif map.NavigateToParentMap then
+			mod.lastSwitchAt = GetTime()   -- (daves_map: avoid Layer.lua treating CloseView's jump as manual browse-away)
 			map:NavigateToParentMap()
 		end
 	end
@@ -375,8 +377,8 @@ local function BuildView()
 	view.credit:SetTextColor(0.8, 0.7, 0.5)
 	view.credit:SetShadowColor(0, 0, 0, 1)
 	view.credit:SetShadowOffset(1, -1)
-	-- the bar across the top: back to the world (the zone it was entered from), the floor (its name
-	-- between two arrows, a list of them all from its name), close
+	-- the bar across the top: location on the left, the floor in the center (between two arrows,
+	-- with a full floor dropdown on click), and close on the right
 	local bar = CreateFrame("Frame", nil, view)
 	bar:SetPoint("TOPLEFT")
 	bar:SetPoint("TOPRIGHT")
@@ -394,18 +396,6 @@ local function BuildView()
 	local close = CreateFrame("Button", nil, bar, "UIPanelCloseButton")
 	close:SetPoint("RIGHT", -4, 0)
 	close:SetScript("OnClick", function() CloseView() end)
-	-- (back by the close button, top right, where a window's way out is)
-	view.back = CreateFrame("Button", nil, bar, "UIPanelButtonTemplate")
-	view.back:SetHeight(24)
-	view.back:SetPoint("RIGHT", close, "LEFT", -6, 0)
-	view.back:SetScript("OnClick", function() CloseView() end)
-	view.back:SetScript("OnEnter", function(self)
-		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-		GameTooltip:AddLine(L["Back to the world map, where you were"], 1, 1, 1)
-		GameTooltip:AddLine(L["Or right-click the map, or press Escape"], 0.7, 0.7, 0.7)
-		GameTooltip:Show()
-	end)
-	view.back:SetScript("OnLeave", GameTooltip_Hide)
 	view.where = Look:Font(bar:CreateFontString(nil, "OVERLAY"), 12)
 	view.where:SetPoint("LEFT", 12, 0)
 	view.where:SetTextColor(0.8, 0.7, 0.5)
@@ -1150,14 +1140,9 @@ local function OpenView(inst, pin)
 			end
 		end
 	end
-	-- back to: the zone the entrance is in
 	EndMarkup(false)
 	view.heldMarks = nil
 	view.fromU, view.fromV = pin and pin.u, pin and pin.v   -- (the entrance: where a report from here says it is)
-	local zone = pin and pin.u and S.ChainAt(pin.u, pin.v)
-	local info = zone and zone[#zone] and C_Map.GetMapInfo(zone[#zone])
-	view.back:SetText("|cffffd100<|r  " .. (info and info.name and L["Back to %s"]:format(info.name) or L["Back"]))
-	view.back:SetWidth((view.back:GetFontString():GetStringWidth() or 80) + 28)
 	view.leaving = nil
 	view:SetAlpha(1)
 	view:Show()
@@ -2408,6 +2393,26 @@ local function InstanceHere()
 	for _, inst in ipairs(places.unplaced or {}) do
 		if inst[1] == instID then return inst end
 	end
+end
+
+function mod.HasCurrentInstanceMap()
+	return MapsOn() and InstanceHere() ~= nil
+end
+
+function mod.OpenCurrentInstance()
+	local inst = InstanceHere()
+	if not inst or not MapsOn() then return false end
+	if view and view:IsShown() and view.inst and view.inst[1] == inst[1] then
+		return true
+	end
+	local id = DungeonMap(inst)
+	if not id then
+		return OpenView(inst, nil) and true or false
+	elseif not InCombatLockdown() then
+		S.OpenMap(id)
+		return true
+	end
+	return false
 end
 
 -- a dungeon you've been inside counts as found ("Only places you've found"), remembered per character:

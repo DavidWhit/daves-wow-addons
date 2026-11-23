@@ -138,6 +138,36 @@ function ns.ToggleQuestTrack(questID)
 	return true
 end
 
+function ns.PinQuest(questID)
+	if issecretvalue(questID) or type(questID) ~= "number" or questID == 0 or not ns.QuestInLog(questID) then
+		return false
+	end
+	if ns.QuestReady(questID) then return false end
+	if ns.db and ns.db.pinned and ns.db.pinned[questID] then return false end
+	local needWatch = not ns.QuestWatched(questID)
+	if needWatch then
+		local maxWatches = (Constants and Constants.QuestWatchConsts and Constants.QuestWatchConsts.MAX_QUEST_WATCHES) or 25
+		local curWatches = (C_QuestLog.GetNumQuestWatches and C_QuestLog.GetNumQuestWatches()) or 0
+		if not issecretvalue(curWatches) and curWatches >= maxWatches then
+			if UIErrorsFrame and OBJECTIVES_WATCH_TOO_MANY then
+				UIErrorsFrame:AddMessage(OBJECTIVES_WATCH_TOO_MANY, 1.0, 0.1, 0.1, 1.0)
+			else
+				ns.Print("you are already tracking the maximum number of quests.")
+			end
+			return false
+		end
+	end
+	if ns.db then
+		if type(ns.db.pinned) ~= "table" then ns.db.pinned = {} end
+		ns.db.pinned[questID] = true
+	end
+	if needWatch then
+		ns.AddQuestWatch(questID)
+	end
+	ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+	return true
+end
+
 function ns.QuestComplete(questID)
 	return C_QuestLog.IsComplete(questID)
 end

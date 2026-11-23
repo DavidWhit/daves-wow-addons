@@ -60,11 +60,51 @@ end
 
 local function NormDungKey(s)
 	s = (s or ""):lower():gsub("^the%s+", ""):gsub("[^%w]+", "")
-	if s == "stockade" then return "stormwindstockade" end
-	if s == "templeofatalhakkar" then return "sunkentemple" end
+	if s == "stockade" or s == "stormwindstockades" then return "stormwindstockade" end
+	if s == "templeofatalhakkar" or s == "atalhakkar" then return "sunkentemple" end
+	if s == "ahnqirajtemple" or s == "ahnqiraj" then return "templeofahnqiraj" end
 	return s
 end
 ns.NormDungKey = NormDungKey
+
+-- Canonical WoW Classic & Forever instanceID -> normalized D.dungeons key (deterministic across locales/wings).
+local INSTANCE_ID_TO_KEY = {
+	[33] = "shadowfangkeep",
+	[34] = "stormwindstockade",
+	[36] = "deadmines",
+	[43] = "wailingcaverns",
+	[47] = "razorfenkraul",
+	[48] = "blackfathomdeeps",
+	[70] = "uldaman",
+	[90] = "gnomeregan",
+	[109] = "sunkentemple",
+	[129] = "razorfendowns",
+	[189] = "scarletmonastery",
+	[209] = "zulfarrak",
+	[229] = "blackrockspire",
+	[230] = "blackrockdepths",
+	[249] = "onyxiaslair",
+	[289] = "scholomance",
+	[309] = "zulgurub",
+	[329] = "stratholme",
+	[349] = "maraudon",
+	[389] = "ragefirechasm",
+	[409] = "moltencore",
+	[429] = "diremaul",
+	[469] = "blackwinglair",
+	[509] = "ruinsofahnqiraj",
+	[531] = "templeofahnqiraj",
+	[533] = "naxxramas",
+	[2959] = "cityofdalaran",
+	[2970] = "drownedcity",
+	[2974] = "blackmawhold",
+	[2994] = "alcazprison",
+	[2998] = "excavationsitewetlands",
+	[2999] = "ruinsoflordaeron",
+	[3001] = "shapersterrace",
+	[3039] = "kroldokstronghold",
+	[3065] = "hallofthanes",
+}
 
 ---------------------------------------------------------------------------
 -- Quest Indices & Completion Tracking
@@ -505,16 +545,163 @@ end
 ---------------------------------------------------------------------------
 -- Quest XP, Item Rewards, Chain Worthiness & Storylines
 ---------------------------------------------------------------------------
+local function GetMapPlaces()
+	return ns.OM and ns.OM.MapPlaces or nil
+end
+
+local function FindPlaceByInstID(instID)
+	local places = instID and GetMapPlaces()
+	if not places then return nil end
+	for _, g in ipairs(places.instances or {}) do
+		for _, inst in ipairs(g[4] or {}) do
+			if inst[1] == instID then return inst end
+		end
+	end
+	for _, inst in ipairs(places.unplaced or {}) do
+		if inst[1] == instID then return inst end
+	end
+	return nil
+end
+
 local function EnsureDungeonIndex()
-	if state.dungQuestSet or not ns.DATA then return end
-	state.dungQuestSet, state.dungByNorm = {}, {}
-	for _, dlist in pairs(ns.DATA.dungeons or {}) do
-		for _, d in ipairs(dlist) do
+	if not state.instIdByNorm then
+		state.instIdByNorm = {}
+		for id, key in pairs(INSTANCE_ID_TO_KEY) do
+			if not state.instIdByNorm[key] then state.instIdByNorm[key] = id end
+		end
+		local places = GetMapPlaces()
+		if places then
+			for _, g in ipairs(places.instances or {}) do
+				for _, inst in ipairs(g[4] or {}) do
+					local k = NormDungKey(inst[2])
+					if k ~= "" and inst[1] and inst[1] ~= 0 and not state.instIdByNorm[k] then
+						state.instIdByNorm[k] = inst[1]
+					end
+				end
+			end
+			for _, inst in ipairs(places.unplaced or {}) do
+				local k = NormDungKey(inst[2])
+				if k ~= "" and inst[1] and inst[1] ~= 0 and not state.instIdByNorm[k] then
+					state.instIdByNorm[k] = inst[1]
+				end
+			end
+		end
+	end
+	if state.dungQuestSet or not (ns.DATA and ns.DATA.dungeons) then return end
+	state.dungQuestSet, state.dungByNorm, state.dungZoneByNorm = {}, {}, {}
+	local zMaps = {}
+	for zMap in pairs(ns.DATA.dungeons) do zMaps[#zMaps + 1] = zMap end
+	table.sort(zMaps)
+	for _, zMap in ipairs(zMaps) do
+		for _, d in ipairs(ns.DATA.dungeons[zMap]) do
 			local k = NormDungKey(d.name)
-			if k ~= "" and not state.dungByNorm[k] then state.dungByNorm[k] = d end
+			if k ~= "" and not state.dungByNorm[k] then
+				state.dungByNorm[k] = d
+				state.dungZoneByNorm[k] = zMap
+			end
 			for _, qi in ipairs(d.quests or {}) do state.dungQuestSet[qi] = true end
 		end
 	end
+end
+
+function ns.DungeonBosses(instID, dungName)
+	EnsureDungeonIndex()
+	local places = GetMapPlaces()
+	if not (places and places.bosses) then return nil end
+	local id = instID
+	if not (type(id) == "number" and id ~= 0) and dungName then
+		local k = NormDungKey(dungName)
+		id = state.instIdByNorm and state.instIdByNorm[k] or nil
+		if not id and k ~= "" then
+			for nk, nid in pairs(state.instIdByNorm or {}) do
+				if k:find(nk, 1, true) or nk:find(k, 1, true) then id = nid; break end
+			end
+		end
+	end
+	return (id and places.bosses[id]) or nil
+end
+
+function ns.MatchDungeon(instName, instID)
+	EnsureDungeonIndex()
+	local byNorm = state.dungByNorm
+	if not byNorm then return nil, nil, instID end
+	local function TryKey(k)
+		if k and k ~= "" and byNorm[k] then
+			return byNorm[k], state.dungZoneByNorm[k], instID or (state.instIdByNorm and state.instIdByNorm[k])
+		end
+		return nil
+	end
+	if type(instID) == "number" and instID ~= 0 then
+		local d, z, id = TryKey(INSTANCE_ID_TO_KEY[instID])
+		if d then return d, z, id end
+		local place = FindPlaceByInstID(instID)
+		if place and place[2] then
+			local pk = NormDungKey(place[2])
+			d, z, id = TryKey(pk)
+			if d then return d, z, instID end
+			if pk ~= "" then
+				local bestK, bestLen = nil, 0
+				for k in pairs(byNorm) do
+					if #k > bestLen and (pk:find(k, 1, true) or k:find(pk, 1, true)) then
+						bestK, bestLen = k, #k
+					end
+				end
+				if bestK then return byNorm[bestK], state.dungZoneByNorm[bestK], instID end
+			end
+		end
+	end
+	if type(instName) == "string" and instName ~= "" then
+		local key = NormDungKey(instName)
+		local d, z, id = TryKey(key)
+		if d then return d, z, id end
+		if key ~= "" then
+			local bestK, bestLen = nil, 0
+			for k in pairs(byNorm) do
+				if #k > bestLen and (key:find(k, 1, true) or k:find(key, 1, true)) then
+					bestK, bestLen = k, #k
+				end
+			end
+			if bestK then
+				return byNorm[bestK], state.dungZoneByNorm[bestK], instID or (state.instIdByNorm and state.instIdByNorm[bestK])
+			end
+		end
+	end
+	return nil, nil, instID
+end
+
+function ns.CurrentPlayerDungeon()
+	if not IsInInstance then return nil end
+	local inInst, instType = IsInInstance()
+	if issecretvalue(inInst) or issecretvalue(instType) or not inInst then return nil end
+	if instType == "none" or instType == "pvp" or instType == "arena" then return nil end
+	local rawName, rawType, _, _, _, _, _, rawInstID
+	if GetInstanceInfo then
+		rawName, rawType, _, _, _, _, _, rawInstID = GetInstanceInfo()
+	end
+	local instName = (type(rawName) == "string" and not issecretvalue(rawName) and rawName ~= "") and rawName or nil
+	local instID = (type(rawInstID) == "number" and not issecretvalue(rawInstID) and rawInstID ~= 0) and rawInstID or nil
+	local isRaid = (instType == "raid") or (not issecretvalue(rawType) and rawType == "raid")
+	local drec, zMap, resolvedID = ns.MatchDungeon(instName, instID)
+	local place = instID and FindPlaceByInstID(instID) or nil
+	if not drec then
+		if not (place or instName) then return nil end
+		drec = {
+			name = (place and place[2]) or instName,
+			lo = (place and place[4]) or 0,
+			hi = (place and (place[5] or place[4])) or 0,
+			raid = (place and place[3] == true) or isRaid,
+			pin = 0,
+			quests = {},
+		}
+	end
+	local finalID = resolvedID or instID
+	return {
+		dungeon = drec,
+		zoneMap = zMap,
+		instID = finalID,
+		instName = instName or drec.name,
+		bosses = ns.DungeonBosses(finalID, drec.name),
+	}
 end
 
 local function RequestQuestRewardPreload(qid)
@@ -1011,6 +1198,7 @@ local function ResetCharCompletionCache()
 end
 
 function ns:PLAYER_ENTERING_WORLD()
+	if ns.OnInstanceChanged then ns.OnInstanceChanged() end
 	ResetCharCompletionCache()
 	-- Re-sync shortly after login/loading screen in case the server's per-character quest bitset finishes hydrating late.
 	C_Timer.After(1.5, ResetCharCompletionCache)

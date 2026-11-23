@@ -302,9 +302,13 @@ function ns.PinRefZone(mapID, allowAnyZone)
 end
 
 function ns.OnUserMapNavigate(quiet)
+	local browsedAway = false
+	if ns.MarkDungeonBrowseOther and not (ns.IsDungeonViewShown and ns.IsDungeonViewShown()) then
+		browsedAway = ns.MarkDungeonBrowseOther() == true
+	end
 	local hadLock = state.refPinnedMap ~= nil or state.sidebarDestZone ~= nil
 		or (ns.HasRefContextLock and ns.HasRefContextLock())
-	if not hadLock then return false end
+	if not (hadLock or browsedAway) then return false end
 	state.refPinnedMap = nil
 	state.sidebarDestZone = nil
 	state.refMap = nil
@@ -397,6 +401,10 @@ function ns.RefreshRefLayerSet(zMap)
 		return
 	end
 	local useMap = state.refPinnedMap or zMap
+	if state.refMode == "dungeon" and not state.refPinnedMap and ns.ActiveDungeonZone then
+		local activeDZ = ns.ActiveDungeonZone()
+		if activeDZ then useMap = activeDZ end
+	end
 	if not useMap then
 		state.refMap = nil
 		return
@@ -757,18 +765,22 @@ end
 
 function ns.FindPlayer()
 	local clearedLock = ns.OnUserMapNavigate(true)
+	local clearedBrowse = (ns.ClearDungeonBrowseOther and ns.ClearDungeonBrowseOther() == true) or false
 	local stitch = ns.StitchWorld()
 	if stitch and stitch.DungeonViewShown and stitch.DungeonViewShown() and stitch.CloseDungeonView then
 		stitch.CloseDungeonView()
 	end
 	if stitch and stitch.FindMe and stitch:FindMe(false) then
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		if clearedLock and ns.Refresh then ns.Refresh() end
+		if (clearedLock or clearedBrowse) and ns.Refresh then ns.Refresh() end
 		return
 	end
 	local best = C_Map.GetBestMapForUnit("player")
-	if best and best ~= 0 then ShowMap(best) end
-	if clearedLock and ns.Refresh then ns.Refresh() end
+	if best and best ~= 0 then
+		if stitch then stitch.lastSwitchAt = GetTime() end
+		ShowMap(best)
+	end
+	if (clearedLock or clearedBrowse) and ns.Refresh then ns.Refresh() end
 end
 
 ---------------------------------------------------------------------------

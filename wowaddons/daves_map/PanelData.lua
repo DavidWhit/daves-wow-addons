@@ -30,6 +30,7 @@ local ROW_HEIGHTS = {
 	quest = 28,
 	logquest = 28,
 	dung_open = 34,
+	boss = 24,
 	poi = 34,
 	result = 34,
 	note = 38,
@@ -774,13 +775,24 @@ end
 local function BuildDungeonItems()
 	local D = ns.DATA
 	local viewZ = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
-	local zMap = (ns.ActiveDungeonZone and ns.ActiveDungeonZone()) or viewZ
+	local zMap, activeDung
+	if ns.ActiveDungeonContext then
+		zMap, activeDung = ns.ActiveDungeonContext()
+	else
+		zMap = (ns.ActiveDungeonZone and ns.ActiveDungeonZone()) or viewZ
+	end
 	ui.zoneMap = zMap
-	if not (D and zMap and ns.Calibrate()) then return end
-	local zInfo = C_Map.GetMapInfo(zMap)
-	local zName = zInfo and zInfo.name or "this zone"
-	local zoneDungs = D.dungeons and D.dungeons[zMap]
+	if not (D and ns.Calibrate()) then return end
+
+	local zoneDungs
+	if activeDung and activeDung.dungeon then
+		zoneDungs = { activeDung.dungeon }
+	elseif zMap and D.dungeons and D.dungeons[zMap] and #D.dungeons[zMap] > 0 then
+		zoneDungs = D.dungeons[zMap]
+	end
 	if not (zoneDungs and #zoneDungs > 0) then
+		local zInfo = zMap and C_Map.GetMapInfo(zMap)
+		local zName = zInfo and zInfo.name or "this zone"
 		ui.items[1] = {
 			kind = "note",
 			title = "No dungeons in " .. zName,
@@ -789,8 +801,14 @@ local function BuildDungeonItems()
 		return
 	end
 
+	local zInfo = zMap and C_Map.GetMapInfo(zMap)
+	local zName = zInfo and zInfo.name or (activeDung and activeDung.dungeon and activeDung.dungeon.name) or "this zone"
 	local fold = ns.db.zoneFold or {}
 	local multiDungs = #zoneDungs > 1
+	local isActiveInst = activeDung ~= nil and activeDung.dungeon ~= nil
+	local isInsideInst = isActiveInst and not activeDung.fromView
+	local dungViewShown = (ns.IsDungeonViewShown and ns.IsDungeonViewShown()) == true
+	local minimal = MinimalInfo()
 	for _, d in ipairs(zoneDungs) do
 		local qentries = {}
 		local seenQid, seenTitle, seenStarter = {}, {}, {}
@@ -825,21 +843,55 @@ local function BuildDungeonItems()
 		end
 		SortQuestEntries(qentries)
 
-		local mid = (d.lo and d.hi and d.lo > 0) and math.floor((d.lo + d.hi) / 2) or 0
-		local range = (d.lo and d.lo > 0) and ((d.lo == d.hi) and tostring(d.lo) or (d.lo .. "-" .. d.hi)) or nil
+		if isActiveInst then
+			ui.inDungeonInfo = {
+				name = d.name,
+				lo = d.lo,
+				hi = d.hi,
+				raid = d.raid == true,
+				done = dDone,
+				total = dTotal,
+				remXP = dRemXP,
+				exactXP = dExactXP,
+				isInside = isInsideInst,
+			}
+		end
+
+		local hi = (d.hi and d.hi > 0) and d.hi or d.lo
+		local mid = (d.lo and hi and d.lo > 0) and math.floor((d.lo + hi) / 2) or 0
+		local range = (d.lo and d.lo > 0) and ((d.lo == hi) and tostring(d.lo) or (d.lo .. "-" .. hi)) or nil
 		local lvlTag = range and (" |c%s[%s]|r"):format(DiffHex(mid), range) or ""
 		local headTitle = (d.raid and "Raid: " or "Dungeon: ") .. d.name .. lvlTag
 		local xpHeader = dRemXP > 0 and ns.FormatXP(dRemXP, dExactXP) or nil
 		local rightTxt = dTotal > 0 and ("%d/%d"):format(dDone, dTotal) or "Map"
 		if xpHeader then rightTxt = rightTxt .. " - " .. xpHeader end
 
-		local secKey = "dung:" .. d.name
+		local secKey = isActiveInst and ("in:dung:" .. d.name) or ("dung:" .. d.name)
 		local closed = fold[secKey]
-		if closed == nil then closed = multiDungs end
+		if closed == nil then closed = (not isActiveInst) and multiDungs or false end
 		ui.items[#ui.items + 1] = { kind = "zsec", key = secKey, title = headTitle, n = rightTxt, closed = closed }
 		if not closed then
-			if d.pin and d.pin ~= 0 then
-				local subParts = { "Open floor map & bosses" }
+			local hasPin = d.pin and d.pin ~= 0
+			local canOpenCur = isInsideInst and ns.HasCurrentInstanceMap and ns.HasCurrentInstanceMap()
+			if hasPin or canOpenCur then
+				local inViewNow = false
+				if dungViewShown then
+					if hasPin and ui.dungeonOpenPin and ui.dungeonOpenPin == d.pin then
+						inViewNow = true
+					elseif ui.dungeonOpenName then
+						local matchedD = ns.MatchDungeon and select(1, ns.MatchDungeon(ui.dungeonOpenName)) or nil
+						if matchedD == d then
+							inViewNow = true
+						elseif ns.NormDungKey then
+							local ok = ns.NormDungKey(ui.dungeonOpenName)
+							local dk = ns.NormDungKey(d.name)
+							if ok ~= "" and dk ~= "" and (ok == dk or ok:find(dk, 1, true) or dk:find(ok, 1, true)) then
+								inViewNow = true
+							end
+						end
+					end
+				end
+				local subParts = { inViewNow and "Floor map open" or "Open floor map & bosses" }
 				if dTotal > 0 then
 					local rem = dTotal - dDone
 					subParts[#subParts + 1] = rem > 0 and ("%d/%d quests left"):format(rem, dTotal) or ("%d/%d done"):format(dDone, dTotal)
@@ -847,16 +899,40 @@ local function BuildDungeonItems()
 				if xpHeader then subParts[#subParts + 1] = "|cffe8d8a8" .. xpHeader .. "|r" end
 				ui.items[#ui.items + 1] = {
 					kind = "dung_open",
-					i = d.pin,
+					i = hasPin and d.pin or 0,
 					title = d.name,
 					sub = table.concat(subParts, "  -  "),
+					isCurrentInstance = isInsideInst,
+					inView = inViewNow,
 				}
 			end
 			if #qentries > 0 then
 				ui.items[#ui.items + 1] = { kind = "qcols" }
+				for _, entry in ipairs(qentries) do
+					EmitQuestEntry(ui.items, entry, false)
+				end
+			elseif isActiveInst then
+				ui.items[#ui.items + 1] = {
+					kind = "note",
+					title = dTotal > 0 and "All dungeon quests completed" or "No QuestieDB quests listed",
+					sub = dTotal > 0 and "Uncheck Hide Completed in Base to view completed quests." or "Bosses and floor map details are still available below.",
+				}
 			end
-			for _, entry in ipairs(qentries) do
-				EmitQuestEntry(ui.items, entry, false)
+		end
+		if isActiveInst and not minimal and activeDung.bosses and #activeDung.bosses > 0 then
+			local bKey = "bosses:" .. d.name
+			local bClosed = fold[bKey] == true
+			ui.items[#ui.items + 1] = {
+				kind = "zsec",
+				key = bKey,
+				title = "Bosses",
+				n = tostring(#activeDung.bosses),
+				closed = bClosed,
+			}
+			if not bClosed then
+				for bIdx, bossName in ipairs(activeDung.bosses) do
+					ui.items[#ui.items + 1] = { kind = "boss", num = bIdx, title = bossName }
+				end
 			end
 		end
 	end
@@ -1002,7 +1078,7 @@ local function BuildTrackerItems()
 			ui.items[1] = {
 				kind = "note",
 				title = "No tracked quests",
-				sub = "Uncheck 'Show only tracked quests' in Map Settings to show all Quest Log quests.",
+				sub = "Click Tracked in the top bar (or Map Settings) to show all Quest Log quests.",
 			}
 		else
 			ui.items[1] = {
@@ -1022,6 +1098,7 @@ function ns.BuildPanelItems()
 	end
 	wipe(ui.items)
 	ui.revealItemIdx = nil
+	ui.inDungeonInfo = nil
 	local tab = ns.db and ns.db.panelTab or "layers"
 	local key
 	if ui.found then
@@ -1069,8 +1146,12 @@ function ns.BuildPanelItems()
 		key = "zone:" .. tostring((ns.ActiveZoneContext and ns.ActiveZoneContext()) or (ns.ViewZoneMap and ns.ViewZoneMap()) or 0)
 		BuildZoneItems()
 	elseif tab == "dungeon" then
-		key = "dungeon:" .. tostring((ns.ActiveDungeonZone and ns.ActiveDungeonZone()) or (ns.ViewZoneMap and ns.ViewZoneMap()) or 0)
 		BuildDungeonItems()
+		if ui.inDungeonInfo then
+			key = "dungeon:in:" .. tostring(ui.inDungeonInfo.name or 0)
+		else
+			key = "dungeon:" .. tostring(ui.zoneMap or 0)
+		end
 	else
 		key = "layers"
 		BuildLayersItems()

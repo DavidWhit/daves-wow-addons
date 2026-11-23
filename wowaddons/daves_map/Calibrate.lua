@@ -450,6 +450,16 @@ function ns.CloseDungeonView()
 	return false
 end
 
+function ns.HasCurrentInstanceMap()
+	local stitch = ns.StitchWorld()
+	return (stitch and stitch.HasCurrentInstanceMap and stitch.HasCurrentInstanceMap()) == true
+end
+
+function ns.OpenCurrentInstanceMap()
+	local stitch = ns.StitchWorld()
+	return (stitch and stitch.OpenCurrentInstance and stitch.OpenCurrentInstance()) == true
+end
+
 function ns.OpenInstancePin(i, anchor, title, onlyDungeonView)
 	local stitch = ns.StitchWorld()
 	local D = ns.DATA
