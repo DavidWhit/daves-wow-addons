@@ -342,26 +342,135 @@ local function ComputeScreenResizeCaps()
 	return maxTotalW, maxBodyH
 end
 
+local function EnsureResizePreview()
+	if ui.resizePreview or not WorldMapFrame then return ui.resizePreview end
+	local p = CreateFrame("Frame", nil, WorldMapFrame)
+	p:SetFrameStrata("DIALOG")
+	p:SetFrameLevel(50)
+	p:EnableMouse(false)
+
+	local function CrispTex(parent, layer, subLevel, r, g, b, a)
+		local t = parent:CreateTexture(nil, layer, nil, subLevel)
+		t:SetColorTexture(r, g, b, a)
+		t:SetVertexColor(1, 1, 1, 1)
+		if t.SetTexelSnappingBias then t:SetTexelSnappingBias(0) end
+		if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(false) end
+		return t
+	end
+
+	local function AddOutline(parent, thickness, inset, subLevel, r, g, b, a)
+		local top = CrispTex(parent, "BORDER", subLevel, r, g, b, a)
+		top:SetHeight(thickness)
+		top:SetPoint("TOPLEFT", parent, "TOPLEFT", inset, -inset)
+		top:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -inset, -inset)
+		local bot = CrispTex(parent, "BORDER", subLevel, r, g, b, a)
+		bot:SetHeight(thickness)
+		bot:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", inset, inset)
+		bot:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -inset, inset)
+		local left = CrispTex(parent, "BORDER", subLevel, r, g, b, a)
+		left:SetWidth(thickness)
+		left:SetPoint("TOPLEFT", parent, "TOPLEFT", inset, -(inset + thickness))
+		left:SetPoint("BOTTOMLEFT", parent, "BOTTOMLEFT", inset, inset + thickness)
+		local right = CrispTex(parent, "BORDER", subLevel, r, g, b, a)
+		right:SetWidth(thickness)
+		right:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -inset, -(inset + thickness))
+		right:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -inset, inset + thickness)
+	end
+
+	local box = CreateFrame("Frame", nil, p)
+	box:EnableMouse(false)
+	local fill = CrispTex(box, "BACKGROUND", 0, 0.08, 0.06, 0.04, 0.14)
+	fill:SetAllPoints()
+	AddOutline(box, 2, 0, 2, 0.84, 0.68, 0.30, 0.92)
+	AddOutline(box, 1, 2, 1, 0, 0, 0, 0.65)
+	local guide = CrispTex(box, "ARTWORK", 1, 0.84, 0.68, 0.30, 0.55)
+	guide:SetWidth(1)
+	box.splitGuide = guide
+	p.box = box
+
+	local splitBar = CreateFrame("Frame", nil, p)
+	splitBar:EnableMouse(false)
+	splitBar:SetWidth(4)
+	local sL = CrispTex(splitBar, "BACKGROUND", 0, 0, 0, 0, 0.70)
+	sL:SetWidth(1)
+	sL:SetPoint("TOPLEFT")
+	sL:SetPoint("BOTTOMLEFT")
+	local sM = CrispTex(splitBar, "ARTWORK", 1, 0.84, 0.68, 0.30, 0.92)
+	sM:SetWidth(2)
+	sM:SetPoint("TOP")
+	sM:SetPoint("BOTTOM")
+	local sR = CrispTex(splitBar, "BACKGROUND", 0, 0, 0, 0, 0.70)
+	sR:SetWidth(1)
+	sR:SetPoint("TOPRIGHT")
+	sR:SetPoint("BOTTOMRIGHT")
+	p.splitBar = splitBar
+
+	p:Hide()
+	ui.resizePreview = p
+	return p
+end
+
+local function HideResizePreview()
+	if ui.resizePreview then ui.resizePreview:Hide() end
+end
+
+local function UpdateResizePreview(mode, mw, cw, bh)
+	local p = EnsureResizePreview()
+	if not (p and WorldMapFrame) then return end
+	local chromeL = L.CHROME_LEFT or -6
+	local chromeT = L.CHROME_TOP or 6
+	local mapL = L.MAP_LEFT_X or 6
+	local stageTopY = L.STAGE_TOP_Y or -38
+	local splitCenter = mapL + mw + math.floor(SPLITTER_W / 2)
+	if mode == "split" then
+		p.box:Hide()
+		p.splitBar:ClearAllPoints()
+		p.splitBar:SetPoint("TOP", WorldMapFrame, "TOPLEFT", splitCenter, TOP_CONTENT_Y)
+		p.splitBar:SetPoint("BOTTOM", WorldMapFrame, "TOPLEFT", splitCenter, stageTopY - bh)
+		p.splitBar:Show()
+	else
+		p.splitBar:Hide()
+		p.box:ClearAllPoints()
+		p.box:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", chromeL, chromeT)
+		p.box:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT",
+			mapL + mw + SPLITTER_W + RAIL_W + RAIL_CONTENT_GAP + cw + OUTER_PAD,
+			stageTopY - bh - OUTER_PAD)
+		p.box.splitGuide:ClearAllPoints()
+		p.box.splitGuide:SetPoint("TOP", p.box, "TOPLEFT", splitCenter - chromeL, -OUTER_PAD)
+		p.box.splitGuide:SetPoint("BOTTOM", p.box, "BOTTOMLEFT", splitCenter - chromeL, OUTER_PAD)
+		p.box:Show()
+	end
+	p:Show()
+end
+
 local function StopResize(btn, commit)
 	if not resizeState.active then return end
 	local activeBtn = btn or resizeState.btn
-	local mapChanged = resizeState.mapChanged == true
+	local mode = resizeState.mode
+	if mode == "split" and InCombatLockdown() then
+		commit = false
+	end
+	local nextMW, nextCW, nextBH = resizeState.lastMapW, resizeState.lastContentW, resizeState.lastBodyH
+	local changed = (nextMW ~= resizeState.startMapW)
+		or (nextCW ~= resizeState.startContentW)
+		or (nextBH ~= resizeState.startBodyH)
 	resizeState.active = false
 	resizeState.mode = nil
 	resizeState.btn = nil
 	resizeState.mapChanged = false
 	ui.dragging = false
 	if activeBtn then activeBtn:SetScript("OnUpdate", nil) end
-	if commit and ns.SetUnifiedWindowSize then
-		ns.SetUnifiedWindowSize(resizeState.lastMapW, resizeState.lastContentW, resizeState.lastBodyH, true)
-	end
-	if ns.CommitUnifiedMapResize then
-		ns.CommitUnifiedMapResize(commit and mapChanged)
-	end
-	if ui.detailsPane and ui.detailsPane:IsShown() then
-		if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
-	elseif ns.LayoutPanelRows then
-		ns.LayoutPanelRows()
+	HideResizePreview()
+	if commit and changed and ns.SetUnifiedWindowSize then
+		local _, _, _, _, mapChanged = ns.SetUnifiedWindowSize(nextMW, nextCW, nextBH, true)
+		if mapChanged and ns.CommitUnifiedMapResize then
+			ns.CommitUnifiedMapResize(true)
+		end
+		if ui.detailsPane and ui.detailsPane:IsShown() then
+			if ns.LayoutQuestDetailsPane then ns.LayoutQuestDetailsPane() end
+		elseif ns.LayoutPanelRows then
+			ns.LayoutPanelRows()
+		end
 	end
 end
 
@@ -382,7 +491,7 @@ local function OnResizeUpdate(self)
 
 	if resizeState.mode == "split" then
 		if InCombatLockdown() then
-			StopResize(self, true)
+			StopResize(self, false)
 			return
 		end
 		local totalW = resizeState.startMapW + resizeState.startContentW
@@ -394,8 +503,8 @@ local function OnResizeUpdate(self)
 		end
 	else
 		if InCombatLockdown() then
-			nextMapW = resizeState.lastMapW
-			nextBodyH = resizeState.lastBodyH
+			nextMapW = resizeState.startMapW
+			nextBodyH = resizeState.startBodyH
 			local maxCW = math.max(CONTENT_MIN_W, math.min(CONTENT_MAX_W, maxTotalW - nextMapW))
 			local wantTotalW = math.floor(resizeState.startMapW + resizeState.startContentW + dx + 0.5)
 			nextContentW = math.max(CONTENT_MIN_W, math.min(maxCW, wantTotalW - nextMapW))
@@ -417,21 +526,10 @@ local function OnResizeUpdate(self)
 	end
 
 	if nextMapW ~= resizeState.lastMapW or nextContentW ~= resizeState.lastContentW or nextBodyH ~= resizeState.lastBodyH then
-		if ns.SetUnifiedWindowSize then
-			local mw, mh, cw, bh, mapChg = ns.SetUnifiedWindowSize(nextMapW, nextContentW, nextBodyH, false)
-			resizeState.lastMapW = mw
-			resizeState.lastMapH = mh
-			resizeState.lastContentW = cw
-			resizeState.lastBodyH = bh
-			if mapChg then
-				resizeState.mapChanged = true
-				local stitch = ns.StitchWorld and ns.StitchWorld() or nil
-				if stitch and stitch.FollowResize then stitch.FollowResize() end
-			end
-		end
-		if not (ui.detailsPane and ui.detailsPane:IsShown()) and ns.LayoutPanelRows then
-			ns.LayoutPanelRows()
-		end
+		resizeState.lastMapW = nextMapW
+		resizeState.lastContentW = nextContentW
+		resizeState.lastBodyH = nextBodyH
+		UpdateResizePreview(resizeState.mode, nextMapW, nextContentW, nextBodyH)
 	end
 end
 
@@ -456,10 +554,7 @@ local function StartResize(btn, mode)
 	resizeState.lastBodyH = bh
 	resizeState.mapChanged = false
 	ui.dragging = true
-	if not InCombatLockdown() then
-		local stitch = ns.StitchWorld and ns.StitchWorld() or nil
-		if stitch and stitch.BeginResize then stitch.BeginResize() end
-	end
+	UpdateResizePreview(resizeState.mode, mw, cw, bh)
 	btn:SetScript("OnUpdate", OnResizeUpdate)
 end
 
@@ -1069,7 +1164,7 @@ function ns.InitPanel()
 		end
 	end)
 	panel:SetScript("OnHide", function()
-		if resizeState.active then StopResize(resizeState.btn, true) end
+		if resizeState.active then StopResize(resizeState.btn, false) end
 		if ui.pinBtn then ui.pinBtn:SetActive(false) end
 		if ns.DisarmPinMode then ns.DisarmPinMode() end
 		if ns.HideStyleDialog then ns.HideStyleDialog() end

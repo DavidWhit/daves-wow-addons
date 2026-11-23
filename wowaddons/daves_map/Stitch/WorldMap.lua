@@ -1086,9 +1086,10 @@ local function ResetView(self)
 	anim = nil
 	if live and map:IsShown() then beforeReset = { live[1], live[2], live[3], at = GetTime() } end
 	local u, v, zoom
+	local sizeChanged = live and map:IsShown() and (math.abs(sc:GetWidth() - live[4]) > 0.5 or math.abs(sc:GetHeight() - live[5]) > 0.5)   -- (daves_map)
 	if resize and live and map:IsShown() then
 		u, v, zoom = View()
-	elseif live and map:IsShown() and (math.abs(sc:GetWidth() - live[4]) > 0.5 or math.abs(sc:GetHeight() - live[5]) > 0.5) then
+	elseif sizeChanged then
 		u, v, zoom = live[1], live[2], live[3]
 	elseif not live and mod.SavedView then          -- (no view drawn yet: the map is opening)
 		u, v, zoom = mod.SavedView(self.mapID)
@@ -1097,7 +1098,7 @@ local function ResetView(self)
 	if u then
 		zoom = Clamp(zoom, LeastZoom(), MaxZoomAt(u, v))
 		local nu, nv, nz = View()
-		if resize or not (nu and math.abs(nu - u) < 1e-4 and math.abs(nv - v) < 1e-4 and math.abs(nz - zoom) < 1e-3) then
+		if resize or sizeChanged or not (nu and math.abs(nu - u) < 1e-4 and math.abs(nv - v) < 1e-4 and math.abs(nz - zoom) < 1e-3) then   -- (daves_map)
 			ShowWorld(u, v, zoom)
 		end
 		userMoved = true
