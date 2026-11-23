@@ -641,6 +641,12 @@ OnUpdate = function()
 			else
 				view.dirty = true
 			end
+			if ns.RefreshMapStage then
+				local hostInfo = map and C_Map and C_Map.GetMapInfo and C_Map.GetMapInfo(map) or nil
+				if not hostInfo or not hostInfo.mapType or hostInfo.mapType >= Enum.UIMapType.Zone or (stitch and stitch.suspendAutoSwitch) then
+					ns.RefreshMapStage(vz)
+				end
+			end
 		end
 	end
 	UpdateLodFades(seamless, sz, zoom)

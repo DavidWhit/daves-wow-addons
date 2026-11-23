@@ -1,10 +1,12 @@
 -- daves_map / MapChrome.lua
 -- Removes Blizzard's default Quest Log side panel (`QuestMapFrame`), `SidePanelToggle`, portrait border chrome,
--- and canvas tracking buttons cleanly without tainting `WorldMapFrame` or `UIPanelWindows` in combat.
+-- bulky `WorldMapFrame.NavBar`, and canvas tracking buttons cleanly without tainting `WorldMapFrame` or
+-- `UIPanelWindows` in combat.
 -- Turns `WorldMapFrame` into a single unified HUD Edit Mode window (`DavesMapWorldChrome`, `DialogBorderTranslucentTemplate`)
--- hosting `[ Far-Left Tab Rail | Live World Map | Right Content Pane ]`, redirects `TOGGLEQUESTLOG` (`L`) to open the
--- unified window cleanly, and exposes Blizzard's Forever map tracking filters (`questPOI`, `showQuestLevel`,
--- `showQuestDifficultyColor`, `showDungeonEntrancesOnMap`, `trivialQuests`, `contentTrackingFilter`) inside Map Settings.
+-- hosting `[ Map Column (Dropdowns + Centered Map Stage) | Vertical Splitter | Middle 46px Tab Rail | Right Content Pane ]`,
+-- redirects `TOGGLEQUESTLOG` (`L`) to open the unified window cleanly, and exposes Blizzard's Forever map tracking filters
+-- (`questPOI`, `showQuestLevel`, `showQuestDifficultyColor`, `showDungeonEntrancesOnMap`, `trivialQuests`,
+-- `contentTrackingFilter`) inside Map Settings.
 
 local _, ns = ...
 
@@ -12,11 +14,15 @@ local L = {
 	CHROME_LEFT = -6,
 	CHROME_TOP = 6,
 	OUTER_PAD = 12,
-	HEADER_H = 34,
-	RAIL_W = 46,
-	RAIL_MAP_GAP = 8,
-	MAP_CONTENT_GAP = 8,
-	SPACER_H = 67,
+	TOP_CONTENT_Y = -6,      -- CHROME_TOP - OUTER_PAD (no title bar gap!)
+	NAV_BAR_H = 26,          -- matches Search/toolbar & WowStyle1DropdownTemplate height
+	NAV_GAP = 6,             -- gap between map nav dropdowns and map stage
+	STAGE_TOP_Y = -38,       -- TOP_CONTENT_Y - NAV_BAR_H - NAV_GAP
+	MAP_MAT_PAD = 4,         -- subtle 4px inner mat around ScrollContainer inside mapStage
+	MAP_LEFT_X = 6,          -- CHROME_LEFT + OUTER_PAD (map is now on the LEFT!)
+	SPLITTER_W = 8,          -- draggable divider between Map column and Middle Tab Rail
+	RAIL_W = 46,             -- middle Tab Rail (`B`, `T`, `Z`, `D`) left of text/content pane
+	RAIL_CONTENT_GAP = 4,    -- tight seam between Tab Rail and Right Content Pane
 	MAP_MIN_W = 460,
 	MAP_DEFAULT_W = 697,
 	MAP_MAX_W = 900,
@@ -26,11 +32,10 @@ local L = {
 	CONTENT_MIN_W = 480,
 	CONTENT_DEFAULT_W = 516,
 	CONTENT_MAX_W = 1000,
-	BODY_MIN_H = 320,
-	BODY_DEFAULT_H = 465,
+	BODY_MIN_H = 328,        -- MAP_MIN_H + 2 * MAP_MAT_PAD
+	BODY_DEFAULT_H = 473,    -- MAP_DEFAULT_H + 2 * MAP_MAT_PAD
 	BODY_MAX_H = 900,
 }
-L.MAP_LEFT_X = L.CHROME_LEFT + L.OUTER_PAD + L.RAIL_W + L.RAIL_MAP_GAP
 ns.UNIFIED_LAYOUT = L
 
 local function SafeNum(v)
@@ -46,8 +51,6 @@ local state = {
 	mapChrome = nil,
 	mapBorder = nil,
 	mapOverlay = nil,
-	mapTitle = nil,
-	canvasRim = nil,
 	mapW = nil,
 	contentW = nil,
 	bodyH = nil,
@@ -346,7 +349,7 @@ end)
 
 ---------------------------------------------------------------------------
 -- Single Unified HUD Edit Mode Window (`DavesMapWorldChrome`)
--- Layout: [ Far-Left Tab Rail | Live World Map | Right Content Pane ]
+-- Layout: [ Map Column (Dropdowns + Centered Map Stage) | Splitter | Middle Tab Rail | Right Content Pane ]
 ---------------------------------------------------------------------------
 local function TryTemplate(kind, name, parent, template)
 	local ok, f = pcall(CreateFrame, kind, name, parent, template)
@@ -369,7 +372,7 @@ local function ClampBodyHeight(h)
 end
 
 local function MapHeightForBody(bodyH)
-	return math.max(L.MAP_MIN_H, math.min(L.MAP_MAX_H, bodyH))
+	return math.max(L.MAP_MIN_H, math.min(L.MAP_MAX_H, bodyH - 2 * L.MAP_MAT_PAD))
 end
 
 function ns.GetUnifiedWindowSize()
@@ -391,20 +394,25 @@ local function UpdateChromeBounds()
 	chrome:ClearAllPoints()
 	chrome:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", L.CHROME_LEFT, L.CHROME_TOP)
 	chrome:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT",
-		L.MAP_LEFT_X + mw + L.MAP_CONTENT_GAP + cw + L.OUTER_PAD,
-		-(L.SPACER_H + bh + L.OUTER_PAD))
+		L.MAP_LEFT_X + mw + L.SPLITTER_W + L.RAIL_W + L.RAIL_CONTENT_GAP + cw + L.OUTER_PAD,
+		L.STAGE_TOP_Y - bh - L.OUTER_PAD)
+	if ns.LayoutMapStage then
+		ns.LayoutMapStage(L.MAP_LEFT_X, L.TOP_CONTENT_Y, L.NAV_BAR_H, L.STAGE_TOP_Y, mw, bh)
+	end
 end
 
-local function ApplySpacerAndScrollBounds(mw, mh)
+local function ApplySpacerAndScrollBounds(mw, mh, bh)
 	local spacer = WorldMapFrame and WorldMapFrame.TitleCanvasSpacerFrame
 	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
 	if not (spacer and sc) then return end
+	local extraY = math.floor((bh - mh) / 2)
+	local scTopY = L.STAGE_TOP_Y - extraY
 	spacer:ClearAllPoints()
 	spacer:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X, 0)
-	spacer:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + mw, -L.SPACER_H)
+	spacer:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + mw, L.STAGE_TOP_Y)
 	sc:ClearAllPoints()
-	sc:SetPoint("TOPLEFT", spacer, "BOTTOMLEFT", 0, 0)
-	sc:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + mw, -(L.SPACER_H + mh))
+	sc:SetPoint("TOPLEFT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + L.MAP_MAT_PAD, scTopY)
+	sc:SetPoint("BOTTOMRIGHT", WorldMapFrame, "TOPLEFT", L.MAP_LEFT_X + mw - L.MAP_MAT_PAD, scTopY - mh)
 end
 
 function ns.SetUnifiedWindowSize(mapW, contentW, bodyH, save)
@@ -419,6 +427,7 @@ function ns.SetUnifiedWindowSize(mapW, contentW, bodyH, save)
 	end
 	local mh = MapHeightForBody(bh)
 	local mapChanged = (mw ~= curMW) or (mh ~= curMH)
+	local stageChanged = mapChanged or (bh ~= curBH)
 	state.mapW = mw
 	state.contentW = cw
 	state.bodyH = bh
@@ -427,8 +436,8 @@ function ns.SetUnifiedWindowSize(mapW, contentW, bodyH, save)
 		ns.db.contentW = cw
 		ns.db.bodyH = bh
 	end
-	if mapChanged and not InCombatLockdown() and not (WorldMapFrame and WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then
-		ApplySpacerAndScrollBounds(mw, mh)
+	if stageChanged and not InCombatLockdown() and not (WorldMapFrame and WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then
+		ApplySpacerAndScrollBounds(mw, mh, bh)
 	end
 	UpdateChromeBounds()
 	return mw, mh, cw, bh, mapChanged
@@ -490,7 +499,7 @@ function ns.ApplyUnifiedScale(scale)
 		if WorldMapFrame:IsShown() and not (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized()) then
 			local uiTop = SafeNum(UIParent and UIParent:GetTop()) or 768
 			local _, _, _, bh = ns.GetUnifiedWindowSize()
-			local frameH = (L.SPACER_H + bh + L.OUTER_PAD) * s
+			local frameH = (-L.STAGE_TOP_Y + bh + L.OUTER_PAD) * s
 			local yOffset = -116
 			local bottomPos = uiTop + yOffset - frameH
 			if bottomPos < 80 then
@@ -507,32 +516,8 @@ function ns.ApplyUnifiedScale(scale)
 	end
 end
 
-local function StripNavBarChrome(navBar)
-	if not navBar then return end
-	for _, key in ipairs({
-		"InsetBorderBottomLeft", "InsetBorderBottomRight", "InsetBorderBottom",
-		"InsetBorderLeft", "InsetBorderRight", "overlay",
-	}) do
-		if navBar[key] then KeepHidden(navBar[key]) end
-	end
-	local regions = { navBar:GetRegions() }
-	for _, r in ipairs(regions) do
-		if r and r.GetObjectType and r:GetObjectType() == "Texture" then
-			r:SetAlpha(0)
-		end
-	end
-end
-
-local function LayoutNavBarAndClose()
+local function LayoutCloseButton()
 	if not WorldMapFrame then return end
-	local nav = WorldMapFrame.NavBar
-	local spacer = WorldMapFrame.TitleCanvasSpacerFrame
-	if nav and spacer then
-		StripNavBarChrome(nav)
-		nav:ClearAllPoints()
-		nav:SetPoint("TOPLEFT", spacer, "TOPLEFT", 0, -28)
-		nav:SetPoint("BOTTOMRIGHT", spacer, "BOTTOMRIGHT", 0, 6)
-	end
 	local close = WorldMapFrame.BorderFrame and WorldMapFrame.BorderFrame.CloseButton
 	if close and state.mapChrome then
 		close:ClearAllPoints()
@@ -557,16 +542,19 @@ LayoutUnifiedMapRegion = function(fromSpacerHook)
 	state.inLayout = true
 	local prevW = SafeNum(sc:GetWidth()) or 0
 	local prevH = SafeNum(sc:GetHeight()) or 0
-	local mw, mh = ns.GetUnifiedWindowSize()
-	ApplySpacerAndScrollBounds(mw, mh)
+	local mw, mh, _, bh = ns.GetUnifiedWindowSize()
+	ApplySpacerAndScrollBounds(mw, mh, bh)
 	UpdateChromeBounds()
-	LayoutNavBarAndClose()
+	LayoutCloseButton()
 	state.inLayout = false
-	if fromSpacerHook and WorldMapFrame:IsShown()
-		and (math.abs(prevW - mw) > 1 or math.abs(prevH - mh) > 1)
-		and sc.mapID and sc.OnCanvasSizeChanged then
-		state.pendingCanvasResize = false
-		sc:OnCanvasSizeChanged()
+	local scW = mw - 2 * L.MAP_MAT_PAD
+	if fromSpacerHook and (math.abs(prevW - scW) > 1 or math.abs(prevH - mh) > 1) then
+		if WorldMapFrame:IsShown() and sc.mapID and sc.OnCanvasSizeChanged then
+			state.pendingCanvasResize = false
+			sc:OnCanvasSizeChanged()
+		else
+			state.pendingCanvasResize = true
+		end
 	end
 end
 ns.LayoutUnifiedMapRegion = LayoutUnifiedMapRegion
@@ -576,7 +564,7 @@ SyncMapChromeStrata = function()
 	local mapStrata = WorldMapFrame:GetFrameStrata() or "MEDIUM"
 	local scLevel = (WorldMapFrame.ScrollContainer and WorldMapFrame.ScrollContainer:GetFrameLevel()) or 2
 	state.mapChrome:SetFrameStrata(mapStrata)
-	state.mapChrome:SetFrameLevel(math.max(0, scLevel - 1))
+	state.mapChrome:SetFrameLevel(math.max(0, scLevel - 2))
 	if state.mapBorder then
 		state.mapBorder:SetFrameLevel(state.mapChrome:GetFrameLevel())
 	end
@@ -584,28 +572,33 @@ SyncMapChromeStrata = function()
 		state.mapOverlay:SetFrameStrata(WorldMapFrame.BorderFrame:GetFrameStrata() or "HIGH")
 		state.mapOverlay:SetFrameLevel((WorldMapFrame.BorderFrame:GetFrameLevel() or 10) + 1)
 	end
-end
-
-local function UpdateMapTitle()
-	if not (state.mapTitle and WorldMapFrame) then return end
-	local mapID = WorldMapFrame:GetMapID()
-	local info = (mapID and C_Map and C_Map.GetMapInfo) and C_Map.GetMapInfo(mapID) or nil
-	local name = info and info.name
-	if type(name) == "string" and not issecretvalue(name) and name ~= "" then
-		state.mapTitle:SetText("Dave's Map - " .. name)
-	else
-		state.mapTitle:SetText("Dave's Map")
+	local close = WorldMapFrame.BorderFrame and WorldMapFrame.BorderFrame.CloseButton
+	if close and state.mapOverlay and close.SetFrameLevel and not (close:IsProtected() and InCombatLockdown()) then
+		close:SetFrameLevel(math.max(close:GetFrameLevel() or 1, (state.mapOverlay:GetFrameLevel() or 1) + 2))
+	end
+	if ns.SyncMapStageStrata then
+		ns.SyncMapStageStrata()
 	end
 end
-ns.UpdateMapChromeTitle = UpdateMapTitle
+
+local function RefreshStage(overrideMapID)
+	if ns.RefreshMapStage then
+		ns.RefreshMapStage(overrideMapID)
+	end
+end
+ns.UpdateMapChromeTitle = RefreshStage
 
 function ns.WorldMapChrome()
 	return state.mapChrome
 end
 
 function ns.ApplyMapChromeStyle(alpha, style)
-	if not (state.mapBorder and ns.ApplyDialogBackground) then return end
-	ns.ApplyDialogBackground(state.mapBorder, alpha, style)
+	if state.mapBorder and ns.ApplyDialogBackground then
+		ns.ApplyDialogBackground(state.mapBorder, alpha, style)
+	end
+	if ns.ApplyMapStageStyle then
+		ns.ApplyMapStageStyle(alpha, style)
+	end
 end
 
 local function HideDefaultWorldMapChrome()
@@ -624,9 +617,17 @@ local function HideDefaultWorldMapChrome()
 		KeepHidden(bf.Tutorial)
 		KeepHidden(bf.MaximizeMinimizeFrame)
 	end
+	KeepHidden(WorldMapFrame.NavBar)
 	KeepHidden(WorldMapFrame.SidePanelToggle)
 	KeepHidden(WorldMapFrame.WorldMapTrackingOptionsButton)
 	KeepHidden(WorldMapFrame.WorldMapTrackingPinButton)
+	if type(WorldMapFrame.overlayFrames) == "table" then
+		for _, f in ipairs(WorldMapFrame.overlayFrames) do
+			if f and f.RefreshMenu and f.ShouldShowTrackingIconOnFloor then
+				KeepHidden(f)
+			end
+		end
+	end
 end
 
 function ns.InitMapChrome()
@@ -637,7 +638,7 @@ function ns.InitMapChrome()
 	if state.initialized then
 		LayoutUnifiedMapRegion(false)
 		SyncMapChromeStrata()
-		UpdateMapTitle()
+		RefreshStage()
 		return
 	end
 	state.initialized = true
@@ -645,8 +646,8 @@ function ns.InitMapChrome()
 	state.contentW = ClampContentWidth(ns.db and ns.db.contentW)
 	state.bodyH = ClampBodyHeight(ns.db and ns.db.bodyH)
 
-	-- Single unified HUD Edit Mode translucent dialog frame spanning [ Far-Left Tab Rail | World Map | Right Content ].
-	local sc = WorldMapFrame.ScrollContainer
+	-- Single unified HUD Edit Mode translucent dialog frame spanning:
+	-- [ Map Column (Dropdowns + Centered Map Stage) | Splitter | Middle Tab Rail | Right Content Pane ].
 	local chrome = CreateFrame("Frame", "DavesMapWorldChrome", WorldMapFrame)
 	state.mapChrome = chrome
 	chrome:EnableMouse(true)
@@ -671,30 +672,19 @@ function ns.InitMapChrome()
 	end
 	state.mapBorder = border
 
-	-- Non-interactive overlay above the canvas for the unified window title and canvas hairline border.
+	-- Non-interactive overlay above the canvas for the delicate inner map frame border (`MapStage.lua`).
 	local overlay = CreateFrame("Frame", nil, WorldMapFrame)
 	state.mapOverlay = overlay
 	overlay:EnableMouse(false)
 	overlay:SetAllPoints(chrome)
 
-	local title = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-	title:SetPoint("TOP", overlay, "TOP", 0, -11)
-	title:SetText("Dave's Map")
-	state.mapTitle = title
-
-	local rim = CreateFrame("Frame", nil, overlay, BackdropTemplateMixin and "BackdropTemplate" or nil)
-	state.canvasRim = rim
-	rim:EnableMouse(false)
-	rim:SetPoint("TOPLEFT", sc, "TOPLEFT", -1, 1)
-	rim:SetPoint("BOTTOMRIGHT", sc, "BOTTOMRIGHT", 1, -1)
-	if rim.SetBackdrop then
-		rim:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-		rim:SetBackdropBorderColor(0.45, 0.36, 0.20, 0.72)
+	if ns.InitMapStage then
+		ns.InitMapStage(chrome, overlay)
 	end
 
 	LayoutUnifiedMapRegion(false)
 	SyncMapChromeStrata()
-	UpdateMapTitle()
+	RefreshStage()
 
 	if not state.navHooked then
 		state.navHooked = true
@@ -710,7 +700,7 @@ function ns.InitMapChrome()
 			SyncMapChromeStrata()
 		end)
 		hooksecurefunc(WorldMapFrame, "OnMapChanged", function()
-			UpdateMapTitle()
+			RefreshStage()
 		end)
 		WorldMapFrame:HookScript("OnShow", function()
 			SuppressQuestMapFrame()
@@ -724,7 +714,7 @@ function ns.InitMapChrome()
 				end
 			end
 			SyncMapChromeStrata()
-			UpdateMapTitle()
+			RefreshStage()
 			if ns.WasQuestLogKeyPressed() and ns.OpenTrackerTab then
 				ns.OpenTrackerTab(nil, nil, true)
 			end

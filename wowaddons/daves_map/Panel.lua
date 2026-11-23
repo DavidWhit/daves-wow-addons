@@ -1,12 +1,12 @@
 -- daves_map / Panel.lua
 -- Single unified Dave's Map window layout inside `DavesMapWorldChrome` (`MapChrome.lua`):
---   * Layout: `[ Far-Left Tab Rail (B / T / Z / D) | Live World Map | Right Content Pane ]`.
---   * `ui.panel` is a mouse-transparent container matching `DavesMapWorldChrome` so the live World Map
---     canvas and NavBar in the middle stay 100% interactive, while `leftRail` and `content` capture clicks.
---   * Top content toolbar: `[ <- Back | Search... | Find Me | Drop Waypoint | Map Settings ]`.
+--   * Layout: `[ Left: Map Column (Dropdowns + Centered Map Stage) | Vertical Splitter | Middle: 46px Tab Rail | Right: Content Pane ]`.
+--   * `ui.panel` is a mouse-transparent container matching `DavesMapWorldChrome` so the left map nav
+--     dropdowns and live World Map canvas stay 100% interactive while `splitter`, `leftRail`, and `content` capture clicks.
+--   * Top content toolbar: `[ <- Back | Search... | Find Me | Drop Waypoint | Map Settings ]` (leaving top-right clear for Blizzard's CloseButton).
 --   * Bottom-right grip resizes the unified window in 2D: the OpenMap canvas grows/shrinks freely inside
---     its fixed min/max bounds (`460..900 x 320..600`, scaling to fit on drop) while any further drag grows
---     the right content pane; a vertical divider between map & panel trades width between them directly.
+--     its fixed min/max bounds (`460..900 x 320..600`, centered vertically inside `mapStage` and scaling to fit on drop)
+--     while any further drag grows the right content pane; the vertical splitter trades width between map & panel directly.
 
 local _, ns = ...
 
@@ -14,15 +14,18 @@ local ui = ns.PanelUI
 local C = ns.PANEL_CONST
 local L = ns.UNIFIED_LAYOUT or {}
 local OUTER_PAD = L.OUTER_PAD or 12
-local HEADER_H = L.HEADER_H or 34
-local CHROME_TOP = L.CHROME_TOP or 6
+local TOP_CONTENT_Y = L.TOP_CONTENT_Y or -6
+local NAV_BAR_H = L.NAV_BAR_H or 26
+local NAV_GAP = L.NAV_GAP or 6
+local SPLITTER_W = L.SPLITTER_W or 8
 local RAIL_W = L.RAIL_W or C.RAIL_W or 46
-local MAP_CONTENT_GAP = L.MAP_CONTENT_GAP or 8
+local RAIL_CONTENT_GAP = L.RAIL_CONTENT_GAP or 4
 local MAP_MIN_W = L.MAP_MIN_W or 460
 local MAP_MAX_W = L.MAP_MAX_W or 900
 local CONTENT_MIN_W = L.CONTENT_MIN_W or 480
 local CONTENT_MAX_W = L.CONTENT_MAX_W or 1000
-local BODY_MIN_H = L.BODY_MIN_H or 320
+local BODY_MIN_H = L.BODY_MIN_H or 328
+local BODY_DEFAULT_H = L.BODY_DEFAULT_H or 473
 local BODY_MAX_H = L.BODY_MAX_H or 900
 local LIST_PAD, SCROLL_GUTTER = C.LIST_PAD, C.SCROLL_GUTTER
 local Sound = ns.Sound
@@ -33,14 +36,14 @@ local resizeState = {
 	btn = nil,
 	startX = 0,
 	startY = 0,
-	startMapW = 697,
-	startMapH = 465,
-	startContentW = 516,
-	startBodyH = 465,
-	lastMapW = 697,
-	lastMapH = 465,
-	lastContentW = 516,
-	lastBodyH = 465,
+	startMapW = L.MAP_DEFAULT_W or 697,
+	startMapH = L.MAP_DEFAULT_H or 465,
+	startContentW = L.CONTENT_DEFAULT_W or 516,
+	startBodyH = BODY_DEFAULT_H,
+	lastMapW = L.MAP_DEFAULT_W or 697,
+	lastMapH = L.MAP_DEFAULT_H or 465,
+	lastContentW = L.CONTENT_DEFAULT_W or 516,
+	lastBodyH = BODY_DEFAULT_H,
 	mapChanged = false,
 }
 
@@ -314,23 +317,24 @@ end
 
 local function ComputeScreenResizeCaps()
 	local chrome = ns.WorldMapChrome and ns.WorldMapChrome()
-	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
 	local maxTotalW = MAP_MAX_W + CONTENT_MAX_W
 	local maxBodyH = BODY_MAX_H
-	if not (chrome and sc) then return maxTotalW, maxBodyH end
-	local scL = SafeNum(sc:GetLeft())
-	local scT = SafeNum(sc:GetTop())
+	if not chrome then return maxTotalW, maxBodyH end
+	local chromeL = SafeNum(chrome:GetLeft())
+	local chromeT = SafeNum(chrome:GetTop())
 	local effScale = SafeNum(chrome:GetEffectiveScale())
 	local uw = SafeNum(UIParent:GetWidth()) or 1365
 	local us = SafeNum(UIParent:GetEffectiveScale()) or 1
 	local uiW = uw * us
 	if effScale and effScale > 0 then
-		if scL then
-			local availW = math.floor((uiW - 6) / effScale - scL - MAP_CONTENT_GAP - OUTER_PAD)
+		if chromeL then
+			local fixedW = OUTER_PAD + SPLITTER_W + RAIL_W + RAIL_CONTENT_GAP + OUTER_PAD
+			local availW = math.floor((uiW - 6) / effScale - chromeL - fixedW)
 			maxTotalW = math.max(MAP_MIN_W + CONTENT_MIN_W, math.min(MAP_MAX_W + CONTENT_MAX_W, availW))
 		end
-		if scT then
-			local availH = math.floor(scT - (6 / effScale) - OUTER_PAD)
+		if chromeT then
+			local fixedH = OUTER_PAD + NAV_BAR_H + NAV_GAP + OUTER_PAD
+			local availH = math.floor(chromeT - (6 / effScale) - fixedH)
 			maxBodyH = math.max(BODY_MIN_H, math.min(BODY_MAX_H, availH))
 		end
 	end
@@ -464,7 +468,6 @@ local function AnchorPanelToChrome()
 	local lvl = AbovePins()
 	ui.panel:SetFrameStrata(WorldMapFrame:GetFrameStrata() or "MEDIUM")
 	ui.panel:SetFrameLevel(lvl)
-	if ui.headerBar then ui.headerBar:SetFrameLevel(lvl + 2) end
 	if ui.splitter then ui.splitter:SetFrameLevel(lvl + 8) end
 	if ui.resizeBtn then ui.resizeBtn:SetFrameLevel(lvl + 10) end
 	ui.panel:ClearAllPoints()
@@ -680,27 +683,6 @@ function ns.InitPanel()
 	AnchorPanelToChrome()
 	local level = panel:GetFrameLevel()
 
-	-- Double-click header strip across the unified title bar (leaves top-right clear for Blizzard's CloseButton).
-	local headerBar = CreateFrame("Button", nil, panel)
-	ui.headerBar = headerBar
-	headerBar:SetPoint("TOPLEFT", panel, "TOPLEFT", OUTER_PAD, -4)
-	headerBar:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -34, -4)
-	headerBar:SetHeight(HEADER_H - 6)
-	headerBar:SetFrameLevel(level + 2)
-	headerBar:RegisterForClicks("LeftButtonUp", "Button4Up")
-	headerBar:SetScript("OnClick", function(_, button)
-		if button == "Button4" then ns.GoBack() end
-	end)
-	headerBar:SetScript("OnDoubleClick", function(_, button)
-		if button == "Button4" then
-			ns.GoBack()
-			return
-		end
-		if button ~= "LeftButton" then return end
-		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		ns.ResetPanelPosition()
-	end)
-
 	-- Bottom-right 2D resize grip: grows/shrinks map within its min/max bounds and overflows into the right panel.
 	local resizeBtn = CreateFrame("Button", nil, panel)
 	ui.resizeBtn = resizeBtn
@@ -735,7 +717,26 @@ function ns.InitPanel()
 	resizeBtn:SetScript("OnLeave", GameTooltip_Hide)
 
 	-----------------------------------------------------------------------
-	-- Far-Left Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon`)
+	-- Right Visual Content Pane (anchored after Map + Splitter + Tab Rail)
+	-----------------------------------------------------------------------
+	local content = CreateFrame("Frame", nil, panel)
+	ui.content = content
+	content:EnableMouse(true)
+	content:EnableMouseWheel(true)
+	content:SetScript("OnMouseUp", function(_, button)
+		if button == "Button4" then ns.GoBack() end
+	end)
+	local spacer = WorldMapFrame and WorldMapFrame.TitleCanvasSpacerFrame
+	if spacer then
+		content:SetPoint("TOPLEFT", spacer, "TOPRIGHT", SPLITTER_W + RAIL_W + RAIL_CONTENT_GAP, TOP_CONTENT_Y)
+	else
+		content:SetPoint("TOPLEFT", panel, "TOPLEFT", OUTER_PAD + MAP_MIN_W + SPLITTER_W + RAIL_W + RAIL_CONTENT_GAP, -OUTER_PAD)
+	end
+	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -OUTER_PAD, OUTER_PAD)
+
+	-----------------------------------------------------------------------
+	-- Middle Skill-Icon Tab Rail (`Base`, `Tracker`, `Zone`, `Dungeon`)
+	-- Anchored flush to `content`'s left edge so it tracks all resizes automatically.
 	-----------------------------------------------------------------------
 	local leftRail = CreateFrame("Frame", nil, panel, "BackdropTemplate")
 	ui.leftRail = leftRail
@@ -745,8 +746,8 @@ function ns.InitPanel()
 		if button == "Button4" then ns.GoBack() end
 	end)
 	leftRail:SetWidth(RAIL_W)
-	leftRail:SetPoint("TOPLEFT", panel, "TOPLEFT", OUTER_PAD, -HEADER_H)
-	leftRail:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", OUTER_PAD, OUTER_PAD)
+	leftRail:SetPoint("TOPRIGHT", content, "TOPLEFT", -RAIL_CONTENT_GAP, 0)
+	leftRail:SetPoint("BOTTOMRIGHT", content, "BOTTOMLEFT", -RAIL_CONTENT_GAP, 0)
 	leftRail:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
 	leftRail:SetBackdropColor(0.03, 0.03, 0.05, 0.50)
 	leftRail:SetBackdropBorderColor(0.35, 0.28, 0.18, 0.55)
@@ -810,30 +811,12 @@ function ns.InitPanel()
 		ui.tabs[td.key] = b
 	end
 
-	-----------------------------------------------------------------------
-	-- Right Visual Content Pane (to the right of the live World Map canvas)
-	-----------------------------------------------------------------------
-	local content = CreateFrame("Frame", nil, panel)
-	ui.content = content
-	content:EnableMouse(true)
-	content:EnableMouseWheel(true)
-	content:SetScript("OnMouseUp", function(_, button)
-		if button == "Button4" then ns.GoBack() end
-	end)
-	local spacer = WorldMapFrame and WorldMapFrame.TitleCanvasSpacerFrame
-	if spacer then
-		content:SetPoint("TOPLEFT", spacer, "TOPRIGHT", MAP_CONTENT_GAP, CHROME_TOP - HEADER_H)
-	else
-		content:SetPoint("TOPLEFT", leftRail, "TOPRIGHT", MAP_CONTENT_GAP, 0)
-	end
-	content:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -OUTER_PAD, OUTER_PAD)
-
-	-- Vertical divider handle between the live World Map and right content pane (drag left/right to trade width).
+	-- Vertical divider handle between the left Map Column and middle Tab Rail (drag left/right to trade width).
 	local splitter = CreateFrame("Button", nil, panel)
 	ui.splitter = splitter
-	splitter:SetWidth(MAP_CONTENT_GAP)
-	splitter:SetPoint("TOPRIGHT", content, "TOPLEFT", 0, 0)
-	splitter:SetPoint("BOTTOMRIGHT", content, "BOTTOMLEFT", 0, 0)
+	splitter:SetWidth(SPLITTER_W)
+	splitter:SetPoint("TOPRIGHT", leftRail, "TOPLEFT", 0, 0)
+	splitter:SetPoint("BOTTOMRIGHT", leftRail, "BOTTOMLEFT", 0, 0)
 	splitter:SetFrameLevel(level + 8)
 	local splitLine = splitter:CreateTexture(nil, "ARTWORK")
 	splitLine:SetWidth(1)
@@ -872,7 +855,7 @@ function ns.InitPanel()
 	ui.styleBtn = ToolbarIconButton(content, ns.MEDIA .. "gear", "Map Settings", "Customize Map Tracking & Filters, Window scale, Pin size, Background opacity, and Background style.", function()
 		if ns.ToggleStyleDialog then ns.ToggleStyleDialog() end
 	end)
-	ui.styleBtn:SetPoint("TOPRIGHT", -LIST_PAD, -4)
+	ui.styleBtn:SetPoint("TOPRIGHT", -LIST_PAD - 22, -2)
 
 	ui.pinBtn = ToolbarIconButton(content, ns.MEDIA .. "waypoint", "Drop Waypoint", "Left-click: arm map pin placement (or Ctrl-click the map anytime).\nRight-click: clear active waypoint.", function(button)
 		ns.TogglePinMode(button == "RightButton")
@@ -901,7 +884,7 @@ function ns.InitPanel()
 	local backBtn = CreateFrame("Button", nil, content)
 	ui.backBtn = backBtn
 	backBtn:SetSize(22, 22)
-	backBtn:SetPoint("TOPLEFT", LIST_PAD, -4)
+	backBtn:SetPoint("TOPLEFT", LIST_PAD, -2)
 	backBtn:RegisterForClicks("LeftButtonUp", "Button4Up")
 	backBtn.icon = backBtn:CreateTexture(nil, "ARTWORK")
 	backBtn.icon:SetPoint("CENTER")
