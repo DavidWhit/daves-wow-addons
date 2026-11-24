@@ -41,33 +41,122 @@ local function ZoneNames()
 		if type(z) == "string" and not issecretvalue(z) and z ~= "" then names[z] = true end
 	end
 	local best = C_Map.GetBestMapForUnit("player")
-	for _, id in ipairs({ best or 0, ZoneOf(best) or 0 }) do
-		if id ~= 0 then
-			maps[id] = true
+	if type(best) == "number" and not issecretvalue(best) and best ~= 0 then
+		local function AddMap(id)
+			if type(id) ~= "number" or issecretvalue(id) or id == 0 then return end
 			local info = C_Map.GetMapInfo(id)
-			if info and info.name then names[info.name] = true end
+			if info and info.mapType and info.mapType >= Enum.UIMapType.Zone then
+				maps[id] = true
+				if type(info.name) == "string" and not issecretvalue(info.name) and info.name ~= "" then
+					names[info.name] = true
+				end
+			end
+		end
+		AddMap(best)
+		AddMap(ZoneOf(best))
+		if C_Map.GetMapGroupID and C_Map.GetMapGroupMembersInfo then
+			local gid = C_Map.GetMapGroupID(best)
+			if type(gid) == "number" and not issecretvalue(gid) then
+				local ok, members = pcall(C_Map.GetMapGroupMembersInfo, gid)
+				if ok and type(members) == "table" then
+					for _, m in ipairs(members) do
+						if m and m.mapID then AddMap(m.mapID) end
+					end
+				end
+			end
 		end
 	end
 	return names, maps
 end
 
 local function MapInZone(m, maps)
-	if not m or m == 0 or issecretvalue(m) then return false end
+	if type(m) ~= "number" or issecretvalue(m) or m == 0 then return false end
 	return (maps[m] or maps[ZoneOf(m) or 0]) and true or false
 end
 
-local function QuestInZone(q, maps)
-	if MapInZone(ns.QuestUiMapID and ns.QuestUiMapID(q) or 0, maps) then return true end
+local function IsZoneLevelMap(m)
+	if type(m) ~= "number" or issecretvalue(m) or m == 0 then return false end
+	local info = C_Map.GetMapInfo(m)
+	return (info and info.mapType and info.mapType >= Enum.UIMapType.Zone) == true
+end
+
+local function QuestInZone(q, maps, header, names, inInstance, dungPins)
+	-- Pass ignoreWaypoints = true so Blizzard's cross-zone travel waypoints (boats, portals, zone gates)
+	-- in the player's current zone never falsely mark an out-of-zone quest as belonging to this zone.
+	local qMap = ns.QuestUiMapID and ns.QuestUiMapID(q, true) or 0
+	if MapInZone(qMap, maps) then return true, "blizzMap" end
+
 	local D = ns.DATA
-	local i = D and D.map and ns.QuestPin and ns.QuestPin(q)
-	if not i then return false end
-	if MapInZone(D.map[i], maps) then return true end
-	local e = D.endp and D.endp[i]
-	if e and e ~= 0 and MapInZone(D.map[e], maps) then return true end
-	for _, o in ipairs(D.obj and D.obj[i] or {}) do
-		if MapInZone(D.map[o], maps) then return true end
+	local pins
+	if D and D.map then
+		local list = ns.PinsOfQuest and ns.PinsOfQuest(q)
+		if list and list[1] then
+			if #list > 1 and ns.PassesPlayerFilter then
+				local filtered = {}
+				for _, p in ipairs(list) do
+					if ns.PassesPlayerFilter(p) then filtered[#filtered + 1] = p end
+				end
+				pins = #filtered > 0 and filtered or list
+			else
+				pins = list
+			end
+		elseif ns.QuestPin then
+			local single = ns.QuestPin(q)
+			if single then pins = { single } end
+		end
 	end
-	return false
+
+	-- Inside a dungeon/raid, keep quests belonging to that instance even when Blizzard or QuestieDB
+	-- maps their objectives to the outdoor entrance zone (D.map stores overworld zone/city uiMapIDs only).
+	if inInstance then
+		if pins and dungPins then
+			for _, i in ipairs(pins) do
+				if dungPins[i] then return true, "dungeon" end
+			end
+		end
+		if header and names and names[header] then return true, "dungeonHeader" end
+	end
+
+	-- When Blizzard's live client already resolves this quest to a specific different zone/city/dungeon
+	-- (e.g. Ironforge 1455 for Gnome Improvement), trust it and do not let QuestieDB's generic trade-good,
+	-- mining-vein, or chest objective pins pull the quest into an unrelated zone.
+	if IsZoneLevelMap(qMap) then
+		return false, "blizzOther"
+	end
+
+	-- Blizzard gave no specific zone map (qMap == 0 or continent-wide): fall back to QuestieDB objectives,
+	-- then the Quest Log zone header, then QuestieDB turn-in / starter map.
+	local hasMappedObj = false
+	if pins and D.obj then
+		for _, i in ipairs(pins) do
+			local objs = D.obj[i]
+			if objs and #objs > 0 then
+				for _, o in ipairs(objs) do
+					local om = D.map[o]
+					if om and om ~= 0 then
+						hasMappedObj = true
+						if MapInZone(om, maps) then return true, "obj" end
+					end
+				end
+			end
+		end
+	end
+	if hasMappedObj then
+		return false, "objOther"
+	end
+
+	if header and names and names[header] then return true, "header" end
+	if pins then
+		for _, i in ipairs(pins) do
+			local e = D.endp and D.endp[i]
+			if e and e ~= 0 then
+				if MapInZone(D.map[e], maps) then return true, "endp" end
+			elseif MapInZone(D.map[i], maps) then
+				return true, "start"
+			end
+		end
+	end
+	return false, "none"
 end
 
 local function IsReady(q)
@@ -78,29 +167,70 @@ end
 -- sticks (it was untracked again on every quest log update, which fought you).
 local movedOut = {}
 
--- the quests in your log: all of them, the set that is this zone's, and the ones ready to turn in (in log order)
+-- the quests in your log (plus any watched quests under collapsed/hidden Quest Log headers):
+-- all of them, the set that is this zone's, the ones ready to turn in (in log order), zone names/maps, and match reasons
 local function LogQuests()
 	local names, maps = ZoneNames()
-	local all, here, ready = {}, {}, {}
+	local curDung = ns.CurrentPlayerDungeon and ns.CurrentPlayerDungeon() or nil
+	local inInstance = curDung ~= nil
+	local dungPins
+	if curDung then
+		if type(curDung.instName) == "string" and curDung.instName ~= "" then names[curDung.instName] = true end
+		if curDung.dungeon then
+			if type(curDung.dungeon.name) == "string" and curDung.dungeon.name ~= "" then names[curDung.dungeon.name] = true end
+			if curDung.dungeon.quests and #curDung.dungeon.quests > 0 then
+				dungPins = {}
+				for _, qi in ipairs(curDung.dungeon.quests) do dungPins[qi] = true end
+			end
+		end
+	end
+	local all, here, ready, reasons = {}, {}, {}, {}
+	local seen, headerOf = {}, {}
 	local qt = ns.db and ns.db.questTitles
 	local header
 	for idx = 1, ns.NumQuestLogEntries() do
 		local info = ns.QuestInfo(idx)
 		if info then
 			if info.isHeader then
-				header = info.title
-			elseif not info.isHidden and info.questID and info.questID ~= 0 then
+				header = (type(info.title) == "string" and not issecretvalue(info.title) and info.title ~= "") and info.title or nil
+			elseif type(info.questID) == "number" and not issecretvalue(info.questID) and info.questID ~= 0 then
 				local q = info.questID
-				if qt and type(info.title) == "string" and not issecretvalue(info.title) and info.title ~= "" then
-					qt[q] = info.title
+				if header then headerOf[q] = header end
+				if not info.isHidden then
+					seen[q] = true
+					if qt and type(info.title) == "string" and not issecretvalue(info.title) and info.title ~= "" then
+						qt[q] = info.title
+					end
+					all[#all + 1] = q
+					local inZ, why = QuestInZone(q, maps, header, names, inInstance, dungPins)
+					if inZ then here[q] = true end
+					reasons[q] = why
+					if IsReady(q) then ready[#ready + 1] = q else movedOut[q] = nil end
 				end
-				all[#all + 1] = q
-				if (header and names[header]) or QuestInZone(q, maps) then here[q] = true end
-				if IsReady(q) then ready[#ready + 1] = q else movedOut[q] = nil end
 			end
 		end
 	end
-	return all, here, ready, names
+	-- Also include any watched quest omitted from GetInfo (e.g. under a collapsed or hidden Quest Log header)
+	-- so out-of-zone watched quests can never stay stuck in Blizzard's Objective Tracker.
+	local numWatches = (C_QuestLog.GetNumQuestWatches and C_QuestLog.GetNumQuestWatches()) or 0
+	if type(numWatches) == "number" and not issecretvalue(numWatches) then
+		for w = 1, numWatches do
+			local q = C_QuestLog.GetQuestIDForQuestWatchIndex and C_QuestLog.GetQuestIDForQuestWatchIndex(w)
+			if type(q) == "number" and not issecretvalue(q) and q ~= 0 and not seen[q] then
+				local isTask = C_QuestLog.IsQuestTask and C_QuestLog.IsQuestTask(q) == true
+				local isBounty = C_QuestLog.IsQuestBounty and C_QuestLog.IsQuestBounty(q) == true
+				if not isTask and not isBounty and ns.QuestInLog(q) then
+					seen[q] = true
+					all[#all + 1] = q
+					local inZ, why = QuestInZone(q, maps, headerOf[q], names, inInstance, dungPins)
+					if inZ then here[q] = true end
+					reasons[q] = why
+					if IsReady(q) then ready[#ready + 1] = q else movedOut[q] = nil end
+				end
+			end
+		end
+	end
+	return all, here, ready, names, maps, reasons
 end
 
 ---------------------------------------------------------------------------
@@ -147,8 +277,8 @@ local function TrackZoneQuests()
 	if not db.trackMyZone or UnitOnTaxi("player") then return end   -- on a flight the landing comes back here
 	if not next(names) then return end                               -- a loading screen: leave the tracker alone
 	for _, q in ipairs(all) do
-		-- the zone tracking ignores ready quests, pinned ones, and the currently focused quest
-		if not isReady[q] and not db.pinned[q] and not (ns.ClickFocus and ns.ClickFocus() == q) then
+		-- the zone tracking ignores ready quests and pinned ones (a highlighted/focused quest from another zone still untracks unless pinned)
+		if not isReady[q] and not db.pinned[q] then
 			local watched = Watched(q)
 			if here[q] and not watched then
 				ourAdd[q] = true; C_Timer.After(2, function() ourAdd[q] = nil end)   -- its event, not a later one of yours
@@ -175,6 +305,8 @@ local PIN_ATLAS = (C_Texture.GetAtlasInfo("friendslist-recentallies-pin-yellow")
 	or (C_Texture.GetAtlasInfo("friends-icon-pinned") and "friends-icon-pinned") or nil
 local pinButtons = {}   -- pool, one per quest shown in the tracker
 local groupBadges = {}  -- pool of taint-free group quest-count pills beside tracker blocks
+local UpdatePins        -- forward declaration: PinButton unpinning hides removed pins immediately
+local CheckZoneAndTaxi  -- forward declaration: watcher checks taxi landing and silent zone-map changes
 
 -- Pinned down: upright, in full colour. Not pinned: tipped over and grey, brighter under the mouse.
 local function PaintPin(b)
@@ -195,11 +327,32 @@ local function PinButton(n)
 	b:SetScript("OnClick", function(self)
 		local q = self.questID
 		if not q then return end
-		ns.db.pinned[q] = not ns.db.pinned[q] or nil
-		if ns.Sound then
-			ns.Sound(ns.db.pinned[q] and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF", true)
+		if IsReady(q) then
+			ns.db.pinned[q] = nil
+			UpdatePins(false)
+			return
 		end
-		if Watched(q) then PaintPin(self) end
+		local nowPinned = not ns.db.pinned[q]
+		ns.db.pinned[q] = nowPinned or nil
+		if ns.Sound then
+			ns.Sound(nowPinned and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF", true)
+		end
+		if not nowPinned then
+			if UnitOnTaxi and UnitOnTaxi("player") then
+				local _, here, _, names = LogQuests()
+				if ns.db.trackMyZone and next(names) and not here[q] and Watched(q) then
+					ns.RemoveQuestWatch(q)
+				end
+			else
+				ns.TrackZoneQuests()
+			end
+		end
+		if Watched(q) then
+			PaintPin(self)
+		else
+			UpdatePins(false)
+		end
+		if ns.RefreshQuestDetails then ns.RefreshQuestDetails(false) end
 		if ns.UpdateFocus then ns.UpdateFocus(false) end
 		if ns.Refresh then
 			ns.Refresh()
@@ -268,7 +421,7 @@ local function RestoreBlockAlpha(block)
 	end
 end
 
-local function UpdatePins(refreshTooltip)
+UpdatePins = function(refreshTooltip)
 	local n, gn = 0, 0
 	local tracker = ObjectiveTrackerFrame
 	if tracker and tracker:IsVisible() then
@@ -286,7 +439,7 @@ local function UpdatePins(refreshTooltip)
 							local blockLvl = block:GetFrameLevel()
 							local badgeLvl = (type(blockLvl) == "number" and not issecretvalue(blockLvl)) and (blockLvl + 10) or nil
 							local pinBtn
-							if ns.db.trackMyZone then
+							if ns.db.trackMyZone and not IsReady(id) then
 								n = n + 1
 								local b = PinButton(n)
 								pinBtn = b
@@ -569,14 +722,20 @@ local function Build()
 	section.collapse = btn
 	section.head = head
 
-	local watcher, elapsed = CreateFrame("Frame"), 0
+	local watcher, elapsed, zoneTick = CreateFrame("Frame"), 0, 0
 	watcher:SetScript("OnUpdate", function(_, dt)
 		elapsed = elapsed + dt
 		if elapsed < .1 then return end
+		zoneTick = zoneTick + elapsed
 		elapsed = 0
 		Place()
 		UpdatePins()
 		UpdateQuestClicks()
+		if CheckZoneAndTaxi then
+			local pollZone = zoneTick >= 0.5
+			if pollZone then zoneTick = 0 end
+			CheckZoneAndTaxi(pollZone)
+		end
 	end)
 end
 
@@ -676,19 +835,53 @@ local function Queue(zone, delay)
 	end)
 end
 local lastZoneKey
+local wasOnTaxi = false
 local function ZoneKey()
 	local r = GetRealZoneText and GetRealZoneText()
 	local z = GetZoneText and GetZoneText()
-	local b = C_Map.GetBestMapForUnit("player") or 0
+	local b = C_Map.GetBestMapForUnit("player")
+	b = (type(b) == "number" and not issecretvalue(b)) and b or 0
 	return ((type(r) == "string" and not issecretvalue(r)) and r or "") .. "\1"
 		.. ((type(z) == "string" and not issecretvalue(z)) and z or "") .. "\1" .. b
 end
+local function OnTaxiLanded()
+	lastZoneKey = ZoneKey()
+	ns.TrackZoneQuests()
+	Queue(true, 0.8)
+end
+CheckZoneAndTaxi = function(pollZone)
+	local onTaxi = (UnitOnTaxi and UnitOnTaxi("player") == true) or false
+	if wasOnTaxi and not onTaxi then
+		wasOnTaxi = false
+		OnTaxiLanded()
+		return
+	end
+	wasOnTaxi = onTaxi
+	if pollZone and not onTaxi and ns.db and ns.db.trackMyZone then
+		local k = ZoneKey()
+		if lastZoneKey and k ~= lastZoneKey then
+			lastZoneKey = k
+			ns.TrackZoneQuests()
+			Queue(true, 0.5)
+		elseif not lastZoneKey then
+			lastZoneKey = k
+		end
+	end
+end
 events.ZONE_CHANGED_NEW_AREA = function()
+	if UnitOnTaxi and UnitOnTaxi("player") then
+		wasOnTaxi = true
+		return
+	end
 	lastZoneKey = ZoneKey()
 	ns.TrackZoneQuests()
 	Queue(true)
 end
 events.ZONE_CHANGED = function()
+	if UnitOnTaxi and UnitOnTaxi("player") then
+		wasOnTaxi = true
+		return
+	end
 	local k = ZoneKey()
 	if k ~= lastZoneKey then
 		lastZoneKey = k
@@ -696,15 +889,42 @@ events.ZONE_CHANGED = function()
 		Queue(true)
 	end
 end
+events.ZONE_CHANGED_INDOORS = events.ZONE_CHANGED
 -- The loading screen: the rules apply at once, in this event, before the tracker draws (its updates run on the next
 -- frame: DirtiableMixin), so it never shows the quests it is about to drop; then again a second later in case the
 -- quest log was still filling in.
 events.PLAYER_ENTERING_WORLD = function()
+	wasOnTaxi = (UnitOnTaxi and UnitOnTaxi("player") == true) or false
 	lastZoneKey = ZoneKey()
 	if ns.NumQuestLogEntries() > 0 then ns.TrackZoneQuests() end
 	Queue(true)
 end
-events.PLAYER_CONTROL_GAINED = function() Queue(true) end
+events.PLAYER_CONTROL_GAINED = function()
+	if UnitOnTaxi and UnitOnTaxi("player") then
+		wasOnTaxi = true
+		Queue(true, 0.5)
+	elseif wasOnTaxi or ZoneKey() ~= lastZoneKey then
+		wasOnTaxi = false
+		OnTaxiLanded()
+	end
+end
+events.UNIT_EXITED_VEHICLE = function(_, unit)
+	if not issecretvalue(unit) and unit == "player" then
+		if UnitOnTaxi and UnitOnTaxi("player") then
+			wasOnTaxi = true
+			Queue(true, 0.5)
+		elseif wasOnTaxi or ZoneKey() ~= lastZoneKey then
+			wasOnTaxi = false
+			OnTaxiLanded()
+		end
+	end
+end
+events.UPDATE_BONUS_ACTIONBAR = function()
+	if wasOnTaxi and not (UnitOnTaxi and UnitOnTaxi("player")) then
+		wasOnTaxi = false
+		OnTaxiLanded()
+	end
+end
 -- QUEST_ACCEPTED payload is questID (QuestLogDocumentation, QuestAccepted).
 events.QUEST_ACCEPTED = function(_, questID)
 	if questID then
@@ -746,18 +966,22 @@ events.QUEST_WATCH_LIST_CHANGED = function(_, q, added)
 	if accepted[q] then accepted[q] = nil return end
 	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
 end
--- A quest whose objective advances (QUEST_WATCH_UPDATE / QUEST_LOG_CRITERIA_UPDATE): pin it and track it if not
--- already tracked (unless the advancement completed the quest, in which case it moves to Ready to Turn In).
+-- A quest whose objective advances (QUEST_WATCH_UPDATE / QUEST_LOG_CRITERIA_UPDATE): if an untracked quest
+-- makes progress (e.g. a cross-zone drop), pin and track it; never silently pin quests already tracked in your zone.
 local function OnQuestAdvance(_, q)
-	if type(q) ~= "number" or q == 0 or issecretvalue(q) or not ns.QuestLogIndex(q) then return end
-	ourAdd[q], accepted[q], movedOut[q] = nil, nil, nil
+	if type(q) ~= "number" or issecretvalue(q) or q == 0 or not ns.QuestLogIndex(q) then return end
+	ourAdd[q], accepted[q] = nil, nil
 	if IsReady(q) then
 		ns.db.pinned[q] = nil
 		if MoveReadyOut({ q }) then ns.UpdateReady() end
 		return
 	end
-	if ns.db.trackMyZone and not IsReady(q) then ns.db.pinned[q] = true end
-	if not Watched(q) then ns.AddQuestWatch(q) end
+	movedOut[q] = nil
+	if not Watched(q) then
+		if ns.AddQuestWatch(q) and ns.db.trackMyZone then
+			ns.db.pinned[q] = true
+		end
+	end
 end
 events.QUEST_WATCH_UPDATE = OnQuestAdvance
 events.QUEST_LOG_CRITERIA_UPDATE = OnQuestAdvance
@@ -838,7 +1062,8 @@ UpdateQuestClicks = function()   -- (declared with the pins: their watcher runs 
 	end
 end
 
-local EVENTS = { "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED", "PLAYER_ENTERING_WORLD", "PLAYER_CONTROL_GAINED", "QUEST_ACCEPTED",
+local EVENTS = { "ZONE_CHANGED_NEW_AREA", "ZONE_CHANGED", "ZONE_CHANGED_INDOORS", "PLAYER_ENTERING_WORLD",
+	"PLAYER_CONTROL_GAINED", "UNIT_EXITED_VEHICLE", "UPDATE_BONUS_ACTIONBAR", "QUEST_ACCEPTED",
 	"QUEST_TURNED_IN", "QUEST_REMOVED", "QUEST_WATCH_LIST_CHANGED", "QUEST_WATCH_UPDATE",
 	"QUEST_LOG_CRITERIA_UPDATE", "QUEST_LOG_UPDATE", "ADDON_LOADED" }
 function ns.InitTracker()   -- Core.lua, at PLAYER_LOGIN (before the first loading screen ends)
@@ -848,14 +1073,26 @@ end
 
 -- /dmap zone: what the tracking sees, to check it in game
 function ns.ReportZone()
-	local all, here, ready, names = LogQuests()
-	local list = {}
+	local all, here, ready, names, maps, reasons = LogQuests()
+	local list, mapList = {}, {}
 	for n in pairs(names) do list[#list + 1] = n end
+	for id in pairs(maps) do mapList[#mapList + 1] = tostring(id) end
+	table.sort(list)
+	table.sort(mapList)
 	ns.Print(("track only my zone's quests: %s; on a flight: %s"):format(ns.db.trackMyZone and "on" or "off",
 		UnitOnTaxi("player") and "yes" or "no"))
-	ns.Print("this zone goes by: " .. (#list > 0 and table.concat(list, ", ") or "(nothing)"))
+	ns.Print(("this zone: %s (maps: %s)"):format(#list > 0 and table.concat(list, ", ") or "(none)",
+		#mapList > 0 and table.concat(mapList, ", ") or "none"))
 	local mine = {}
 	for _, q in ipairs(all) do if here[q] then mine[#mine + 1] = ns.QuestTitle(q) or tostring(q) end end
 	ns.Print(("your log: %d quests, %d for this zone%s; %d ready to turn in"):format(#all, #mine,
 		#mine > 0 and (": " .. table.concat(mine, ", ")) or "", #ready))
+	for _, q in ipairs(all) do
+		if Watched(q) then
+			local qMap = ns.QuestUiMapID and ns.QuestUiMapID(q, true) or 0
+			ns.Print(("  watched: %s (#%d) - here=%s (%s), pinned=%s, ready=%s, map=%d"):format(
+				ns.QuestTitle(q) or "?", q, here[q] and "yes" or "no", reasons[q] or "?",
+				(ns.db.pinned and ns.db.pinned[q]) and "yes" or "no", IsReady(q) and "yes" or "no", qMap))
+		end
+	end
 end

@@ -604,10 +604,37 @@ local function EnsureDungeonIndex()
 	end
 end
 
+function ns.FindDungeonPlace(instName, instID)
+	if type(instID) == "number" and instID ~= 0 then
+		local byId = FindPlaceByInstID(instID)
+		if byId then return byId end
+	end
+	local places = instName and GetMapPlaces()
+	if not places then return nil end
+	local want = NormDungKey(instName)
+	if want == "" then return nil end
+	local partial
+	local function Scan(list)
+		for _, inst in ipairs(list or {}) do
+			local k = NormDungKey(inst[2])
+			if k == want then return inst end
+			if not partial and k ~= "" and (k:find(want, 1, true) or want:find(k, 1, true)) then
+				partial = inst
+			end
+		end
+		return nil
+	end
+	for _, g in ipairs(places.instances or {}) do
+		local hit = Scan(g[4])
+		if hit then return hit end
+	end
+	return Scan(places.unplaced) or partial
+end
+
 function ns.DungeonBosses(instID, dungName)
 	EnsureDungeonIndex()
 	local places = GetMapPlaces()
-	if not (places and places.bosses) then return nil end
+	if not (places and places.bosses) then return nil, nil end
 	local id = instID
 	if not (type(id) == "number" and id ~= 0) and dungName then
 		local k = NormDungKey(dungName)
@@ -618,7 +645,7 @@ function ns.DungeonBosses(instID, dungName)
 			end
 		end
 	end
-	return (id and places.bosses[id]) or nil
+	return (id and places.bosses[id]) or nil, id
 end
 
 function ns.MatchDungeon(instName, instID)

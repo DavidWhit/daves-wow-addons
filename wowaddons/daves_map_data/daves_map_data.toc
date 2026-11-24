@@ -2,7 +2,7 @@
 ## Title: |cffd4a94eDave's|r Map (data)
 ## Notes: QuestieDB Forever quests, objectives, turn-ins, chains, townsfolk and rares for Dave's Map.
 ## Author: davidwhit5 (data: Questie/QuestieDB contributors, NOTICE-QuestieDB.md)
-## Version: 2026.11.19
+## Version: 2026.11.24
 ## IconTexture: Interface\Icons\INV_Misc_Map_01
 
 Data.lua

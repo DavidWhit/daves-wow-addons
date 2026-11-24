@@ -475,3 +475,28 @@ function ns.OpenInstancePin(i, anchor, title, onlyDungeonView)
 	if onlyDungeonView or not i then return false end
 	return ns.ShowPinMap and ns.ShowPinMap(i, true) or false
 end
+
+function ns.HighlightDungeonBoss(bossName)
+	local stitch = ns.StitchWorld()
+	if stitch and stitch.HighlightDungeonBoss then
+		stitch.HighlightDungeonBoss(bossName)
+	end
+end
+
+function ns.FocusDungeonBoss(bossName)
+	local stitch = ns.StitchWorld()
+	return (stitch and stitch.FocusDungeonBoss and stitch.FocusDungeonBoss(bossName)) == true
+end
+
+function ns.OpenDungeonBoss(instID, dungName, bossName)
+	local stitch = ns.StitchWorld()
+	return (stitch and stitch.OpenDungeonBoss and stitch.OpenDungeonBoss(instID, dungName, bossName)) == true
+end
+
+function ns.DungeonBossFloor(instID, dungName, bossName)
+	local stitch = ns.StitchWorld()
+	if stitch and stitch.DungeonBossFloor then
+		return stitch.DungeonBossFloor(instID, dungName, bossName)
+	end
+	return nil, 0
+end

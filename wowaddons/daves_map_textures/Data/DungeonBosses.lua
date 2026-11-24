@@ -34,7 +34,7 @@ ns.MapDungeonBosses = {
 		["Mutanus the Devourer"] = { 1, 0.3456, 0.1373 }, -- MoP Classic's journal
 	},
 	[47] = { -- Razorfen Kraul
-		["Roogug"] = { 1, 0.8723, 0.4108 }, -- retail's journal
+		["Roogug"] = { 1, 0.4271, 0.5630 }, -- placed (OpenMap v0.8.13)
 		["Aggem Thorncurse"] = { 1, 0.8019, 0.5164 }, -- MoP Classic's journal
 		["Death Speaker Jargba"] = { 1, 0.8730, 0.4221 }, -- MoP Classic's journal
 		["Overlord Ramtusk"] = { 1, 0.5710, 0.3053 }, -- MoP Classic's journal

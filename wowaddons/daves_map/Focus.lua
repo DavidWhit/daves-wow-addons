@@ -33,7 +33,6 @@ local state = {
 	hookedPOI = {},
 	clickQuest = nil,
 	clickFromTracker = nil,
-	clickWasFocused = nil,
 	inQuestDetails = false,
 	detailsOpenedByBlizzQ = nil,
 	detailsOpenedByBlizzAt = 0,
@@ -835,8 +834,8 @@ end
 local function CentreQuest(q)
 	local _, S = ns.StitchWorld()
 	if not (WorldMapFrame and WorldMapFrame:IsShown() and Stitched() and S) then return end
-	local mapID = GetQuestUiMapID and GetQuestUiMapID(q)
-	if not mapID or mapID == 0 or issecretvalue(mapID) or not S.Rect(mapID) then return end
+	local mapID = ns.QuestUiMapID and ns.QuestUiMapID(q, true) or (GetQuestUiMapID and GetQuestUiMapID(q, true))
+	if type(mapID) ~= "number" or issecretvalue(mapID) or mapID == 0 or not S.Rect(mapID) then return end
 	FlyToQuestOn(mapID, q, true)
 end
 
@@ -844,7 +843,7 @@ function ns.PlainLeftClick(button)
 	return button == "LeftButton" and not IsShiftKeyDown() and not IsModifiedClick("CHATLINK")
 end
 
-function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
+function ns.QuestClicked(q, how, toggleSound, fromTracker)
 	if not (ns.db and type(q) == "number" and q ~= 0) or issecretvalue(q) then return nil end
 	-- Navigating from Blizzard's real Quest Log, Objective Tracker, or map quest pins releases any Zone/Dungeon sidebar lock.
 	local unlockedRef = ns.OnUserMapNavigate(true)
@@ -869,12 +868,12 @@ function ns.QuestClicked(q, how, toggleSound, fromTracker, wasFocused)
 	local mapAlreadyOpen = WorldMapFrame ~= nil and WorldMapFrame:IsShown() and (GetTime() - state.mapShownAt > .1)
 	local fromBlizzDetails = (state.detailsOpenedByBlizzQ == q and state.detailsOpenedByBlizzAt == GetTime())
 	local prevDetailQ = fromBlizzDetails and state.detailsHadPriorDetail or (ns.PanelUI and ns.PanelUI.detailQuestID or nil)
-	local alreadyFocused = (wasFocused ~= nil) and wasFocused or ns.ClickFocused(q)
+	local alreadyFocused = ns.ClickFocused(q)
 	local letGo
 	if not focusEnabled then
 		if how == "focused" then
 			letGo = now ~= q and not reopen
-			if letGo and state.lockedPin ~= pin then return false end
+			if letGo and not (pin ~= nil and state.lockedPin == pin) and prevDetailQ ~= q then return false end
 		else
 			local matchedPrev = (pin ~= nil and state.lockedPin == pin) or (pin == nil and prevDetailQ == q)
 			letGo = matchedPrev and not reopen and state.autoFocusedAt ~= GetTime() and mapAlreadyOpen
@@ -980,14 +979,13 @@ local function BeforePOIClick(poi)
 	local q = (accept == true or accept(poi)) and poi.GetQuestID and poi:GetQuestID() or nil
 	state.clickQuest = q
 	state.clickFromTracker = type(accept) == "function"
-	state.clickWasFocused = (q ~= nil and ns.ClickFocused(q)) or false
 end
 
 local function OnPOIClick(_, button)
-	local q, fromTracker, wasFocused = state.clickQuest, state.clickFromTracker, state.clickWasFocused
-	state.clickQuest, state.clickFromTracker, state.clickWasFocused = nil, nil, nil
+	local q, fromTracker = state.clickQuest, state.clickFromTracker
+	state.clickQuest, state.clickFromTracker = nil, nil
 	if q and ns.PlainLeftClick(button) then
-		ns.QuestClicked(q, fromTracker and "toggle" or "focused", false, fromTracker, fromTracker and wasFocused or nil)
+		ns.QuestClicked(q, "focused", false, fromTracker)
 	end
 end
 
@@ -1106,32 +1104,68 @@ function ns.InitFocus()
 	end
 end
 
+local function PinBelongsToQuest(pin, q)
+	if not (pin and q and ns.DATA) then return false end
+	if state.trackedQuestOfPin[pin] == q or ns.DATA.qid[pin] == q then return true end
+	if ns.LogQuestIDForPin and ns.LogQuestIDForPin(pin) == q then return true end
+	for tp, owner in pairs(state.trackedOwnerPin) do
+		if owner == pin and state.trackedQuestOfPin[tp] == q then return true end
+	end
+	return false
+end
+
 function ns:SUPER_TRACKING_CHANGED()
 	local q, mine = ns.SuperTrackedQuest(), ns.ClickFocus()
 	local trackedFoc = mine or (ns.TrackerFocusQuestID and ns.TrackerFocusQuestID())
+	local clearedPin = false
 	if trackedFoc and q and not issecretvalue(q) and q ~= trackedFoc and not (q == 0 and ns.KeepingFocus and ns.KeepingFocus(trackedFoc)) then
 		ns.SetClickFocus(nil)
 		if ns.ClearTrackerFocus then ns.ClearTrackerFocus() end
+		if state.refMode == nil and PinBelongsToQuest(state.lockedPin, trackedFoc) then
+			state.lockedPin = nil
+			clearedPin = true
+		end
 	end
-	if UpdateFocus(false) and ns.Refresh then
+	if (UpdateFocus(false) or clearedPin) and ns.Refresh then
 		ns.Refresh()
 	elseif WorldMapFrame and WorldMapFrame:IsVisible() and ns.db and ns.db.panelTab == "tracker" and ns.OnLayerChanged then
 		ns.OnLayerChanged()
 	end
 end
 
-local function RefreshTrackedIfChanged()
+local function RefreshTrackedIfChanged(forceRefresh)
 	if WorldMapFrame and WorldMapFrame:IsVisible() then
-		if UpdateFocus(false) and ns.Refresh then
+		if (UpdateFocus(false) or forceRefresh) and ns.Refresh then
 			ns.Refresh()
 		elseif ns.db and ns.db.panelTab == "tracker" and ns.OnLayerChanged then
 			ns.OnLayerChanged()
 		end
+	elseif ns.Refresh then
+		ns.Refresh()
+	elseif ns.OnLayerChanged then
+		ns.OnLayerChanged()
 	end
 end
 
-function ns:QUEST_WATCH_LIST_CHANGED()
-	RefreshTrackedIfChanged()
+function ns:QUEST_WATCH_LIST_CHANGED(q, added)
+	local clearedPin = false
+	if added == false and type(q) == "number" and not issecretvalue(q)
+		and not (ns.KeepingFocus and ns.KeepingFocus(q)) then
+		local cleared = false
+		if ns.ClickFocus() == q then
+			ns.SetClickFocus(nil)
+			cleared = true
+		end
+		if ns.TrackerFocusQuestID and ns.TrackerFocusQuestID() == q then
+			if ns.ClearTrackerFocus then ns.ClearTrackerFocus() end
+			cleared = true
+		end
+		if cleared and state.refMode == nil and PinBelongsToQuest(state.lockedPin, q) then
+			state.lockedPin = nil
+			clearedPin = true
+		end
+	end
+	RefreshTrackedIfChanged(clearedPin)
 end
 
 function ns:QUEST_ACCEPTED()

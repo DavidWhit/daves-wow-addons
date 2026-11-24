@@ -176,8 +176,10 @@ function ns.QuestReady(questID)
 	return C_QuestLog.ReadyForTurnIn(questID) == true
 end
 
-function ns.QuestUiMapID(questID)
-	return GetQuestUiMapID and GetQuestUiMapID(questID) or 0
+function ns.QuestUiMapID(questID, ignoreWaypoints)
+	if type(questID) ~= "number" or issecretvalue(questID) or questID == 0 then return 0 end
+	local m = GetQuestUiMapID and GetQuestUiMapID(questID, ignoreWaypoints == true) or 0
+	return (type(m) == "number" and not issecretvalue(m)) and m or 0
 end
 
 function ns.QuestWatched(questID)

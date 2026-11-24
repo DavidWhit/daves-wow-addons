@@ -22,6 +22,7 @@ local CHAIN_BTN_W = 42
 
 local HAS_LOCK_ATLAS = (C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("Padlock")) ~= nil
 local HAS_TURNIN_ATLAS = (C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo("QuestTurnin")) ~= nil
+local hoverBossRow, hoverBossName
 
 ---------------------------------------------------------------------------
 -- Pooled Row Helpers & Full Property Reset
@@ -321,9 +322,16 @@ local function RenderRow(row, item, yTop)
 		row.rewardBg:SetColorTexture(0.08, 0.07, 0.06, (item.num and item.num % 2 == 0) and 0.36 or 0.20)
 		row.rewardBg:Show()
 		row.num:SetPoint("LEFT", row, "LEFT", 10, 0)
-		row.num:SetText(("|cff998866%d.|r"):format(item.num or 1))
+		row.num:SetText(("|cffffd100%d.|r"):format(item.num or 1))
 		PlaceRowLabels(row, 34, false)
 		row.label:SetText("|cffe8d8a8" .. (item.title or "") .. "|r")
+		if item.floorNum and item.numFloors and item.numFloors > 1 then
+			row.count:SetText("|cff7fd4ffF" .. item.floorNum .. "|r")
+		elseif item.floorNum then
+			row.count:SetText("|cffd4b56aMap|r")
+		else
+			row.count:SetText("")
+		end
 		return
 	end
 
@@ -761,6 +769,13 @@ local function Render()
 		row:Hide()
 		row.item = nil
 	end
+	if hoverBossRow then
+		local it = hoverBossRow:IsShown() and hoverBossRow.item or nil
+		if not (it and it.kind == "boss" and it.inView and it.title == hoverBossName) then
+			hoverBossRow, hoverBossName = nil, nil
+			if ns.HighlightDungeonBoss then ns.HighlightDungeonBoss(nil) end
+		end
+	end
 	ui.rows.n = r
 	if ns.SyncPanelScrollBar then
 		ns.SyncPanelScrollBar(ui.scrollPx, listH, totalH)
@@ -935,7 +950,7 @@ local function OnRowClick(row, button)
 	end
 	local D, db = ns.DATA, ns.db
 	local item = row.item
-	if not (D and db and item) or item.kind == "note" or item.kind == "qcols" or item.kind == "boss" then return end
+	if not (D and db and item) or item.kind == "note" or item.kind == "qcols" then return end
 
 	if item.kind == "head" then
 		if item.action == "toggle_all_layers" then
@@ -984,6 +999,36 @@ local function OnRowClick(row, button)
 			if ns.SyncQuestDetailsPane then ns.SyncQuestDetailsPane(item.questPin) end
 			ns.ShowPinMap(target, true, fromRef)
 		end
+	elseif item.kind == "boss" then
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+		if item.inView and ns.IsDungeonViewShown and ns.IsDungeonViewShown() then
+			if ns.FocusDungeonBoss then ns.FocusDungeonBoss(item.title) end
+			return
+		end
+		local hasPin = item.dungeonPin and item.dungeonPin ~= 0
+		local fromRef = hasPin and LockIfRefTab(item.dungeonPin) or false
+		ns.BeforeOpenDungeonMap(hasPin and item.dungeonPin or nil, item.dungeonName)
+		local opened = false
+		if ns.OpenDungeonBoss then
+			opened = ns.OpenDungeonBoss(item.instID, item.dungeonName, item.title)
+		end
+		if not opened and item.isCurrentInstance and ns.OpenCurrentInstanceMap then
+			opened = ns.OpenCurrentInstanceMap()
+			if opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.FocusDungeonBoss then
+				ns.FocusDungeonBoss(item.title)
+			end
+		end
+		if not opened and ns.OpenInstancePin then
+			opened = ns.OpenInstancePin(hasPin and item.dungeonPin or nil, row, item.dungeonName, true)
+			if opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.FocusDungeonBoss then
+				ns.FocusDungeonBoss(item.title)
+			end
+		end
+		if not (opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown()) then
+			ns.CancelOpenDungeonMap()
+			if not opened and hasPin then ns.ShowPinMap(item.dungeonPin, true, fromRef) end
+		end
+		return
 	elseif item.kind == "dung_open" then
 		local hasPin = item.i and item.i ~= 0
 		if hasPin and (IsShiftKeyDown() or IsControlKeyDown()) then
@@ -1333,6 +1378,23 @@ MakeRow = function(r)
 		if not (D and item) then return end
 		if item.kind == "reward" then
 			ShowRewardItemTooltip(self, item)
+		elseif item.kind == "boss" then
+			if item.inView and ns.HighlightDungeonBoss then
+				hoverBossRow, hoverBossName = self, item.title
+				ns.HighlightDungeonBoss(item.title)
+			end
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:AddLine(("%d. %s"):format(item.num or 1, item.title or ""), 1, .82, .2)
+			if item.floorNum then
+				if item.numFloors and item.numFloors > 1 then
+					GameTooltip:AddLine(("Floor %d - Click to show on dungeon map"):format(item.floorNum), .5, .85, 1)
+				else
+					GameTooltip:AddLine("Click to highlight on dungeon map", .5, .85, 1)
+				end
+			else
+				GameTooltip:AddLine(item.inView and "Position not mapped on floor yet" or "Click to open dungeon map", .7, .7, .7)
+			end
+			GameTooltip:Show()
 		elseif item.tip then
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 			GameTooltip:AddLine(item.tipTitle or StripCodes(item.label or ""), 1, .82, .2)
@@ -1346,6 +1408,10 @@ MakeRow = function(r)
 		end
 	end)
 	row:SetScript("OnLeave", function(self)
+		if hoverBossRow == self then
+			hoverBossRow, hoverBossName = nil, nil
+			if ns.HighlightDungeonBoss then ns.HighlightDungeonBoss(nil) end
+		end
 		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
 	end)
 	ui.rows[r] = row

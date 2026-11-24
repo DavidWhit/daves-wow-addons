@@ -873,24 +873,24 @@ local function BuildDungeonItems()
 		if not closed then
 			local hasPin = d.pin and d.pin ~= 0
 			local canOpenCur = isInsideInst and ns.HasCurrentInstanceMap and ns.HasCurrentInstanceMap()
-			if hasPin or canOpenCur then
-				local inViewNow = false
-				if dungViewShown then
-					if hasPin and ui.dungeonOpenPin and ui.dungeonOpenPin == d.pin then
+			local inViewNow = false
+			if dungViewShown then
+				if hasPin and ui.dungeonOpenPin and ui.dungeonOpenPin == d.pin then
+					inViewNow = true
+				elseif ui.dungeonOpenName then
+					local matchedD = ns.MatchDungeon and select(1, ns.MatchDungeon(ui.dungeonOpenName)) or nil
+					if matchedD == d then
 						inViewNow = true
-					elseif ui.dungeonOpenName then
-						local matchedD = ns.MatchDungeon and select(1, ns.MatchDungeon(ui.dungeonOpenName)) or nil
-						if matchedD == d then
+					elseif ns.NormDungKey then
+						local ok = ns.NormDungKey(ui.dungeonOpenName)
+						local dk = ns.NormDungKey(d.name)
+						if ok ~= "" and dk ~= "" and (ok == dk or ok:find(dk, 1, true) or dk:find(ok, 1, true)) then
 							inViewNow = true
-						elseif ns.NormDungKey then
-							local ok = ns.NormDungKey(ui.dungeonOpenName)
-							local dk = ns.NormDungKey(d.name)
-							if ok ~= "" and dk ~= "" and (ok == dk or ok:find(dk, 1, true) or dk:find(ok, 1, true)) then
-								inViewNow = true
-							end
 						end
 					end
 				end
+			end
+			if hasPin or canOpenCur then
 				local subParts = { inViewNow and "Floor map open" or "Open floor map & bosses" }
 				if dTotal > 0 then
 					local rem = dTotal - dDone
@@ -918,20 +918,44 @@ local function BuildDungeonItems()
 					sub = dTotal > 0 and "Uncheck Hide Completed in Base to view completed quests." or "Bosses and floor map details are still available below.",
 				}
 			end
-		end
-		if isActiveInst and not minimal and activeDung.bosses and #activeDung.bosses > 0 then
-			local bKey = "bosses:" .. d.name
-			local bClosed = fold[bKey] == true
-			ui.items[#ui.items + 1] = {
-				kind = "zsec",
-				key = bKey,
-				title = "Bosses",
-				n = tostring(#activeDung.bosses),
-				closed = bClosed,
-			}
-			if not bClosed then
-				for bIdx, bossName in ipairs(activeDung.bosses) do
-					ui.items[#ui.items + 1] = { kind = "boss", num = bIdx, title = bossName }
+			local bosses, bossInstID = nil, (isActiveInst and activeDung.instID) or nil
+			if isActiveInst and activeDung.bosses and #activeDung.bosses > 0 then
+				bosses = activeDung.bosses
+			elseif ns.DungeonBosses then
+				bosses, bossInstID = ns.DungeonBosses(bossInstID, d.name)
+			end
+			if bosses and #bosses > 0 then
+				local bKey = "bosses:" .. d.name
+				local bClosed = fold[bKey]
+				if bClosed == nil then
+					bClosed = (not isActiveInst and not inViewNow and (multiDungs or minimal)) and true or false
+				end
+				ui.items[#ui.items + 1] = {
+					kind = "zsec",
+					key = bKey,
+					title = "Bosses",
+					n = tostring(#bosses),
+					closed = bClosed,
+				}
+				if not bClosed then
+					for bIdx, bossName in ipairs(bosses) do
+						local floorNum, numFloors
+						if ns.DungeonBossFloor then
+							floorNum, numFloors = ns.DungeonBossFloor(bossInstID, d.name, bossName)
+						end
+						ui.items[#ui.items + 1] = {
+							kind = "boss",
+							num = bIdx,
+							title = bossName,
+							instID = bossInstID,
+							dungeonName = d.name,
+							dungeonPin = hasPin and d.pin or 0,
+							isCurrentInstance = isInsideInst,
+							inView = inViewNow,
+							floorNum = floorNum,
+							numFloors = numFloors,
+						}
+					end
 				end
 			end
 		end

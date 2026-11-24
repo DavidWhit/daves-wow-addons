@@ -795,6 +795,52 @@ end
 function ns.ActiveDungeonContext()
 	local D = ns.DATA
 	local curDung = (ns.CurrentPlayerDungeon and ns.CurrentPlayerDungeon()) or nil
+	local viewZ = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
+	if ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ui.dungeonOpenName then
+		local drec, zMap, instID
+		if ns.MatchDungeon then
+			drec, zMap, instID = ns.MatchDungeon(ui.dungeonOpenName)
+		end
+		if curDung and curDung.dungeon then
+			local same = (drec ~= nil and drec == curDung.dungeon)
+			if not same and ns.NormDungKey then
+				local ok = ns.NormDungKey(ui.dungeonOpenName)
+				local ck = ns.NormDungKey(curDung.dungeon.name)
+				same = ok ~= "" and ck ~= "" and (ok == ck or ok:find(ck, 1, true) or ck:find(ok, 1, true))
+			end
+			if same then
+				return curDung.zoneMap or viewZ, curDung
+			end
+		end
+		if not drec and ns.FindDungeonPlace then
+			local place = ns.FindDungeonPlace(ui.dungeonOpenName, instID)
+			if place then
+				instID = (place[1] and place[1] ~= 0) and place[1] or instID
+				drec = {
+					name = place[2] or ui.dungeonOpenName,
+					lo = place[4] or 0,
+					hi = place[5] or place[4] or 0,
+					raid = place[3] == true,
+					pin = ui.dungeonOpenPin or 0,
+					quests = {},
+				}
+			end
+		end
+		if drec then
+			local bosses, resolvedID = nil, instID
+			if ns.DungeonBosses then
+				bosses, resolvedID = ns.DungeonBosses(instID, drec.name)
+			end
+			return zMap or viewZ, {
+				dungeon = drec,
+				zoneMap = zMap or viewZ,
+				instID = resolvedID or instID,
+				instName = ui.dungeonOpenName,
+				bosses = bosses,
+				fromView = true,
+			}
+		end
+	end
 	local pinned = (ns.RefLayerMode and ns.RefLayerMode() == "dungeon" and ns.PinnedRefZone and ns.PinnedRefZone()) or nil
 	local locked = pinned or ui.dungeonZoneLock
 	if locked then
@@ -806,22 +852,8 @@ function ns.ActiveDungeonContext()
 	if curDung and not ui.dungeonBrowseOther then
 		return curDung.zoneMap, curDung
 	end
-	local viewZ = (ns.ViewZoneMap and ns.ViewZoneMap()) or ns.CurrentMap()
 	if viewZ and D and D.dungeons and D.dungeons[viewZ] and #D.dungeons[viewZ] > 0 then
 		return viewZ, nil
-	end
-	if ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ui.dungeonOpenName and ns.MatchDungeon then
-		local drec, zMap, instID = ns.MatchDungeon(ui.dungeonOpenName)
-		if drec then
-			return zMap, {
-				dungeon = drec,
-				zoneMap = zMap,
-				instID = instID,
-				instName = ui.dungeonOpenName,
-				bosses = ns.DungeonBosses and ns.DungeonBosses(instID, drec.name) or nil,
-				fromView = true,
-			}
-		end
 	end
 	return viewZ, nil
 end
@@ -912,6 +944,7 @@ function ns.SelectSidebarTab(tabKey)
 			Sound("IG_CHARACTER_INFO_TAB")
 			ui.dungeonBrowseOther = nil
 			ui.dungeonZoneLock = nil
+			if dungShown and ns.CloseDungeonView then ns.CloseDungeonView() end
 			if ns.PinRefZone then ns.PinRefZone(nil) end
 			if ns.Refresh then ns.Refresh() elseif ns.OnLayerChanged then ns.OnLayerChanged() end
 			return

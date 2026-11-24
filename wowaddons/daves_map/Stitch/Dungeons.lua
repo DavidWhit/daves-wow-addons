@@ -34,6 +34,7 @@ end
 local d = mod.defaults
 d.dungeonMaps = true            -- the maps of dungeons and raids (off: the world map, and an entrance's card)
 d.dungeonBosses = true          -- the card lists a dungeon's bosses
+d.dungeonBossList = true        -- (daves_map: collapsible on-map Bosses list overlay on the dungeon map)
 d.dungeonMinimap = false        -- dungeons' maps from the game's minimap pictures, where there are (else only where there's no other)
 d.dungeonQuests = true          -- and its quests (questSource)
 d.questSource = "auto"          -- the quests from: "questie", "journal" (Dungeon Journal), "needroll"; "auto": the first there
@@ -182,6 +183,7 @@ local INNER_TABS = 36           -- the panel's bosses / quests / loot tabs, down
 local TAB_W, TAB_H = 40, 42     -- a tab by the quest log, out from it by along it (WoW Forever's tab art; a little smaller)
 local NEEDROLL_URL = "https://www.curseforge.com/wow/addons/needroll"
 local view
+local bossUI = {}   -- (daves_map: on-map collapsible Bosses overlay, pin highlight & header layout)
 local QuestList, EnsureQuests, FillSide, Dock, PlaceTabs, PlaceMarks, PlacePins, EndMarkup   -- (below)
 
 local function Sound(name)
@@ -262,6 +264,8 @@ local function LayoutView()
 	end
 	if PlaceMarks then PlaceMarks(pw, ph) end
 	if PlacePins then PlacePins(pw, ph) end
+	if bossUI.LayoutHeader then bossUI.LayoutHeader() end
+	if bossUI.LayoutPanel then bossUI.LayoutPanel() end
 end
 
 local function ShowFloor(i, quiet)
@@ -269,6 +273,7 @@ local function ShowFloor(i, quiet)
 	i = ((i - 1) % #floors) + 1
 	if not quiet and i ~= view.floor then Sound("IG_MAINMENU_OPTION_CHECKBOX_ON") end
 	view.floor = i
+	if not bossUI.keepFocus then bossUI.focusBoss = nil end
 	local f = floors[i]
 	for k, t in ipairs(view.tiles) do
 		if f.tiles then t:SetTexture(f.tiles[k], nil, nil, "TRILINEAR") end
@@ -277,16 +282,18 @@ local function ShowFloor(i, quiet)
 	view.blank:SetShown(f.blank and true or false)
 	view.blankText:SetShown(f.blank and true or false)
 	view.credit:SetText(f.credit and L["Map by %s"]:format(f.credit) or "")
-	view.floorName:SetText(("|cffffd100%s|r%s"):format(view.FloorName(i), #floors > 1 and ("  |cff998866%d / %d|r"):format(i, #floors) or ""))
+	local instName = S.InstanceName(view.inst)
+	local floorLabel = view.FloorName(i)
+	view.floorName:SetText(("|cffffd100%s|r%s"):format(floorLabel, #floors > 1 and ("  |cff998866%d / %d|r"):format(i, #floors) or ""))
 	view.wing:SetText(f.wing and (f.wing .. "   ") or "")
-	view.where:SetText(S.InstanceName(view.inst))
+	view.where:SetText((#floors > 1 or floorLabel ~= instName) and instName or "")
 	view.prev:SetShown(#floors > 1)
 	view.next:SetShown(#floors > 1)
-	view.floorButton:SetWidth(math.max(160, (view.floorName:GetStringWidth() or 120) + 24))
 	view.floorButton:EnableMouse(#floors > 1)
 	if view.list then view.list:Hide() end
 	if view.side and view.side.LightThumbs then view.side.LightThumbs() end
 	view.zoom, view.ox, view.oy = 1, 0, 0
+	if bossUI.UpdatePanel then bossUI.UpdatePanel() end
 	LayoutView()
 end
 
@@ -396,15 +403,52 @@ local function BuildView()
 	local close = CreateFrame("Button", nil, bar, "UIPanelCloseButton")
 	close:SetPoint("RIGHT", -4, 0)
 	close:SetScript("OnClick", function() CloseView() end)
+	-- (daves_map: compact Bosses toggle pill left of Close in the dungeon map header bar)
+	local bossBtn = CreateFrame("Button", nil, bar)
+	bossBtn:SetSize(82, 22)
+	bossBtn:SetPoint("RIGHT", close, "LEFT", -4, 0)
+	if addonNs.AddBrassPillSlices then
+		bossBtn.frame = addonNs.AddBrassPillSlices(bossBtn, "BACKGROUND", 11)
+		addonNs.AddBrassPillSlices(bossBtn, "HIGHLIGHT", 11, "ADD", 0.35)
+	else
+		local bbg = bossBtn:CreateTexture(nil, "BACKGROUND")
+		bbg:SetAllPoints()
+		bbg:SetColorTexture(0.14, 0.11, 0.08, 0.92)
+		local bhl = bossBtn:CreateTexture(nil, "HIGHLIGHT")
+		bhl:SetAllPoints()
+		bhl:SetColorTexture(1, 0.85, 0.4, 0.22)
+	end
+	bossBtn.lbl = Look:Font(bossBtn:CreateFontString(nil, "OVERLAY"), 11)
+	bossBtn.lbl:SetPoint("CENTER", 0, 0)
+	bossBtn.lbl:SetWordWrap(false)
+	bossBtn:SetScript("OnClick", function()
+		mod.db.dungeonBossList = not (mod.db.dungeonBossList ~= false)
+		Sound(mod.db.dungeonBossList and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		if bossUI.UpdatePanel then bossUI.UpdatePanel() end
+	end)
+	bossBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+		GameTooltip:AddLine("Dungeon Bosses", 1, 0.82, 0)
+		GameTooltip:AddLine("Show or hide the boss list overlay on this dungeon map.", 0.9, 0.9, 0.9, true)
+		GameTooltip:Show()
+	end)
+	bossBtn:SetScript("OnLeave", GameTooltip_Hide)
+	bossBtn:Hide()
+	view.bossBtn = bossBtn
 	view.where = Look:Font(bar:CreateFontString(nil, "OVERLAY"), 12)
 	view.where:SetPoint("LEFT", 12, 0)
+	view.where:SetJustifyH("LEFT")
+	view.where:SetWordWrap(false)
 	view.where:SetTextColor(0.8, 0.7, 0.5)
 	view.floorButton = CreateFrame("Button", nil, bar)
 	view.floorButton:SetSize(200, 30)
 	view.floorButton:SetPoint("CENTER")
 	view.floorButton:SetHighlightTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight", "ADD")
 	view.floorName = Look:Font(view.floorButton:CreateFontString(nil, "OVERLAY"), 15)
-	view.floorName:SetPoint("CENTER", 0, 4)
+	view.floorName:SetPoint("LEFT", 6, 4)
+	view.floorName:SetPoint("RIGHT", -6, 4)
+	view.floorName:SetJustifyH("CENTER")
+	view.floorName:SetWordWrap(false)
 	view.wing = Look:Font(view.floorButton:CreateFontString(nil, "OVERLAY"), 10)
 	view.wing:SetPoint("TOP", view.floorName, "BOTTOM", 0, -1)
 	view.wing:SetTextColor(0.8, 0.7, 0.5)
@@ -573,48 +617,9 @@ local function BuildView()
 	side:SetScript("OnSizeChanged", function(self, w)
 		if w and math.abs((self.filledW or 0) - w) > 1 then C_Timer.After(0, FillSide) end
 	end)
-	-- the tabs beside the quest log while the panel's in it: the log's list, or the dungeon (the log's
-	-- own tabs' look; WoW Forever's log doesn't show its tabs)
-	local tabs = CreateFrame("Frame", nil, map)    -- (the map's: the view clips, and they're past its edge)
-	view.sideTabs = tabs
-	tabs:SetSize(TAB_W, TAB_H * 2 + 3)
-	tabs.list = {}
-	for i, t in ipairs({ { "quests", QUESTS_LABEL or L["Quests"], "questlog-tab-icon-quest", "questlog-tab-icon-quest-inactive" },
-			{ "dungeon", L["Dungeon"], "questlog-questtypeicon-dungeon" } }) do
-		local b = CreateFrame("Button", nil, tabs)
-		b:SetSize(TAB_W, TAB_H)
-		b:SetPoint("TOPRIGHT", 0, -(i - 1) * (TAB_H + 3))
-		b.key, b.tip, b.on, b.off = t[1], t[2], t[3], t[4]
-		b.iconSize = 24
-		b.bg = b:CreateTexture(nil, "BACKGROUND")
-		b.icon = b:CreateTexture(nil, "ARTWORK")
-		b.selected = b:CreateTexture(nil, "OVERLAY")
-		b.hover = b:CreateTexture(nil, "HIGHLIGHT")
-		for _, tex in ipairs({ b.bg, b.selected, b.hover }) do tex:SetPoint("CENTER") end
-		b:SetScript("OnClick", function(self)
-			if PadView() then return end
-			local log = map.QuestLog
-			if log and log:IsVisible() then
-				if view.dockTab == self.key then return end
-				view.dockTab = self.key
-			else   -- (daves_map: never call HandleUserActionToggleSidePanel / ShowUIPanel; dock inside view)
-				local want = (self.key == "dungeon" and view.dockTab ~= "dungeon") and "dungeon" or "quests"
-				if view.dockTab == want then return end
-				view.dockTab = want
-			end
-			Sound("IG_CHARACTER_INFO_TAB")
-			Dock()
-			FillSide()
-		end)
-		b:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_LEFT", 4, -4)   -- (over the map, not the log)
-			GameTooltip:SetText(self.key == "dungeon" and view.inst and S.InstanceName(view.inst) or self.tip)
-			GameTooltip:Show()
-		end)
-		b:SetScript("OnLeave", GameTooltip_Hide)
-		tabs.list[i] = b
-	end
-	tabs:Hide()
+	-- (daves_map: OpenMap's floating quest/dungeon icon sideTabs are omitted because Dave's Map
+	-- provides its own right-hand Base / Tracker & Log / Zone / Dungeon panel plus the on-map Bosses overlay.)
+	if bossUI.BuildPanel then bossUI.BuildPanel() end
 	-- the mouse: the wheel zooms, a drag pans, a right-click goes back to the world
 	view:SetScript("OnMouseWheel", function(_, delta) Wheel(delta) end)
 	-- (drawing on it for a report, the markup: a left-drag draws, a right-drag pans, a right-click stays)
@@ -654,6 +659,8 @@ local function BuildView()
 	view:SetScript("OnSizeChanged", LayoutView)
 	view:SetScript("OnHide", function()
 		view.leaving = nil
+		bossUI.hoverBoss, bossUI.focusBoss = nil, nil
+		if view.bossPanel then view.bossPanel:Hide() end
 		EndMarkup(false)                            -- (a report being drawn: no report)
 		if view.placer then mod:ToggleBossPlacer() end   -- (placing bosses: done)
 		if view.list then view.list:Hide() end
@@ -901,6 +908,7 @@ EndMarkup = function(finished)
 	view.markup = nil
 	if view.markBar then view.markBar:Hide() end
 	if view.drawBar then view.drawBar:Hide() end
+	if bossUI.UpdatePanel then bossUI.UpdatePanel() end
 	if m.keep then                              -- (the quill's: already kept, as drawn)
 		RedrawMarks()
 		if mod.OnSketchChanged then mod.OnSketchChanged() end
@@ -933,6 +941,7 @@ function mod.DungeonDraw(on)
 	view.MarkStart, view.MarkMove, view.MarkFinish = MarkStart, MarkMove, MarkFinish
 	view.markup = { strokes = Kept(true), keep = true, ink = mod.SketchInk and mod.SketchInk() }
 	view.hint:Hide()
+	if view.bossPanel then view.bossPanel:Hide() end
 	DrawBar():Show()
 	RedrawMarks()
 	if mod.OnSketchChanged then mod.OnSketchChanged() end
@@ -949,6 +958,7 @@ function mod.DungeonMarkup(on, onEnd)
 	view.markLines = view.markLines or {}
 	view.markup = { strokes = {}, onEnd = onEnd }
 	view.hint:Hide()
+	if view.bossPanel then view.bossPanel:Hide() end
 	MarkBar():Show()
 	RedrawMarks()
 end
@@ -1026,6 +1036,7 @@ end
 mod.FaceSideTab = FaceTab
 
 local function FaceTabs(mirrored, open)
+	if not (view and view.sideTabs and view.sideTabs.list) then return end
 	for _, b in ipairs(view.sideTabs.list) do
 		FaceTab(b, mirrored, open and b.key == view.dockTab or false)   -- (the log put away: neither is the one shown)
 	end
@@ -1056,7 +1067,7 @@ DockNow = function()
 	if not view then return end
 	local side, tabs = view.side, view.sideTabs
 	if view.leaving then                        -- (going: out of the log at once, not after the view's shrunk)
-		tabs:Hide()
+		if tabs then tabs:Hide() end
 		if side:GetParent() ~= view then side:Hide() end
 		return
 	end
@@ -1089,33 +1100,15 @@ DockNow = function()
 			LayoutView()
 		end
 	end
-	if not view:IsShown() then tabs:Hide() return end
-	PlaceTabs(open)
+	if tabs then tabs:Hide() end   -- (daves_map: floating quest/dungeon icon tabs are permanently disabled)
 end
 
--- the tabs, low down inside the map's right edge (the quest log's left while it's open), turned to sit
--- flat to it; past the end of OpenMap's own tabs when they're on that edge too (Panel.lua). Shown with
--- the log put away too: one brings it back, at that tab
-PlaceTabs = function(open)
-	local tabs, log = view.sideTabs, map.QuestLog
-	if PadView() then tabs:Hide() return end
-	local inView = not open and view.side:IsShown()   -- (daves_map: shift tabs left of the in-view side panel)
-	if mod.PlaceDungeonTabsFrame then mod.PlaceDungeonTabsFrame(tabs)
-	else
-		tabs:ClearAllPoints()
-		tabs:SetPoint("BOTTOMRIGHT", sc, "BOTTOMRIGHT", inView and -SIDE_W or 0, 44)
-	end
-	-- (over the view: it's the map's whole view)
-	tabs:SetFrameLevel(math.min(math.max(log and log:GetFrameLevel() + 610 or 0, view:GetFrameLevel() + 40), 9900))
-	FaceTabs("right", open or inView)
-	tabs:Show()
+-- (daves_map: OpenMap's floating edge tabs are removed; keep no-op entrypoints for any callers)
+PlaceTabs = function()
+	if view and view.sideTabs then view.sideTabs:Hide() end
 end
--- (OpenMap's tabs grew or moved: these go with them)
 function mod.PlaceDungeonTabs()
-	if view and view:IsShown() and not view.leaving then
-		local log = map.QuestLog
-		PlaceTabs(log and log:IsVisible() and true or false)
-	end
+	if view and view.sideTabs then view.sideTabs:Hide() end
 end
 
 -- a dungeon's map in the view: its wing's first floor, else its first; grown out of `pin` (the entrance)
@@ -1142,6 +1135,7 @@ local function OpenView(inst, pin)
 	end
 	EndMarkup(false)
 	view.heldMarks = nil
+	bossUI.hoverBoss, bossUI.focusBoss = nil, nil
 	view.fromU, view.fromV = pin and pin.u, pin and pin.v   -- (the entrance: where a report from here says it is)
 	view.leaving = nil
 	view:SetAlpha(1)
@@ -1156,8 +1150,6 @@ local function OpenView(inst, pin)
 	if (mod.db.dungeonHints or 0) < HINTS then
 		mod.db.dungeonHints = (mod.db.dungeonHints or 0) + 1
 		local hint = L["|cffffd100Right-click|r or |cffffd100Esc|r to go back to the world map"]
-		-- (the log put away: where the dungeon's bosses, quests and loot are)
-		if not view.side:IsShown() then hint = hint .. "\n" .. L["Bosses, quests and loot are in the tabs at the map's edge"] end
 		view.hintText:SetText(hint)
 		view.hint:SetHeight((view.hintText:GetStringHeight() or 14) + 12)
 		view.hint:SetAlpha(1)
@@ -2045,7 +2037,7 @@ end
 -- tools/map-dungeons/bosses.py --import brings it into the data.
 --------------------------------------------------------------------------------
 
-local PIN_SIZE = 22
+local PIN_SIZE = 24
 
 -- (as Kept's; a map built from the minimap pictures has its own floors, so its own places: "minimap:<mapID>")
 local function InstKey(inst)
@@ -2083,7 +2075,7 @@ end
 local function PinTip(pin)
 	GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
 	GameTooltip:AddLine(("%d. %s"):format(pin.index, pin.name), 1, 0.82, 0)
-	if pin.mine then GameTooltip:AddLine(L["Placed by you (/openmap bosses)"], 0.6, 0.6, 0.6) end
+	if pin.mine then GameTooltip:AddLine(L["Placed by you"], 0.6, 0.6, 0.6) end
 	if NeedRoll() then GameTooltip:AddLine(L["Click to see loot in NeedRoll"], 0.6, 0.6, 0.6) end
 	GameTooltip:Show()
 end
@@ -2092,20 +2084,51 @@ local function MakePin(i)
 	local pin = CreateFrame("Button", nil, view.page)
 	pin:SetSize(PIN_SIZE, PIN_SIZE)
 	pin:SetFrameLevel(view.page:GetFrameLevel() + 5)
-	pin.icon = pin:CreateTexture(nil, "ARTWORK")
-	pin.icon:SetAllPoints()
-	if not Atlas(pin.icon, "DungeonSkull") then pin.icon:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull") end
-	pin.ring = pin:CreateTexture(nil, "BACKGROUND")
+	pin.hlRing = pin:CreateTexture(nil, "BACKGROUND", nil, -1)
+	pin.hlRing:SetPoint("CENTER")
+	pin.hlRing:SetSize(PIN_SIZE + 18, PIN_SIZE + 18)
+	pin.hlRing:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+	pin.hlRing:SetBlendMode("ADD")
+	pin.hlRing:SetVertexColor(1, 0.82, 0.22, 0.88)
+	pin.hlRing:Hide()
+	pin.ring = pin:CreateTexture(nil, "BACKGROUND", nil, 0)
 	pin.ring:SetPoint("CENTER")
-	pin.ring:SetSize(PIN_SIZE + 6, PIN_SIZE + 6)
+	pin.ring:SetSize(PIN_SIZE + 8, PIN_SIZE + 8)
 	pin.ring:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-	pin.ring:SetVertexColor(0, 0, 0, 0.7)
+	pin.ring:SetVertexColor(0, 0, 0, 0.82)
+	pin.icon = pin:CreateTexture(nil, "ARTWORK")
+	pin.icon:SetPoint("CENTER")
+	pin.icon:SetSize(PIN_SIZE, PIN_SIZE)
+	if not Atlas(pin.icon, "DungeonSkull") then pin.icon:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull") end
 	pin.num = Look:Font(pin:CreateFontString(nil, "OVERLAY"), 11, "OUTLINE")
 	pin.num:SetPoint("CENTER", pin, "BOTTOMRIGHT", -2, 3)
 	pin.num:SetTextColor(1, 0.82, 0)
-	pin:SetScript("OnEnter", PinTip)
-	pin:SetScript("OnLeave", GameTooltip_Hide)
+	-- (daves_map: crisp floating boss nameplate shown on hover or boss-list selection)
+	local tag = CreateFrame("Frame", nil, pin, "BackdropTemplate")
+	tag:SetHeight(19)
+	tag:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	tag:SetBackdropColor(0.05, 0.04, 0.03, 0.94)
+	tag:SetBackdropBorderColor(0.84, 0.66, 0.28, 0.95)
+	tag.text = Look:Font(tag:CreateFontString(nil, "OVERLAY"), 11)
+	tag.text:SetPoint("CENTER", 0, 0)
+	tag.text:SetWordWrap(false)
+	tag:Hide()
+	pin.tag = tag
+	pin:SetScript("OnEnter", function(self)
+		bossUI.hoverBoss = self.name
+		if bossUI.RefreshHighlight then bossUI.RefreshHighlight() end
+		PinTip(self)
+	end)
+	pin:SetScript("OnLeave", function(self)
+		if bossUI.hoverBoss == self.name then
+			bossUI.hoverBoss = nil
+			if bossUI.RefreshHighlight then bossUI.RefreshHighlight() end
+		end
+		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+	end)
 	pin:SetScript("OnClick", function(self)
+		bossUI.focusBoss = self.name
+		if bossUI.RefreshHighlight then bossUI.RefreshHighlight() end
 		if NeedRoll() then OpenNeedRoll(self.name, IsShiftKeyDown() and "map" or nil) end
 	end)
 	view.bossPins[i] = pin
@@ -2124,9 +2147,21 @@ PlacePins = function(pw, ph)
 				n = n + 1
 				local pin = view.bossPins[n] or MakePin(n)
 				pin.index, pin.name, pin.mine = i, name, mine
+				pin.px, pin.py = p[2], p[3]
 				pin.num:SetText(i)
 				pin:ClearAllPoints()
 				pin:SetPoint("CENTER", view.page, "TOPLEFT", p[2] * pw, -p[3] * ph)
+				pin.tag.text:SetText(("|cffffd100%d.|r %s"):format(i, name))
+				local rawTagW = (pin.tag.text.GetUnboundedStringWidth and pin.tag.text:GetUnboundedStringWidth()) or pin.tag.text:GetStringWidth() or 40
+				local tagW = math.max(54, rawTagW + 14)
+				pin.tag:SetWidth(tagW)
+				pin.tag:ClearAllPoints()
+				local pinX, pinY = p[2] * pw, p[3] * ph
+				local above = (pinY + PIN_SIZE * 0.5 + 24) > ph
+				local vSelf = above and "BOTTOM" or "TOP"
+				local vPin = above and "TOP" or "BOTTOM"
+				local hSide = (pinX - tagW * 0.5 < 4) and "LEFT" or ((pinX + tagW * 0.5 > pw - 4) and "RIGHT" or "")
+				pin.tag:SetPoint(vSelf .. hSide, pin, vPin .. hSide, 0, above and 3 or -3)
 				pin:EnableMouse(not placing)
 				-- (placing: the one just placed lit, the others dimmed)
 				pin:SetAlpha(placing and (placing.last == name and 1 or 0.6) or 1)
@@ -2134,7 +2169,13 @@ PlacePins = function(pw, ph)
 			end
 		end
 	end
-	for i = n + 1, #view.bossPins do view.bossPins[i]:Hide() end
+	for i = n + 1, #view.bossPins do
+		local p = view.bossPins[i]
+		p.tag:Hide()
+		p.hlRing:Hide()
+		p:Hide()
+	end
+	if bossUI.RefreshHighlight then bossUI.RefreshHighlight() end
 end
 
 local function RedrawPins()
@@ -2142,6 +2183,429 @@ local function RedrawPins()
 	if pw and pw > 0 then PlacePins(pw, ph) end
 end
 mod.RedrawBossPins = function() if view and view:IsShown() then RedrawPins() end end
+
+-- (daves_map: on-map collapsible Bosses overlay, header width management, and interactive pin highlighting)
+function bossUI.LayoutHeader()
+	if not (view and view.floorButton and view.where and view.prev and view.next) then return end
+	local barW = view:GetWidth()
+	if not barW or barW <= 0 then return end
+	local floors = view.floors or {}
+	local multi = #floors > 1
+	local rightRes = 38 + ((view.bossBtn and view.bossBtn:IsShown()) and (view.bossBtn:GetWidth() + 10) or 0)
+	local hasWhere = (view.where:GetText() or "") ~= ""
+	local leftRes = hasWhere and math.min(130, math.max(58, math.floor(barW * 0.22))) or 10
+	local arrowPad = multi and 32 or 4
+	local maxFW = math.max(96, barW - leftRes - rightRes - arrowPad * 2)
+	local rawW = (view.floorName.GetUnboundedStringWidth and view.floorName:GetUnboundedStringWidth()) or view.floorName:GetStringWidth() or 110
+	local textW = rawW + 20
+	local fw = math.min(maxFW, math.max(110, textW))
+	view.floorButton:SetWidth(fw)
+	local spanL = leftRes + arrowPad
+	local spanR = barW - rightRes - arrowPad
+	local half = fw * 0.5
+	local mid = barW * 0.5
+	local cx = 0
+	if (mid + half > spanR) or (mid - half < spanL) then
+		cx = ((spanL + spanR) * 0.5) - mid
+	end
+	view.floorButton:ClearAllPoints()
+	view.floorButton:SetPoint("CENTER", view.floorButton:GetParent(), "CENTER", cx, 0)
+	view.where:ClearAllPoints()
+	view.where:SetPoint("LEFT", view.where:GetParent(), "LEFT", 12, 0)
+	view.where:SetPoint("RIGHT", multi and view.prev or view.floorButton, "LEFT", -6, 0)
+end
+
+function bossUI.RefreshHighlight()
+	if not view then return end
+	local active = bossUI.hoverBoss or bossUI.focusBoss
+	local baseLvl = view.page and (view.page:GetFrameLevel() + 5) or 10
+	for _, pin in ipairs(view.bossPins or {}) do
+		if pin:IsShown() then
+			local lit = active ~= nil and pin.name == active
+			pin.hlRing:SetShown(lit)
+			pin.tag:SetShown(lit and not view.placer)
+			pin.icon:SetSize(lit and (PIN_SIZE + 5) or PIN_SIZE, lit and (PIN_SIZE + 5) or PIN_SIZE)
+			pin.ring:SetSize(lit and (PIN_SIZE + 13) or (PIN_SIZE + 8), lit and (PIN_SIZE + 13) or (PIN_SIZE + 8))
+			pin:SetFrameLevel(lit and (baseLvl + 7) or baseLvl)
+		end
+	end
+	local bp = view.bossPanel
+	if bp and bp:IsShown() then
+		for _, row in ipairs(bp.rows or {}) do
+			if row:IsShown() then
+				local lit = active ~= nil and row.bossName == active
+				row.selBg:SetShown(lit)
+			end
+		end
+	end
+end
+
+function bossUI.ApplyScroll(bp)
+	if not bp then return end
+	local clipH = bp.clip:GetHeight() or 1
+	local maxScroll = math.max(0, (bp.contentH or 0) - clipH)
+	bp.scrollY = math.max(0, math.min(bp.scrollY or 0, maxScroll))
+	bp.content:ClearAllPoints()
+	bp.content:SetPoint("TOPLEFT", bp.clip, "TOPLEFT", 0, bp.scrollY)
+	bp.content:SetPoint("TOPRIGHT", bp.clip, "TOPRIGHT", 0, bp.scrollY)
+	if maxScroll > 1 then
+		local trackH = math.max(16, clipH - 4)
+		local thumbH = math.max(18, math.floor(trackH * (clipH / bp.contentH)))
+		local travel = math.max(1, trackH - thumbH)
+		local offset = math.floor((bp.scrollY / maxScroll) * travel + 0.5)
+		bp.thumb:SetHeight(thumbH)
+		bp.thumb:ClearAllPoints()
+		bp.thumb:SetPoint("TOPRIGHT", bp.clip, "TOPRIGHT", -1, -2 - offset)
+		bp.thumb:Show()
+	else
+		bp.thumb:Hide()
+	end
+end
+
+function bossUI.LayoutPanel()
+	local bp = view and view.bossPanel
+	if not (bp and bp:IsShown()) then return end
+	local portH = view.port and view.port:GetHeight() or 360
+	local maxH = math.max(96, math.floor(portH - 16))
+	local footH = bp.foot:IsShown() and 18 or 0
+	local wantH = 26 + (bp.contentH or 20) + footH + 8
+	bp:SetHeight(math.min(maxH, wantH))
+	bp.clip:ClearAllPoints()
+	bp.clip:SetPoint("TOPLEFT", bp, "TOPLEFT", 4, -26)
+	bp.clip:SetPoint("BOTTOMRIGHT", bp, "BOTTOMRIGHT", -4, 4 + footH)
+	bossUI.ApplyScroll(bp)
+end
+
+function bossUI.BuildPanel()
+	if not view or view.bossPanel then return end
+	local bp = CreateFrame("Frame", nil, view, "BackdropTemplate")
+	bp:SetWidth(206)
+	bp:SetPoint("TOPRIGHT", view.port, "TOPRIGHT", -8, -8)
+	bp:SetFrameLevel(view:GetFrameLevel() + 22)
+	bp:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
+	bp:SetBackdropColor(0.05, 0.04, 0.03, 0.86)
+	bp:SetBackdropBorderColor(0.66, 0.49, 0.28, 0.85)
+	bp:EnableMouse(true)
+	bp:EnableMouseWheel(true)
+	bp.title = Look:Font(bp:CreateFontString(nil, "OVERLAY"), 12)
+	bp.title:SetPoint("TOPLEFT", 8, -6)
+	bp.title:SetJustifyH("LEFT")
+	bp.title:SetWordWrap(false)
+	local hideBtn = CreateFrame("Button", nil, bp)
+	hideBtn:SetSize(18, 18)
+	hideBtn:SetPoint("TOPRIGHT", -4, -3)
+	local hhl = hideBtn:CreateTexture(nil, "HIGHLIGHT")
+	hhl:SetAllPoints()
+	hhl:SetColorTexture(1, 0.85, 0.35, 0.22)
+	local htxt = Look:Font(hideBtn:CreateFontString(nil, "OVERLAY"), 12)
+	htxt:SetPoint("CENTER", 0, 1)
+	htxt:SetText("|cffc8b896x|r")
+	hideBtn:SetScript("OnClick", function()
+		mod.db.dungeonBossList = false
+		Sound("IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		bossUI.UpdatePanel()
+	end)
+	hideBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+		GameTooltip:AddLine("Hide Bosses list", 1, 0.82, 0)
+		GameTooltip:Show()
+	end)
+	hideBtn:SetScript("OnLeave", GameTooltip_Hide)
+	local div = bp:CreateTexture(nil, "ARTWORK")
+	div:SetPoint("TOPLEFT", 4, -23)
+	div:SetPoint("TOPRIGHT", -4, -23)
+	div:SetHeight(1)
+	div:SetColorTexture(0.66, 0.49, 0.28, 0.50)
+	local clip = CreateFrame("Frame", nil, bp)
+	clip:SetPoint("TOPLEFT", 4, -26)
+	clip:SetPoint("BOTTOMRIGHT", -4, 4)
+	clip:SetClipsChildren(true)
+	bp.clip = clip
+	bp.content = CreateFrame("Frame", nil, clip)
+	bp.content:SetPoint("TOPLEFT")
+	bp.content:SetPoint("TOPRIGHT")
+	bp.content:SetHeight(1)
+	bp.thumb = clip:CreateTexture(nil, "OVERLAY")
+	bp.thumb:SetWidth(3)
+	bp.thumb:SetColorTexture(0.78, 0.62, 0.34, 0.85)
+	bp.thumb:Hide()
+	bp.foot = Look:Font(bp:CreateFontString(nil, "OVERLAY"), 10)
+	bp.foot:SetPoint("BOTTOMLEFT", 8, 5)
+	bp.foot:SetPoint("BOTTOMRIGHT", -8, 5)
+	bp.foot:SetJustifyH("LEFT")
+	bp.foot:SetWordWrap(false)
+	bp.foot:SetText("|cff8a8274Positions not mapped yet|r")
+	bp.foot:Hide()
+	bp.rows = {}
+	bp.scrollY = 0
+	bp.contentH = 0
+	bp:SetScript("OnMouseWheel", function(self, delta)
+		self.scrollY = (self.scrollY or 0) - delta * 24
+		bossUI.ApplyScroll(self)
+	end)
+	bp:Hide()
+	view.bossPanel = bp
+end
+
+function bossUI.ShowRowTip(self)
+	GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+	GameTooltip:AddLine(("%d. %s"):format(self.bossIdx or 1, self.bossName or ""), 1, 0.82, 0)
+	if self.bossFloor then
+		if self.bossFloor == view.floor then
+			GameTooltip:AddLine("Pinned on this floor", 0.35, 1, 0.45)
+		else
+			local fName = view.FloorName and view.FloorName(self.bossFloor) or ("Floor " .. tostring(self.bossFloor))
+			GameTooltip:AddLine(("On %s (Floor %d) - Click to view"):format(fName, self.bossFloor), 0.5, 0.85, 1)
+		end
+	else
+		GameTooltip:AddLine("No floor pin position recorded yet", 0.7, 0.7, 0.7)
+	end
+	if NeedRoll() then
+		GameTooltip:AddLine((self.bossFloor and self.bossFloor ~= view.floor) and "Shift-click: loot in NeedRoll" or "Click: loot in NeedRoll", 0.6, 0.6, 0.6)
+	end
+	GameTooltip:Show()
+end
+
+function bossUI.GetRow(bp, idx)
+	local row = bp.rows[idx]
+	if row then return row end
+	row = CreateFrame("Button", nil, bp.content)
+	row:SetHeight(20)
+	local hl = row:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetAllPoints()
+	hl:SetColorTexture(1, 0.84, 0.28, 0.16)
+	row.selBg = row:CreateTexture(nil, "BACKGROUND")
+	row.selBg:SetAllPoints()
+	row.selBg:SetColorTexture(1, 0.84, 0.28, 0.22)
+	row.selBg:Hide()
+	row.num = Look:Font(row:CreateFontString(nil, "OVERLAY"), 11)
+	row.num:SetPoint("LEFT", 4, 0)
+	row.num:SetWidth(22)
+	row.num:SetJustifyH("RIGHT")
+	row.badge = Look:Font(row:CreateFontString(nil, "OVERLAY"), 10)
+	row.badge:SetPoint("RIGHT", -6, 0)
+	row.badge:SetJustifyH("RIGHT")
+	row.badge:SetWordWrap(false)
+	row.skull = row:CreateTexture(nil, "ARTWORK")
+	row.skull:SetSize(12, 12)
+	row.skull:SetPoint("RIGHT", -6, 0)
+	if not Atlas(row.skull, "DungeonSkull") then row.skull:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull") end
+	row.skull:Hide()
+	row.name = Look:Font(row:CreateFontString(nil, "OVERLAY"), 11)
+	row.name:SetPoint("LEFT", row.num, "RIGHT", 5, 0)
+	row.name:SetPoint("RIGHT", row.badge, "LEFT", -4, 0)
+	row.name:SetJustifyH("LEFT")
+	row.name:SetWordWrap(false)
+	row:SetScript("OnEnter", function(self)
+		bossUI.hoverBoss = self.bossName
+		bossUI.RefreshHighlight()
+		bossUI.ShowRowTip(self)
+	end)
+	row:SetScript("OnLeave", function(self)
+		if bossUI.hoverBoss == self.bossName then
+			bossUI.hoverBoss = nil
+			bossUI.RefreshHighlight()
+		end
+		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+	end)
+	row:SetScript("OnClick", function(self)
+		if not self.bossName then return end
+		local jumped = self.bossFloor and self.bossFloor ~= view.floor
+		mod.FocusDungeonBoss(self.bossName)
+		if jumped and GameTooltip:GetOwner() == self then
+			bossUI.ShowRowTip(self)
+		end
+		if NeedRoll() and (not jumped or IsShiftKeyDown()) then
+			OpenNeedRoll(self.bossName, IsShiftKeyDown() and "map" or nil)
+		end
+	end)
+	bp.rows[idx] = row
+	return row
+end
+
+function bossUI.UpdatePanel()
+	if not view then return end
+	local inst = view.inst
+	local btn = view.bossBtn
+	local bp = view.bossPanel
+	local names = (inst and mod.db.dungeonBosses) and BossNames(inst) or {}
+	local count = #names
+	if btn then
+		if count > 0 then
+			local open = mod.db.dungeonBossList ~= false
+			btn.lbl:SetText((open and "|cffffd100Bosses (" or "|cffe8d8a8Bosses (") .. count .. ")|r")
+			if btn.frame then
+				if open then btn.frame:SetVertexColor(1, 0.96, 0.80, 1) else btn.frame:SetVertexColor(0.86, 0.80, 0.66, 0.90) end
+			end
+			btn:SetWidth(math.max(74, math.min(102, (btn.lbl:GetStringWidth() or 60) + 18)))
+			btn:Show()
+		else
+			btn:Hide()
+		end
+	end
+	bossUI.LayoutHeader()
+	if not bp then return end
+	if count == 0 or mod.db.dungeonBossList == false or not view:IsShown() or view.placer or view.markup then
+		bp:Hide()
+		return
+	end
+	local multiFloor = view.floors and #view.floors > 1
+	local pinnedTotal = 0
+	for i, name in ipairs(names) do
+		local p = BossAt(inst, name)
+		if p then pinnedTotal = pinnedTotal + 1 end
+		local onThisFloor = p and p[1] == view.floor
+		local row = bossUI.GetRow(bp, i)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", bp.content, "TOPLEFT", 0, -(i - 1) * 20)
+		row:SetPoint("TOPRIGHT", bp.content, "TOPRIGHT", 0, -(i - 1) * 20)
+		row:SetAlpha(1)
+		row.selBg:Hide()
+		row.skull:Hide()
+		row.badge:SetText("")
+		row.bossName = name
+		row.bossIdx = i
+		row.bossFloor = p and p[1] or nil
+		local numColor = onThisFloor and "|cffffd100" or "|cff9a8b68"
+		row.num:SetText(("%s%d.|r"):format(numColor, i))
+		local nameColor = (onThisFloor or not p) and "|cfff2ead8" or "|cff9a9386"
+		row.name:SetText(nameColor .. name .. "|r")
+		row.name:ClearAllPoints()
+		row.name:SetPoint("LEFT", row.num, "RIGHT", 5, 0)
+		if p and multiFloor then
+			row.badge:SetText((onThisFloor and "|cffffd100F" or "|cff7fd4ffF") .. p[1] .. "|r")
+			row.name:SetPoint("RIGHT", row.badge, "LEFT", -4, 0)
+		elseif onThisFloor then
+			row.skull:Show()
+			row.name:SetPoint("RIGHT", row.skull, "LEFT", -4, 0)
+		else
+			row.name:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+		end
+		row:Show()
+	end
+	for i = count + 1, #bp.rows do
+		bp.rows[i].bossName = nil
+		bp.rows[i]:Hide()
+	end
+	bp.title:SetText(("|cffffd100Bosses|r |cff998866(%d)|r"):format(count))
+	bp.foot:SetShown(pinnedTotal == 0)
+	bp.contentH = count * 20
+	bp.content:SetHeight(math.max(1, bp.contentH))
+	if bp.lastInst ~= inst then
+		bp.lastInst = inst
+		bp.scrollY = 0
+	end
+	bp:Show()
+	bossUI.LayoutPanel()
+	bossUI.RefreshHighlight()
+end
+
+function mod.HighlightDungeonBoss(bossName)
+	bossUI.hoverBoss = bossName
+	if view and view:IsShown() then bossUI.RefreshHighlight() end
+end
+
+function mod.FocusDungeonBoss(bossName)
+	if not (view and view:IsShown() and view.inst and bossName) then return false end
+	bossUI.focusBoss = bossName
+	local p = BossAt(view.inst, bossName)
+	if p then
+		if p[1] ~= view.floor and view.floors and view.floors[p[1]] then
+			bossUI.keepFocus = true
+			ShowFloor(p[1])
+			bossUI.keepFocus = nil
+		end
+		if view.zoom and view.zoom > 1.05 and view.page then
+			local pw, ph = view.page:GetSize()
+			if pw and pw > 0 and ph and ph > 0 then
+				view.ox = (0.5 - p[2]) * pw
+				view.oy = (p[3] - 0.5) * ph
+				LayoutView()
+			end
+		end
+	end
+	bossUI.RefreshHighlight()
+	return true
+end
+
+-- Pure side-effect-free lookup of a dungeon instance (and optional entrance pin) by instID or name.
+function bossUI.FindInst(instID, dungName)
+	local function ExactMatch(cand)
+		if instID and instID ~= 0 and cand[1] == instID then return true end
+		if dungName and Plain(cand[2]) == Plain(dungName) then return true end
+		return false
+	end
+	for _, pin in ipairs(entrancePins) do
+		for _, cand in ipairs(pin.instances or {}) do
+			if ExactMatch(cand) then return cand, pin end
+		end
+	end
+	local places = Places()
+	for _, g in ipairs(places.instances or {}) do
+		for _, cand in ipairs(g[4] or {}) do
+			if ExactMatch(cand) then return cand, nil end
+		end
+	end
+	for _, cand in ipairs(places.unplaced or {}) do
+		if ExactMatch(cand) then return cand, nil end
+	end
+	if dungName then
+		local want = Plain(dungName):gsub("[^%w]+", "")
+		if want ~= "" then
+			for _, pin in ipairs(entrancePins) do
+				for _, cand in ipairs(pin.instances or {}) do
+					local have = Plain(cand[2]):gsub("[^%w]+", "")
+					if have ~= "" and (have == want or have:find(want, 1, true) or want:find(have, 1, true)) then
+						return cand, pin
+					end
+				end
+			end
+			for _, g in ipairs(places.instances or {}) do
+				for _, cand in ipairs(g[4] or {}) do
+					local have = Plain(cand[2]):gsub("[^%w]+", "")
+					if have ~= "" and (have == want or have:find(want, 1, true) or want:find(have, 1, true)) then
+						return cand, nil
+					end
+				end
+			end
+		end
+	end
+	return nil, nil
+end
+
+-- Direct multi-wing-safe boss opener: opens the dungeon's floor map without popping a wing chooser, then focuses `bossName`.
+function mod.OpenDungeonBoss(instID, dungName, bossName)
+	if not MapsOn() then return false end
+	local inst, pin = bossUI.FindInst(instID, dungName)
+	if not inst then return false end
+	if not (view and view:IsShown() and view.inst and ((inst[1] ~= 0 and view.inst[1] == inst[1]) or view.inst[2] == inst[2])) then
+		GameTooltip:Hide()
+		Open(inst, pin)
+	end
+	if view and view:IsShown() then
+		if bossName then mod.FocusDungeonBoss(bossName) end
+		return true
+	end
+	return false
+end
+
+-- Pure side-effect-free lookup of a boss's pinned floor (and floor count) for Dave's Map sidebar rows.
+function mod.DungeonBossFloor(instID, dungName, bossName)
+	if not bossName then return nil, 0 end
+	local inst = bossUI.FindInst(instID, dungName)
+	if not inst then return nil, 0 end
+	local floors, src = FloorsOf(inst)
+	local nFloors = floors and #floors or 0
+	local baseKey = inst[1] ~= 0 and inst[1] or inst[2]
+	local key = (src == "minimap" and baseKey) and ("minimap:" .. baseKey) or baseKey
+	local mine = mod.db and mod.db.bossPlaced and (mod.db.bossPlaced[key] or (inst[2] and mod.db.bossPlaced[inst[2]]))
+	local p = mine and mine[bossName]
+	if not p then
+		local shipped = ns.MapDungeonBosses and ns.MapDungeonBosses[key]
+		p = shipped and shipped[bossName]
+	end
+	return p and p[1] or nil, nFloors
+end
 
 -- the placer's bar, over the picture's top: the boss to place, Skip, Undo, Done
 local function PlacerBar()
@@ -2236,6 +2700,7 @@ function mod:ToggleBossPlacer()
 		view.placer = nil
 		if view.placerBar then view.placerBar:Hide() end
 		RedrawPins()
+		if bossUI.UpdatePanel then bossUI.UpdatePanel() end
 		ns:Print(L["Boss places saved in OpenMapDB (worldmap, bossPlaced) once you /reload or log out; tools/map-dungeons/bosses.py --import adds them to OpenMap's data."])
 		return
 	end
@@ -2252,13 +2717,14 @@ function mod:ToggleBossPlacer()
 	if not mod.db.dungeonBosses then mod.db.dungeonBosses = true end   -- (placing them: shown)
 	view.placer = { names = names, at = 1, undo = {} }
 	view.hint:Hide()
+	if view.bossPanel then view.bossPanel:Hide() end
 	PlacerBar():Show()
 	PlacerShow()
 end
 mod.BossPlacing = function() return view and view.placer and true or false end
 mod.BossPlacerClick = function() PlacerClick() end
 
-mod.RefreshDungeonCard = function() Recolour() RefreshCard() FillSide() mod.RedrawBossPins() end   -- (settings changed: mod:Refresh)
+mod.RefreshDungeonCard = function() Recolour() RefreshCard() FillSide() mod.RedrawBossPins() if bossUI.UpdatePanel then bossUI.UpdatePanel() end end   -- (settings changed: mod:Refresh)
 mod.RefreshSideQuests = function()
 	if view and view:IsShown() and view.side and view.side:IsShown() and mod.db.dungeonTab == "quests" then
 		FillSide()
@@ -2589,8 +3055,12 @@ function mod:SetupDungeons(worldMap)
 	map:HookScript("OnHide", function()
 		hiddenAt, hiddenWith = GetTime(), view and view:IsShown() and { view.inst, view.fromU, view.fromV, view.floor } or nil
 		returnTo, shownMap, lastMap, portalCard = nil, nil, nil, nil
+		bossUI.hoverBoss, bossUI.focusBoss = nil, nil
 		if chooser then chooser:Hide() end
-		if view then view:Hide() end
+		if view then
+			if view.sideTabs then view.sideTabs:Hide() end
+			view:Hide()
+		end
 		RefreshCard()                               -- (the map's gone: the card too, and other addons told)
 	end)
 	-- the wheel past all the way out on a dungeon's map: back to the world
