@@ -30,6 +30,7 @@ local ui = {
 	history = {},
 	scrollByKey = {},
 	expandedChains = {},   -- [starterPin] = true | false (nil = auto-expand when player is currently on a step)
+	expandedBossLoot = {}, -- ["instID:bossName"] = true | false (nil = expanded unless Minimal quest info is on)
 	scrollPx = 0,
 	totalH = 0,
 	lastKey = nil,
@@ -279,6 +280,20 @@ function ns.ToggleChainExpanded(starterPin, currentlyExpanded)
 	if not starterPin then return false end
 	local nextVal = not currentlyExpanded
 	ui.expandedChains[starterPin] = nextVal
+	return nextVal
+end
+
+function ns.IsBossLootExpanded(bossKey, minimal)
+	if not bossKey then return false end
+	local explicit = ui.expandedBossLoot[bossKey]
+	if explicit ~= nil then return explicit end
+	return not minimal
+end
+
+function ns.ToggleBossLootExpanded(bossKey, currentlyExpanded)
+	if not bossKey then return false end
+	local nextVal = not (currentlyExpanded == true)
+	ui.expandedBossLoot[bossKey] = nextVal
 	return nextVal
 end
 

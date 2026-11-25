@@ -413,6 +413,7 @@ function ns:PLAYER_LOGIN()
 	if ns.InitQuests then ns.InitQuests() end
 	ns.InitTracker()
 	if ns.StartStitch then ns.StartStitch() end   -- the seamless map (Stitch\Base.lua)
+	if ns.InitNonStitchedViewport then ns.InitNonStitchedViewport() end   -- edge-to-edge cover fit for non-stitched maps (MapStage.lua)
 	if ns.RefreshControls then ns.RefreshControls() end
 	if ns.Refresh then ns.Refresh() end
 	local D = ns.DATA

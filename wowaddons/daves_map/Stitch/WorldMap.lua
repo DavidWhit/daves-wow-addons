@@ -67,6 +67,8 @@ function mod.Migrate(db)
 	db.dungeonDockTab = nil
 	-- (daves_map: dungeon maps & entrance portals enabled once on existing saves from before 0.5.8)
 	if not db.dungeonIconsOn then db.icons, db.dungeonIconsOn = true, true end
+	-- (daves_map: default the floating Bosses overlay off once on existing saves now that boss/rare markers render directly on the map)
+	if not db.bossListDefaultOff then db.dungeonBossList, db.bossListDefaultOff = false, true end
 end
 
 local ICONS_FROM = { 0, 20, 0.5 }   -- iconsFrom's least (0: Auto), most, step (zoom: times the whole-world view)

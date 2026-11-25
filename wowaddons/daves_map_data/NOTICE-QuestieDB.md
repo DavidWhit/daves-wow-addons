@@ -1,6 +1,11 @@
-# QuestieDB Data Attribution (`daves_map_data`)
+# QuestieDB & AtlasLootClassic Data Attribution (`daves_map_data`)
 
-`daves_map_data/Data.lua` is compiled by `daves_map/tools/Update-MapData.py` from the open-source [Questie/QuestieDB](https://github.com/Questie/QuestieDB) WoW: Forever dataset (including `data/Forever/`, `src/corrections/Forever/`, and `support/Forever/`). `daves_map` is an independent addon and is not affiliated with or endorsed by the Questie team.
+`daves_map_data/Data.lua` is compiled by `daves_map/tools/Update-MapData.py` from:
+
+- [Questie/QuestieDB](https://github.com/Questie/QuestieDB) WoW: Forever dataset (including `data/Forever/`, `src/corrections/Forever/`, and `support/Forever/`) for quests, objectives, turn-ins, chains, townsfolk, rares, and WoW: Forever custom dungeon boss drops.
+- [Hoizame/AtlasLootClassic](https://github.com/Hoizame/AtlasLootClassic) (`AtlasLootClassic_DungeonsAndRaids`, GPLv2) for curated Classic Vanilla dungeon and raid boss loot tables and drop rates.
+
+`daves_map` is an independent addon and is not affiliated with or endorsed by the Questie or AtlasLootClassic teams.
 
 ---
 

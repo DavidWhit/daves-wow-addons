@@ -256,12 +256,8 @@ function ns.ComputeLodFades(seamless, curMap, sz, zoom, outAlpha)
 			lz = 1.0
 		elseif mtype == Enum.UIMapType.Continent then
 			lz = 2.4 + z * 1.2
-		elseif mtype == Enum.UIMapType.Zone then
-			local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
-			local canZoom = sc and sc.GetScaleForMaxZoom and sc.GetScaleForMinZoom
-				and (sc:GetScaleForMaxZoom() > sc:GetScaleForMinZoom() + 1e-4)
-			lz = (ns.IsCityMap(curMap) or not canZoom) and 12.0 or (6.8 + z * 5.2)
 		else
+			-- Non-stitched zone/city/instance maps show full zone detail (including townsfolk) at cover zoom.
 			lz = 12.0
 		end
 	end
@@ -493,10 +489,18 @@ function ns.OpenDungeonBoss(instID, dungName, bossName)
 	return (stitch and stitch.OpenDungeonBoss and stitch.OpenDungeonBoss(instID, dungName, bossName)) == true
 end
 
+function ns.DungeonBossList(instID, dungName)
+	local stitch = ns.StitchWorld()
+	if stitch and stitch.DungeonBossList then
+		return stitch.DungeonBossList(instID, dungName)
+	end
+	return nil, nil
+end
+
 function ns.DungeonBossFloor(instID, dungName, bossName)
 	local stitch = ns.StitchWorld()
 	if stitch and stitch.DungeonBossFloor then
 		return stitch.DungeonBossFloor(instID, dungName, bossName)
 	end
-	return nil, 0
+	return nil, 0, false, 0, nil
 end

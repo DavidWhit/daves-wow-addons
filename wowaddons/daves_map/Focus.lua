@@ -664,9 +664,11 @@ local function LeftSidebarPad(totalW)
 	return 0
 end
 
-local function PanZoomScrollContainer(x, y)
+local function PanZoomScrollContainer(x, y, zoomIn)
+	if InCombatLockdown() then return false end
 	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
-	if not (sc and sc.Child and sc.SetZoomTarget and sc.SetPanTarget and sc.GetScaleForMaxZoom) then
+	if not (sc and sc.Child and sc.SetZoomTarget and sc.SetPanTarget and sc.GetScaleForMaxZoom
+		and sc.zoomLevels and #sc.zoomLevels > 0) then
 		return false
 	end
 	local cw, chH = sc.Child:GetSize()
@@ -674,8 +676,25 @@ local function PanZoomScrollContainer(x, y)
 	if not (cw and chH and cw > 0 and chH > 0 and vw and vh and vw > 0 and vh > 0) then
 		return false
 	end
+	local curScale = (sc.GetCanvasScale and sc:GetCanvasScale()) or 1
+	local minScale = (sc.GetScaleForMinZoom and sc:GetScaleForMinZoom()) or curScale
+	local maxScale = sc:GetScaleForMaxZoom() or minScale
+	local scale
+	if zoomIn then
+		scale = math.min(maxScale, math.max(curScale, minScale * 1.6))
+	else
+		scale = math.max(minScale, math.min(maxScale, curScale))
+		local curX = sc.GetCurrentScrollX and sc:GetCurrentScrollX()
+		local curY = sc.GetCurrentScrollY and sc:GetCurrentScrollY()
+		if curX and curY and cw * scale > 0 and chH * scale > 0 then
+			local halfX = (vw * 0.5) / (cw * scale)
+			local halfY = (vh * 0.5) / (chH * scale)
+			if math.abs(x - curX) < halfX * IN_VIEW and math.abs(y - curY) < halfY * IN_VIEW then
+				return false
+			end
+		end
+	end
 	local padL = LeftSidebarPad(vw)
-	local scale = sc:GetScaleForMaxZoom()
 	local cx, cy = x, y
 	if padL > 0 and cw * scale > 0 then
 		cx = cx - (padL * 0.5) / (cw * scale)
@@ -685,6 +704,7 @@ local function PanZoomScrollContainer(x, y)
 		cx = math.max(minX, math.min(maxX, cx))
 		cy = math.max(minY, math.min(maxY, cy))
 	end
+	if sc.SetScalingMode then sc:SetScalingMode("SCALING_MODE_LINEAR") end
 	sc:SetZoomTarget(scale)
 	sc:SetPanTarget(cx, cy)
 	return true
@@ -722,9 +742,9 @@ function ns.ShowPinMap(i, close, fromSidebar)
 		end
 	end
 	result = ShowMap(targetZone)
-	if close and targetZone and WorldMapFrame and WorldMapFrame:IsShown() and WorldMapFrame:GetMapID() == targetZone then
+	if not Stitched() and targetZone and WorldMapFrame and WorldMapFrame:IsShown() and WorldMapFrame:GetMapID() == targetZone then
 		local x, y = ns.ProjectPin(targetZone, i)
-		if x and y and PanZoomScrollContainer(x, y) then
+		if x and y and PanZoomScrollContainer(x, y, close == true) then
 			result = true
 		end
 	end
@@ -778,6 +798,18 @@ function ns.FindPlayer()
 	if best and best ~= 0 then
 		if stitch then stitch.lastSwitchAt = GetTime() end
 		ShowMap(best)
+		if not Stitched() and WorldMapFrame and WorldMapFrame:IsShown() and WorldMapFrame:GetMapID() == best then
+			local pos = C_Map.GetPlayerMapPosition(best, "player")
+			if pos then
+				local px, py = pos.x, pos.y
+				if pos.GetXY then px, py = pos:GetXY() end
+				if type(px) == "number" and type(py) == "number" and not issecretvalue(px) and not issecretvalue(py) and (px ~= 0 or py ~= 0) then
+					if PanZoomScrollContainer(px, py, true) then
+						Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+					end
+				end
+			end
+		end
 	end
 	if (clearedLock or clearedBrowse) and ns.Refresh then ns.Refresh() end
 end

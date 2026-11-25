@@ -357,8 +357,11 @@ bindEvents:SetScript("OnEvent", function(_, event)
 			local sc = WorldMapFrame.ScrollContainer
 			if sc and sc.mapID and sc.OnCanvasSizeChanged then
 				state.pendingCanvasResize = false
+				if ns.PrepareNonStitchedResize then ns.PrepareNonStitchedResize() end
 				sc:OnCanvasSizeChanged()
 			end
+		elseif ns.EnsureNonStitchedViewportFit then
+			ns.EnsureNonStitchedViewportFit()
 		end
 		if state.pendingProviderRefresh then
 			state.pendingProviderRefresh = false
@@ -481,6 +484,7 @@ function ns.CommitUnifiedMapResize(mapChanged)
 		local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
 		if not InCombatLockdown() and WorldMapFrame and WorldMapFrame:IsShown() and sc and sc.mapID and sc.OnCanvasSizeChanged then
 			state.pendingCanvasResize = false
+			if ns.PrepareNonStitchedResize then ns.PrepareNonStitchedResize() end
 			sc:OnCanvasSizeChanged()
 		else
 			state.pendingCanvasResize = true
@@ -731,6 +735,7 @@ LayoutUnifiedMapRegion = function(fromSpacerHook)
 	if fromSpacerHook and (math.abs(prevW - scW) > 1 or math.abs(prevH - mh) > 1) then
 		if WorldMapFrame:IsShown() and sc.mapID and sc.OnCanvasSizeChanged then
 			state.pendingCanvasResize = false
+			if ns.PrepareNonStitchedResize then ns.PrepareNonStitchedResize() end
 			sc:OnCanvasSizeChanged()
 		else
 			state.pendingCanvasResize = true
@@ -912,6 +917,8 @@ function ns.InitMapChrome()
 					state.pendingCanvasResize = false
 					mapSC:OnCanvasSizeChanged()
 				end
+			elseif ns.EnsureNonStitchedViewportFit then
+				ns.EnsureNonStitchedViewportFit()
 			end
 			SyncMapChromeStrata()
 			RefreshStage()

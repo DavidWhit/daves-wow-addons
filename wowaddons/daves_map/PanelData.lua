@@ -31,6 +31,7 @@ local ROW_HEIGHTS = {
 	logquest = 28,
 	dung_open = 34,
 	boss = 24,
+	boss_drop = 23,
 	poi = 34,
 	result = 34,
 	note = 38,
@@ -609,7 +610,7 @@ local function BuildLayersItems()
 		skey = "minimalQuestInfo",
 		label = "Minimal quest info",
 		tipTitle = "Minimal quest info",
-		tip = "Show only the quest row itself in quest lists (hides quest chains, chain steps, reward items, and extra Starter/XP columns).",
+		tip = "Show only the quest row itself in quest lists (hides quest chains, chain steps, reward items, boss drops by default, and extra Starter/XP columns).",
 		checked = db.minimalQuestInfo == true,
 	}
 
@@ -930,31 +931,72 @@ local function BuildDungeonItems()
 				if bClosed == nil then
 					bClosed = (not isActiveInst and not inViewNow and (multiDungs or minimal)) and true or false
 				end
+				local bossRows, rareCount, regCount = {}, 0, 0
+				for bIdx, bossName in ipairs(bosses) do
+					local floorNum, numFloors, isRare, spotCount, bossNote
+					if ns.DungeonBossFloor then
+						floorNum, numFloors, isRare, spotCount, bossNote = ns.DungeonBossFloor(bossInstID, d.name, bossName)
+					end
+					if isRare then
+						rareCount = rareCount + 1
+					else
+						regCount = regCount + 1
+					end
+					local drops = ns.BossDrops and ns.BossDrops(bossInstID, d.name, bossName) or nil
+					local dropCount = drops and math.floor(#drops / 2) or 0
+					local lootKey = tostring(bossInstID or d.name) .. ":" .. bossName
+					local lootExpanded = dropCount > 0 and ns.IsBossLootExpanded and ns.IsBossLootExpanded(lootKey, minimal) or false
+					bossRows[#bossRows + 1] = {
+						kind = "boss",
+						num = bIdx,
+						bossNum = not isRare and regCount or nil,
+						title = bossName,
+						instID = bossInstID,
+						dungeonName = d.name,
+						dungeonPin = hasPin and d.pin or 0,
+						isCurrentInstance = isInsideInst,
+						inView = inViewNow,
+						floorNum = floorNum,
+						numFloors = numFloors,
+						isRare = isRare == true,
+						spotCount = spotCount or 0,
+						bossNote = bossNote,
+						dropCount = dropCount,
+						drops = drops,
+						lootKey = lootKey,
+						lootExpanded = lootExpanded,
+					}
+				end
 				ui.items[#ui.items + 1] = {
 					kind = "zsec",
 					key = bKey,
-					title = "Bosses",
-					n = tostring(#bosses),
+					title = rareCount > 0 and "Bosses & Rares" or "Bosses",
+					n = rareCount > 0 and ("%d + %dR"):format(regCount, rareCount) or tostring(#bosses),
 					closed = bClosed,
 				}
 				if not bClosed then
-					for bIdx, bossName in ipairs(bosses) do
-						local floorNum, numFloors
-						if ns.DungeonBossFloor then
-							floorNum, numFloors = ns.DungeonBossFloor(bossInstID, d.name, bossName)
+					for _, br in ipairs(bossRows) do
+						ui.items[#ui.items + 1] = br
+						if br.lootExpanded and br.drops then
+							local drops = br.drops
+							for k = 1, #drops, 2 do
+								ui.items[#ui.items + 1] = {
+									kind = "boss_drop",
+									itemID = drops[k],
+									dropPct = drops[k + 1] or 0,
+									bossName = br.title,
+									bossNum = br.bossNum,
+									isRare = br.isRare,
+									instID = br.instID,
+									dungeonName = br.dungeonName,
+									dungeonPin = br.dungeonPin,
+									isCurrentInstance = br.isCurrentInstance,
+									inView = br.inView,
+									floorNum = br.floorNum,
+									numFloors = br.numFloors,
+								}
+							end
 						end
-						ui.items[#ui.items + 1] = {
-							kind = "boss",
-							num = bIdx,
-							title = bossName,
-							instID = bossInstID,
-							dungeonName = d.name,
-							dungeonPin = hasPin and d.pin or 0,
-							isCurrentInstance = isInsideInst,
-							inView = inViewNow,
-							floorNum = floorNum,
-							numFloors = numFloors,
-						}
 					end
 				end
 			end

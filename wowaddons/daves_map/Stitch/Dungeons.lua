@@ -34,7 +34,8 @@ end
 local d = mod.defaults
 d.dungeonMaps = true            -- the maps of dungeons and raids (off: the world map, and an entrance's card)
 d.dungeonBosses = true          -- the card lists a dungeon's bosses
-d.dungeonBossList = true        -- (daves_map: collapsible on-map Bosses list overlay on the dungeon map)
+d.dungeonBossList = false       -- (daves_map: optional on-map Bosses list overlay; off by default since boss/rare markers render directly on the map)
+d.bossListDefaultOff = true     -- (daves_map: marks fresh saves as already migrated to dungeonBossList = false)
 d.dungeonMinimap = false        -- dungeons' maps from the game's minimap pictures, where there are (else only where there's no other)
 d.dungeonQuests = true          -- and its quests (questSource)
 d.questSource = "auto"          -- the quests from: "questie", "journal" (Dungeon Journal), "needroll"; "auto": the first there
@@ -240,7 +241,7 @@ local function FloorsOf(inst)
 end
 local BLANK = { { blank = true } }    -- (the floors of a dungeon the client has no map of: one blank page)
 
-local function LayoutView()
+local function LayoutView(panOnly)
 	-- (no floor shown yet: showing the view can size its port before ShowFloor sets the zoom, and lays it out)
 	if not view or not view:IsShown() or not view.zoom then return end
 	local w, h = view.port:GetWidth(), view.port:GetHeight()
@@ -251,6 +252,11 @@ local function LayoutView()
 	local mx, my = math.max(0, (pw - w) / 2), math.max(0, (ph - h) / 2)
 	view.ox = math.max(-mx, math.min(mx, view.ox))
 	view.oy = math.max(-my, math.min(my, view.oy))
+	if panOnly == true then
+		view.page:ClearAllPoints()
+		view.page:SetPoint("CENTER", view.port, "CENTER", view.ox, view.oy)
+		return
+	end
 	view.page:SetSize(pw, ph)
 	view.page:ClearAllPoints()
 	view.page:SetPoint("CENTER", view.port, "CENTER", view.ox, view.oy)
@@ -422,14 +428,14 @@ local function BuildView()
 	bossBtn.lbl:SetPoint("CENTER", 0, 0)
 	bossBtn.lbl:SetWordWrap(false)
 	bossBtn:SetScript("OnClick", function()
-		mod.db.dungeonBossList = not (mod.db.dungeonBossList ~= false)
+		mod.db.dungeonBossList = not (mod.db.dungeonBossList == true)
 		Sound(mod.db.dungeonBossList and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
 		if bossUI.UpdatePanel then bossUI.UpdatePanel() end
 	end)
 	bossBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-		GameTooltip:AddLine("Dungeon Bosses", 1, 0.82, 0)
-		GameTooltip:AddLine("Show or hide the boss list overlay on this dungeon map.", 0.9, 0.9, 0.9, true)
+		GameTooltip:AddLine("Dungeon Bosses & Rares", 1, 0.82, 0)
+		GameTooltip:AddLine("Show or hide the boss and rare list overlay on this dungeon map.", 0.9, 0.9, 0.9, true)
 		GameTooltip:Show()
 	end)
 	bossBtn:SetScript("OnLeave", GameTooltip_Hide)
@@ -453,8 +459,8 @@ local function BuildView()
 	view.wing:SetPoint("TOP", view.floorName, "BOTTOM", 0, -1)
 	view.wing:SetTextColor(0.8, 0.7, 0.5)
 	function view.FloorName(i)
-		local f = view.floors[i]
-		return f.name or (#view.floors > 1 and L["Floor %d"]:format(i)) or S.InstanceName(view.inst)
+		local f = view.floors and view.floors[i]
+		return (f and f.name) or ((not f or #view.floors > 1) and L["Floor %d"]:format(i)) or S.InstanceName(view.inst)
 	end
 	-- every floor by name, to go straight to one
 	view.floorButton:SetScript("OnClick", function(self)
@@ -654,9 +660,9 @@ local function BuildView()
 		local x, y = GetCursorPosition()
 		local es = self:GetEffectiveScale()
 		self.ox, self.oy = d[3] + (x - d[1]) / es, d[4] + (y - d[2]) / es
-		LayoutView()
+		LayoutView(true)
 	end)
-	view:SetScript("OnSizeChanged", LayoutView)
+	view:SetScript("OnSizeChanged", function() LayoutView() end)
 	view:SetScript("OnHide", function()
 		view.leaving = nil
 		bossUI.hoverBoss, bossUI.focusBoss = nil, nil
@@ -2037,7 +2043,7 @@ end
 -- tools/map-dungeons/bosses.py --import brings it into the data.
 --------------------------------------------------------------------------------
 
-local PIN_SIZE = 24
+local PIN_SIZE = 26
 
 -- (as Kept's; a map built from the minimap pictures has its own floors, so its own places: "minimap:<mapID>")
 local function InstKey(inst)
@@ -2046,35 +2052,240 @@ local function InstKey(inst)
 	return key
 end
 
--- the game's bosses of the instance shown, in its order, and any placed by hand that it doesn't list
-local function BossNames(inst)
-	local names, seen = {}, {}
-	for _, n in ipairs((Places().bosses or {})[inst[1]] or {}) do
-		if not seen[n] then names[#names + 1], seen[n] = n, true end
-	end
-	local key = InstKey(inst)
-	for _, src in ipairs({ ns.MapDungeonBosses and ns.MapDungeonBosses[key], mod.db.bossPlaced and mod.db.bossPlaced[key] }) do
-		local extra = {}
-		for n in pairs(src or {}) do if not seen[n] then extra[#extra + 1] = n end end
-		table.sort(extra)
-		for _, n in ipairs(extra) do names[#names + 1], seen[n] = n, true end
-	end
-	return names
+function bossUI.InstKeyFor(inst, src)
+	local key = inst and (inst[1] ~= 0 and inst[1] or inst[2])
+	if not key then return nil end
+	if src == "minimap" then return "minimap:" .. key end
+	return key
 end
 
--- a boss's place: { floor, x, y }, the placer's over the shipped one; nil where it has none
+function bossUI.IsRare(entry)
+	return type(entry) == "table" and entry.rare == true
+end
+
+function bossUI.Spots(entry)
+	if type(entry) ~= "table" then return nil end
+	if type(entry.spots) == "table" and #entry.spots > 0 then return entry.spots end
+	if entry[1] and entry[2] and entry[3] then return { entry } end
+	return nil
+end
+
+-- Pure read-only lookup of a boss/rare entry (user-placed position overrides shipped coords while preserving rare/note metadata).
+function bossUI.ReadEntry(inst, name, src)
+	if not (inst and name) then return nil, false, false, nil end
+	local key = bossUI.InstKeyFor(inst, src)
+	if not key then return nil, false, false, nil end
+	local shippedTbl = ns.MapDungeonBosses and ns.MapDungeonBosses[key]
+	local shipped = shippedTbl and shippedTbl[name]
+	local placedTbl = mod.db and mod.db.bossPlaced
+	local mineTbl = placedTbl and (placedTbl[key] or (src ~= "minimap" and inst[2] and placedTbl[inst[2]]))
+	local mine = mineTbl and mineTbl[name]
+	if mine then
+		return mine, true, bossUI.IsRare(mine) or bossUI.IsRare(shipped), mine.note or (shipped and shipped.note)
+	end
+	if shipped then
+		return shipped, false, bossUI.IsRare(shipped), shipped.note
+	end
+	return nil, false, false, nil
+end
+
+-- Pure ordered boss & rare list: guaranteed bosses in encounter order first (numbered 1..N),
+-- followed by rare spawns (unnumbered, badged with R / R1..Rn).
+function bossUI.BossNamesFor(inst, src)
+	local regular, rares, seen = {}, {}, {}
+	local key = bossUI.InstKeyFor(inst, src)
+	local shipped = key and ns.MapDungeonBosses and ns.MapDungeonBosses[key]
+	local placedTbl = mod.db and mod.db.bossPlaced
+	local mine = key and placedTbl and (placedTbl[key] or (src ~= "minimap" and inst[2] and placedTbl[inst[2]]))
+	local function IsRareName(n)
+		local e = (mine and mine[n]) or (shipped and shipped[n])
+		return bossUI.IsRare(e) or (shipped and bossUI.IsRare(shipped[n]))
+	end
+	local function Push(n)
+		if seen[n] then return end
+		seen[n] = true
+		if IsRareName(n) then rares[#rares + 1] = n else regular[#regular + 1] = n end
+	end
+	for _, n in ipairs((Places().bosses or {})[inst[1]] or {}) do
+		Push(n)
+	end
+	for _, tbl in ipairs({ shipped, mine }) do
+		local extra = {}
+		for n in pairs(tbl or {}) do if not seen[n] then extra[#extra + 1] = n end end
+		table.sort(extra)
+		for _, n in ipairs(extra) do Push(n) end
+	end
+	local names, bossNums = {}, {}
+	for i, n in ipairs(regular) do
+		names[#names + 1] = n
+		bossNums[n] = i
+	end
+	for _, n in ipairs(rares) do
+		names[#names + 1] = n
+	end
+	return names, bossNums
+end
+
+-- the game's bosses of the instance shown, in its order, followed by rare spawns and any placed by hand
+local function BossNames(inst)
+	local src = (view and view.inst == inst) and view.source or nil
+	return bossUI.BossNamesFor(inst, src)
+end
+
+-- a boss's place: { floor, x, y [, rare = true] [, spots = ...] [, note = ...] }, the placer's over the shipped one; nil where it has none
 local function BossAt(inst, name)
 	ByMapID(mod.db.bossPlaced, inst)
-	local key = InstKey(inst)
-	local mine = mod.db.bossPlaced and mod.db.bossPlaced[key]
-	if mine and mine[name] then return mine[name], true end
-	local shipped = ns.MapDungeonBosses and ns.MapDungeonBosses[key]
-	return shipped and shipped[name]
+	local src = (view and view.inst == inst) and view.source or nil
+	return bossUI.ReadEntry(inst, name, src)
+end
+
+function bossUI.OtherFloorsText(spots, curFloor)
+	if not (spots and #spots > 1) then return nil end
+	local seen, list = {}, {}
+	for _, sp in ipairs(spots) do
+		local fl = sp[1]
+		if fl and fl ~= curFloor and not seen[fl] then
+			seen[fl] = true
+			local fn = view and view.FloorName and view.FloorName(fl)
+			if fn then
+				list[#list + 1] = ("%s (F%d)"):format(fn, fl)
+			else
+				list[#list + 1] = "Floor " .. tostring(fl)
+			end
+		end
+	end
+	return #list > 0 and table.concat(list, ", ") or nil
+end
+
+function bossUI.StylePin(pin, isRare)
+	pin.icon:SetDesaturated(false)
+	pin.icon:SetTexCoord(0, 1, 0, 1)
+	if isRare then
+		if Atlas(pin.icon, "VignetteKillElite") or Atlas(pin.icon, "VignetteKill") then
+			pin.icon:SetVertexColor(0.86, 0.96, 1, 1)
+		else
+			pin.icon:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull")
+			pin.icon:SetDesaturated(true)
+			pin.icon:SetVertexColor(0.58, 0.92, 1, 1)
+		end
+		pin.hlRing:SetVertexColor(0.38, 0.88, 1, 0.92)
+		pin.rim:SetVertexColor(0.36, 0.84, 1, 0.95)
+		pin.ring:SetVertexColor(0.03, 0.08, 0.13, 0.92)
+		pin.num:SetTextColor(0.58, 0.94, 1)
+		pin.tag:SetBackdropColor(0.03, 0.07, 0.11, 0.90)
+		pin.tag:SetBackdropBorderColor(0.36, 0.80, 0.98, 0.88)
+	else
+		if Atlas(pin.icon, "DungeonSkull") then
+			pin.icon:SetVertexColor(1, 1, 1, 1)
+		else
+			pin.icon:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull")
+			pin.icon:SetVertexColor(1, 0.92, 0.72, 1)
+		end
+		pin.hlRing:SetVertexColor(1, 0.82, 0.22, 0.90)
+		pin.rim:SetVertexColor(0.88, 0.68, 0.22, 0.88)
+		pin.ring:SetVertexColor(0.04, 0.03, 0.02, 0.90)
+		pin.num:SetTextColor(1, 0.84, 0.18)
+		pin.tag:SetBackdropColor(0.05, 0.04, 0.03, 0.88)
+		pin.tag:SetBackdropBorderColor(0.78, 0.60, 0.24, 0.84)
+	end
+end
+
+function bossUI.PlaceTagNonOverlapping(pin, pinX, pinY, tagW, tagH, pw, ph, usedBoxes)
+	local halfP = PIN_SIZE * 0.5 + 3
+	local pad = 4
+	local maxX = math.max(pad, pw - pad - tagW)
+	local maxY = math.max(pad, ph - pad - tagH)
+	local cands = {
+		{ pinX - tagW * 0.5, pinY + halfP },
+		{ pinX - tagW * 0.5, pinY - halfP - tagH },
+		{ pinX + halfP + 2, pinY - tagH * 0.5 },
+		{ pinX - halfP - 2 - tagW, pinY - tagH * 0.5 },
+		{ pinX + 4, pinY + halfP },
+		{ pinX + 4, pinY - halfP - tagH },
+		{ pinX - tagW - 4, pinY + halfP },
+		{ pinX - tagW - 4, pinY - halfP - tagH },
+		{ pinX - tagW * 0.5, pinY + halfP + tagH + 3 },
+		{ pinX - tagW * 0.5, pinY - halfP - tagH * 2 - 3 },
+	}
+	local bestX, bestY, bestScore = pad, pad, math.huge
+	for _, c in ipairs(cands) do
+		local x0 = math.max(pad, math.min(maxX, c[1]))
+		local y0 = math.max(pad, math.min(maxY, c[2]))
+		local x1, y1 = x0 + tagW, y0 + tagH
+		local score = 0
+		for _, b in ipairs(usedBoxes) do
+			local ox = math.min(x1, b[3]) - math.max(x0, b[1])
+			if ox > 0 then
+				local oy = math.min(y1, b[4]) - math.max(y0, b[2])
+				if oy > 0 then score = score + ox * oy end
+			end
+		end
+		if score < bestScore then
+			bestScore, bestX, bestY = score, x0, y0
+			if score == 0 then break end
+		end
+	end
+	usedBoxes[#usedBoxes + 1] = { bestX - 1, bestY - 1, bestX + tagW + 1, bestY + tagH + 1 }
+	pin.tag:ClearAllPoints()
+	pin.tag:SetPoint("TOPLEFT", view.page, "TOPLEFT", bestX, -bestY)
+end
+
+function bossUI.AppendBossDrops(inst, bossName, maxShown)
+	if not (addonNs and addonNs.BossDrops and addonNs.ItemDisplay and inst and bossName) then return end
+	local drops = addonNs.BossDrops(inst[1], inst[2], bossName)
+	if not (drops and #drops >= 2) then return end
+	local total = math.floor(#drops / 2)
+	local lim = math.min(total, maxShown or 8)
+	GameTooltip:AddLine(" ")
+	GameTooltip:AddLine("Notable Drops:", 1, 0.82, 0)
+	for idx = 1, lim do
+		local k = (idx - 1) * 2 + 1
+		local itemID = drops[k]
+		local pctX10 = drops[k + 1] or 0
+		local name, hex, icon, subLabel = addonNs.ItemDisplay(itemID)
+		local leftTxt = ("|T%s:13:13:0:0:64:64:5:59:5:59|t |c%s%s|r"):format(
+			tostring(icon or 134400), hex or "ffe8d8a8", name or ("Item #" .. tostring(itemID)))
+		local pctTxt = addonNs.FormatDropPct and addonNs.FormatDropPct(pctX10) or nil
+		local rightTxt
+		if subLabel and subLabel ~= "" and pctTxt then
+			rightTxt = subLabel .. " - " .. pctTxt
+		else
+			rightTxt = pctTxt or subLabel or ""
+		end
+		if rightTxt ~= "" then
+			GameTooltip:AddDoubleLine(leftTxt, rightTxt, 1, 1, 1, 0.72, 0.78, 0.84)
+		else
+			GameTooltip:AddLine(leftTxt, 1, 1, 1)
+		end
+	end
+	if total > lim then
+		GameTooltip:AddLine(("+%d more in Dungeon tab"):format(total - lim), 0.62, 0.74, 0.86)
+	end
 end
 
 local function PinTip(pin)
 	GameTooltip:SetOwner(pin, "ANCHOR_RIGHT")
-	GameTooltip:AddLine(("%d. %s"):format(pin.index, pin.name), 1, 0.82, 0)
+	if pin.isRare then
+		GameTooltip:AddLine((pin.name or "") .. "  [Rare]", 0.48, 0.88, 1)
+		if pin.spotTotal and pin.spotTotal > 1 then
+			GameTooltip:AddLine(("Possible spawn %d of %d (rare - not guaranteed every run)"):format(pin.spotIdx or 1, pin.spotTotal), 0.72, 0.90, 1, true)
+		else
+			GameTooltip:AddLine("Rare spawn (not guaranteed every run)", 0.72, 0.90, 1, true)
+		end
+	else
+		local head = pin.bossNum and ("%d. %s"):format(pin.bossNum, pin.name) or (pin.name or "")
+		GameTooltip:AddLine(head, 1, 0.82, 0)
+		if pin.spotTotal and pin.spotTotal > 1 then
+			GameTooltip:AddLine(("Location %d of %d"):format(pin.spotIdx or 1, pin.spotTotal), 0.55, 0.85, 1)
+		end
+	end
+	if pin.note and pin.note ~= "" then
+		GameTooltip:AddLine(pin.note, 0.88, 0.86, 0.80, true)
+	end
+	if pin.otherFloors then
+		GameTooltip:AddLine("Also on: " .. pin.otherFloors, 0.60, 0.82, 0.98, true)
+	end
+	bossUI.AppendBossDrops(view and view.inst, pin.name, 8)
 	if pin.mine then GameTooltip:AddLine(L["Placed by you"], 0.6, 0.6, 0.6) end
 	if NeedRoll() then GameTooltip:AddLine(L["Click to see loot in NeedRoll"], 0.6, 0.6, 0.6) end
 	GameTooltip:Show()
@@ -2086,30 +2297,37 @@ local function MakePin(i)
 	pin:SetFrameLevel(view.page:GetFrameLevel() + 5)
 	pin.hlRing = pin:CreateTexture(nil, "BACKGROUND", nil, -1)
 	pin.hlRing:SetPoint("CENTER")
-	pin.hlRing:SetSize(PIN_SIZE + 18, PIN_SIZE + 18)
+	pin.hlRing:SetSize(PIN_SIZE + 20, PIN_SIZE + 20)
 	pin.hlRing:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
 	pin.hlRing:SetBlendMode("ADD")
-	pin.hlRing:SetVertexColor(1, 0.82, 0.22, 0.88)
+	pin.hlRing:SetVertexColor(1, 0.82, 0.22, 0.90)
 	pin.hlRing:Hide()
-	pin.ring = pin:CreateTexture(nil, "BACKGROUND", nil, 0)
+	pin.rim = pin:CreateTexture(nil, "BACKGROUND", nil, 0)
+	pin.rim:SetPoint("CENTER")
+	pin.rim:SetSize(PIN_SIZE + 10, PIN_SIZE + 10)
+	pin.rim:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+	pin.rim:SetVertexColor(0.88, 0.68, 0.22, 0.88)
+	pin.ring = pin:CreateTexture(nil, "BACKGROUND", nil, 1)
 	pin.ring:SetPoint("CENTER")
-	pin.ring:SetSize(PIN_SIZE + 8, PIN_SIZE + 8)
+	pin.ring:SetSize(PIN_SIZE + 6, PIN_SIZE + 6)
 	pin.ring:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
-	pin.ring:SetVertexColor(0, 0, 0, 0.82)
+	pin.ring:SetVertexColor(0.04, 0.03, 0.02, 0.90)
 	pin.icon = pin:CreateTexture(nil, "ARTWORK")
 	pin.icon:SetPoint("CENTER")
 	pin.icon:SetSize(PIN_SIZE, PIN_SIZE)
 	if not Atlas(pin.icon, "DungeonSkull") then pin.icon:SetTexture("Interface\\TargetingFrame\\UI-TargetingFrame-Skull") end
-	pin.num = Look:Font(pin:CreateFontString(nil, "OVERLAY"), 11, "OUTLINE")
-	pin.num:SetPoint("CENTER", pin, "BOTTOMRIGHT", -2, 3)
-	pin.num:SetTextColor(1, 0.82, 0)
-	-- (daves_map: crisp floating boss nameplate shown on hover or boss-list selection)
-	local tag = CreateFrame("Frame", nil, pin, "BackdropTemplate")
-	tag:SetHeight(19)
+	pin.num = Look:Font(pin:CreateFontString(nil, "OVERLAY"), 10, "OUTLINE")
+	pin.num:SetPoint("CENTER", pin, "BOTTOMRIGHT", -1, 2)
+	pin.num:SetTextColor(1, 0.84, 0.18)
+	-- (daves_map: crisp always-visible nameplate parented to view.page so raising a hovered tag never disturbs pin mouse focus)
+	local tag = CreateFrame("Frame", nil, view.page, "BackdropTemplate")
+	tag:SetHeight(17)
+	tag:SetFrameLevel(view.page:GetFrameLevel() + 7)
 	tag:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-	tag:SetBackdropColor(0.05, 0.04, 0.03, 0.94)
-	tag:SetBackdropBorderColor(0.84, 0.66, 0.28, 0.95)
-	tag.text = Look:Font(tag:CreateFontString(nil, "OVERLAY"), 11)
+	tag:SetBackdropColor(0.05, 0.04, 0.03, 0.88)
+	tag:SetBackdropBorderColor(0.78, 0.60, 0.24, 0.84)
+	tag:EnableMouse(false)
+	tag.text = Look:Font(tag:CreateFontString(nil, "OVERLAY"), 10)
 	tag.text:SetPoint("CENTER", 0, 0)
 	tag.text:SetWordWrap(false)
 	tag:Hide()
@@ -2138,35 +2356,65 @@ end
 PlacePins = function(pw, ph)
 	view.bossPins = view.bossPins or {}
 	local n = 0
+	local placed = {}
+	local usedBoxes = {}
 	local inst = view.inst
+	local placing = view.placer
 	if inst and mod.db.dungeonBosses and view.floors and not (view.floors[view.floor] or {}).blank then
-		local placing = view.placer
-		for i, name in ipairs(BossNames(inst)) do
-			local p, mine = BossAt(inst, name)
-			if p and p[1] == view.floor then
-				n = n + 1
-				local pin = view.bossPins[n] or MakePin(n)
-				pin.index, pin.name, pin.mine = i, name, mine
-				pin.px, pin.py = p[2], p[3]
-				pin.num:SetText(i)
-				pin:ClearAllPoints()
-				pin:SetPoint("CENTER", view.page, "TOPLEFT", p[2] * pw, -p[3] * ph)
-				pin.tag.text:SetText(("|cffffd100%d.|r %s"):format(i, name))
-				local rawTagW = (pin.tag.text.GetUnboundedStringWidth and pin.tag.text:GetUnboundedStringWidth()) or pin.tag.text:GetStringWidth() or 40
-				local tagW = math.max(54, rawTagW + 14)
-				pin.tag:SetWidth(tagW)
-				pin.tag:ClearAllPoints()
-				local pinX, pinY = p[2] * pw, p[3] * ph
-				local above = (pinY + PIN_SIZE * 0.5 + 24) > ph
-				local vSelf = above and "BOTTOM" or "TOP"
-				local vPin = above and "TOP" or "BOTTOM"
-				local hSide = (pinX - tagW * 0.5 < 4) and "LEFT" or ((pinX + tagW * 0.5 > pw - 4) and "RIGHT" or "")
-				pin.tag:SetPoint(vSelf .. hSide, pin, vPin .. hSide, 0, above and 3 or -3)
-				pin:EnableMouse(not placing)
-				-- (placing: the one just placed lit, the others dimmed)
-				pin:SetAlpha(placing and (placing.last == name and 1 or 0.6) or 1)
-				pin:Show()
+		local names, bossNums = BossNames(inst)
+		for i, name in ipairs(names) do
+			local entry, mine, isRare, note = BossAt(inst, name)
+			local spots = bossUI.Spots(entry)
+			if spots then
+				local spotTotal = #spots
+				local otherFloors = bossUI.OtherFloorsText(spots, view.floor)
+				local bNum = bossNums[name]
+				for sIdx, sp in ipairs(spots) do
+					if sp[1] == view.floor then
+						n = n + 1
+						local pin = view.bossPins[n] or MakePin(n)
+						pin.index, pin.bossNum, pin.name, pin.mine = i, bNum, name, mine
+						pin.isRare, pin.note = isRare, note
+						pin.spotIdx, pin.spotTotal, pin.otherFloors = sIdx, spotTotal, otherFloors
+						pin.px, pin.py = sp[2], sp[3]
+						bossUI.StylePin(pin, isRare)
+						if isRare then
+							pin.num:SetText(spotTotal > 1 and ("R" .. sIdx) or "R")
+						elseif bNum then
+							pin.num:SetText(tostring(bNum))
+						else
+							pin.num:SetText("")
+						end
+						local pinX, pinY = sp[2] * pw, sp[3] * ph
+						pin:ClearAllPoints()
+						pin:SetPoint("CENTER", view.page, "TOPLEFT", pinX, -pinY)
+						if isRare then
+							if spotTotal > 1 then
+								pin.tag.text:SetText(("|cff7fd4ffRare %d/%d:|r %s"):format(sIdx, spotTotal, name))
+							else
+								pin.tag.text:SetText("|cff7fd4ffRare:|r " .. name)
+							end
+						else
+							local prefix = bNum and ("|cffffd100%d.|r "):format(bNum) or ""
+							local suffix = spotTotal > 1 and (" |cff998866(%d/%d)|r"):format(sIdx, spotTotal) or ""
+							pin.tag.text:SetText(prefix .. name .. suffix)
+						end
+						local rawTagW = (pin.tag.text.GetUnboundedStringWidth and pin.tag.text:GetUnboundedStringWidth()) or pin.tag.text:GetStringWidth() or 40
+						local tagW = math.max(50, rawTagW + 12)
+						pin.tag:SetWidth(tagW)
+						pin:EnableMouse(not placing)
+						pin:Show()
+						local boxR = PIN_SIZE * 0.5 + 3
+						usedBoxes[#usedBoxes + 1] = { pinX - boxR, pinY - boxR, pinX + boxR, pinY + boxR }
+						placed[#placed + 1] = { pin = pin, x = pinX, y = pinY, w = tagW, h = 17 }
+					end
+				end
 			end
+		end
+	end
+	if not placing then
+		for _, p in ipairs(placed) do
+			bossUI.PlaceTagNonOverlapping(p.pin, p.x, p.y, p.w, p.h, pw, ph, usedBoxes)
 		end
 	end
 	for i = n + 1, #view.bossPins do
@@ -2217,16 +2465,35 @@ end
 
 function bossUI.RefreshHighlight()
 	if not view then return end
-	local active = bossUI.hoverBoss or bossUI.focusBoss
+	local placing = view.placer
+	local active = (not placing) and (bossUI.hoverBoss or bossUI.focusBoss) or nil
 	local baseLvl = view.page and (view.page:GetFrameLevel() + 5) or 10
+	local normalTagLvl, litTagLvl = baseLvl + 2, baseLvl + 8
 	for _, pin in ipairs(view.bossPins or {}) do
 		if pin:IsShown() then
 			local lit = active ~= nil and pin.name == active
 			pin.hlRing:SetShown(lit)
-			pin.tag:SetShown(lit and not view.placer)
+			pin.tag:SetShown(not placing)
 			pin.icon:SetSize(lit and (PIN_SIZE + 5) or PIN_SIZE, lit and (PIN_SIZE + 5) or PIN_SIZE)
-			pin.ring:SetSize(lit and (PIN_SIZE + 13) or (PIN_SIZE + 8), lit and (PIN_SIZE + 13) or (PIN_SIZE + 8))
-			pin:SetFrameLevel(lit and (baseLvl + 7) or baseLvl)
+			pin.ring:SetSize(lit and (PIN_SIZE + 11) or (PIN_SIZE + 6), lit and (PIN_SIZE + 11) or (PIN_SIZE + 6))
+			pin.rim:SetSize(lit and (PIN_SIZE + 15) or (PIN_SIZE + 10), lit and (PIN_SIZE + 15) or (PIN_SIZE + 10))
+			if pin.isRare then
+				pin.tag:SetBackdropBorderColor(lit and 0.54 or 0.36, lit and 0.94 or 0.80, lit and 1 or 0.98, lit and 1 or 0.88)
+			else
+				pin.tag:SetBackdropBorderColor(lit and 1 or 0.78, lit and 0.86 or 0.60, lit and 0.30 or 0.24, lit and 1 or 0.84)
+			end
+			if placing then
+				pin:SetAlpha(placing.last == pin.name and 1 or 0.6)
+			else
+				pin:SetAlpha(1)
+				pin.tag:SetAlpha(lit and 1 or 0.88)
+			end
+			-- Keep interactive pin Button frame levels fixed so hover never bounces OnLeave/OnEnter;
+			-- only raise the mouse-transparent nameplate frame (parented to view.page).
+			local wantTagLvl = lit and litTagLvl or normalTagLvl
+			if pin.tag:GetFrameLevel() ~= wantTagLvl then
+				pin.tag:SetFrameLevel(wantTagLvl)
+			end
 		end
 	end
 	local bp = view.bossPanel
@@ -2279,11 +2546,11 @@ end
 function bossUI.BuildPanel()
 	if not view or view.bossPanel then return end
 	local bp = CreateFrame("Frame", nil, view, "BackdropTemplate")
-	bp:SetWidth(206)
+	bp:SetWidth(214)
 	bp:SetPoint("TOPRIGHT", view.port, "TOPRIGHT", -8, -8)
 	bp:SetFrameLevel(view:GetFrameLevel() + 22)
 	bp:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8", edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1 })
-	bp:SetBackdropColor(0.05, 0.04, 0.03, 0.86)
+	bp:SetBackdropColor(0.05, 0.04, 0.03, 0.88)
 	bp:SetBackdropBorderColor(0.66, 0.49, 0.28, 0.85)
 	bp:EnableMouse(true)
 	bp:EnableMouseWheel(true)
@@ -2349,9 +2616,22 @@ end
 
 function bossUI.ShowRowTip(self)
 	GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-	GameTooltip:AddLine(("%d. %s"):format(self.bossIdx or 1, self.bossName or ""), 1, 0.82, 0)
+	if self.isRare then
+		GameTooltip:AddLine((self.bossName or "") .. "  [Rare]", 0.48, 0.88, 1)
+		if self.spotCount and self.spotCount > 1 then
+			GameTooltip:AddLine(("Possible spawn locations: %d (rare - not guaranteed every run)"):format(self.spotCount), 0.72, 0.90, 1, true)
+		else
+			GameTooltip:AddLine("Rare spawn (not guaranteed every run)", 0.72, 0.90, 1, true)
+		end
+	else
+		local head = self.bossNum and ("%d. %s"):format(self.bossNum, self.bossName or "") or (self.bossName or "")
+		GameTooltip:AddLine(head, 1, 0.82, 0)
+	end
+	if self.bossNote and self.bossNote ~= "" then
+		GameTooltip:AddLine(self.bossNote, 0.88, 0.86, 0.80, true)
+	end
 	if self.bossFloor then
-		if self.bossFloor == view.floor then
+		if self.onThisFloor then
 			GameTooltip:AddLine("Pinned on this floor", 0.35, 1, 0.45)
 		else
 			local fName = view.FloorName and view.FloorName(self.bossFloor) or ("Floor " .. tostring(self.bossFloor))
@@ -2360,8 +2640,9 @@ function bossUI.ShowRowTip(self)
 	else
 		GameTooltip:AddLine("No floor pin position recorded yet", 0.7, 0.7, 0.7)
 	end
+	bossUI.AppendBossDrops(view and view.inst, self.bossName, 8)
 	if NeedRoll() then
-		GameTooltip:AddLine((self.bossFloor and self.bossFloor ~= view.floor) and "Shift-click: loot in NeedRoll" or "Click: loot in NeedRoll", 0.6, 0.6, 0.6)
+		GameTooltip:AddLine((self.bossFloor and not self.onThisFloor) and "Shift-click: loot in NeedRoll" or "Click: loot in NeedRoll", 0.6, 0.6, 0.6)
 	end
 	GameTooltip:Show()
 end
@@ -2410,7 +2691,7 @@ function bossUI.GetRow(bp, idx)
 	end)
 	row:SetScript("OnClick", function(self)
 		if not self.bossName then return end
-		local jumped = self.bossFloor and self.bossFloor ~= view.floor
+		local jumped = self.bossFloor and not self.onThisFloor
 		mod.FocusDungeonBoss(self.bossName)
 		if jumped and GameTooltip:GetOwner() == self then
 			bossUI.ShowRowTip(self)
@@ -2428,16 +2709,19 @@ function bossUI.UpdatePanel()
 	local inst = view.inst
 	local btn = view.bossBtn
 	local bp = view.bossPanel
-	local names = (inst and mod.db.dungeonBosses) and BossNames(inst) or {}
+	local names, bossNums = {}, {}
+	if inst and mod.db.dungeonBosses then
+		names, bossNums = BossNames(inst)
+	end
 	local count = #names
 	if btn then
 		if count > 0 then
-			local open = mod.db.dungeonBossList ~= false
+			local open = mod.db.dungeonBossList == true
 			btn.lbl:SetText((open and "|cffffd100Bosses (" or "|cffe8d8a8Bosses (") .. count .. ")|r")
 			if btn.frame then
 				if open then btn.frame:SetVertexColor(1, 0.96, 0.80, 1) else btn.frame:SetVertexColor(0.86, 0.80, 0.66, 0.90) end
 			end
-			btn:SetWidth(math.max(74, math.min(102, (btn.lbl:GetStringWidth() or 60) + 18)))
+			btn:SetWidth(math.max(74, math.min(106, (btn.lbl:GetStringWidth() or 60) + 18)))
 			btn:Show()
 		else
 			btn:Hide()
@@ -2445,16 +2729,25 @@ function bossUI.UpdatePanel()
 	end
 	bossUI.LayoutHeader()
 	if not bp then return end
-	if count == 0 or mod.db.dungeonBossList == false or not view:IsShown() or view.placer or view.markup then
+	if count == 0 or mod.db.dungeonBossList ~= true or not view:IsShown() or view.placer or view.markup then
 		bp:Hide()
 		return
 	end
 	local multiFloor = view.floors and #view.floors > 1
-	local pinnedTotal = 0
+	local pinnedTotal, rareTotal = 0, 0
 	for i, name in ipairs(names) do
-		local p = BossAt(inst, name)
-		if p then pinnedTotal = pinnedTotal + 1 end
-		local onThisFloor = p and p[1] == view.floor
+		local entry, _, isRare, note = BossAt(inst, name)
+		local spots = bossUI.Spots(entry)
+		local spotCount = spots and #spots or 0
+		if spotCount > 0 then pinnedTotal = pinnedTotal + 1 end
+		if isRare then rareTotal = rareTotal + 1 end
+		local onThisFloor = false
+		if spots then
+			for _, sp in ipairs(spots) do
+				if sp[1] == view.floor then onThisFloor = true; break end
+			end
+		end
+		local primaryFloor = onThisFloor and view.floor or (spots and spots[1][1]) or nil
 		local row = bossUI.GetRow(bp, i)
 		row:ClearAllPoints()
 		row:SetPoint("TOPLEFT", bp.content, "TOPLEFT", 0, -(i - 1) * 20)
@@ -2465,15 +2758,31 @@ function bossUI.UpdatePanel()
 		row.badge:SetText("")
 		row.bossName = name
 		row.bossIdx = i
-		row.bossFloor = p and p[1] or nil
-		local numColor = onThisFloor and "|cffffd100" or "|cff9a8b68"
-		row.num:SetText(("%s%d.|r"):format(numColor, i))
-		local nameColor = (onThisFloor or not p) and "|cfff2ead8" or "|cff9a9386"
-		row.name:SetText(nameColor .. name .. "|r")
+		row.bossNum = bossNums[name]
+		row.isRare = isRare
+		row.spotCount = spotCount
+		row.bossNote = note
+		row.bossFloor = primaryFloor
+		row.onThisFloor = onThisFloor
+		if isRare then
+			row.selBg:SetColorTexture(0.32, 0.78, 1, 0.22)
+			row.num:SetText(onThisFloor and "|cff7fd4ffR|r" or "|cff4e86a8R|r")
+			row.name:SetText((onThisFloor and "|cff9ce0ff" or "|cff6f94aa") .. name .. "|r")
+		else
+			row.selBg:SetColorTexture(1, 0.84, 0.28, 0.22)
+			local numColor = onThisFloor and "|cffffd100" or "|cff9a8b68"
+			row.num:SetText(("%s%d.|r"):format(numColor, bossNums[name] or i))
+			local nameColor = (onThisFloor or not primaryFloor) and "|cfff2ead8" or "|cff9a9386"
+			row.name:SetText(nameColor .. name .. "|r")
+		end
 		row.name:ClearAllPoints()
 		row.name:SetPoint("LEFT", row.num, "RIGHT", 5, 0)
-		if p and multiFloor then
-			row.badge:SetText((onThisFloor and "|cffffd100F" or "|cff7fd4ffF") .. p[1] .. "|r")
+		if isRare and primaryFloor then
+			local tag = (multiFloor and ("F" .. primaryFloor .. (spotCount > 1 and (" - " .. spotCount .. "x") or "")) or (spotCount > 1 and (spotCount .. " spots") or "Rare"))
+			row.badge:SetText((onThisFloor and "|cff7fd4ff" or "|cff56829e") .. tag .. "|r")
+			row.name:SetPoint("RIGHT", row.badge, "LEFT", -4, 0)
+		elseif primaryFloor and multiFloor then
+			row.badge:SetText((onThisFloor and "|cffffd100F" or "|cff7fd4ffF") .. primaryFloor .. "|r")
 			row.name:SetPoint("RIGHT", row.badge, "LEFT", -4, 0)
 		elseif onThisFloor then
 			row.skull:Show()
@@ -2487,7 +2796,7 @@ function bossUI.UpdatePanel()
 		bp.rows[i].bossName = nil
 		bp.rows[i]:Hide()
 	end
-	bp.title:SetText(("|cffffd100Bosses|r |cff998866(%d)|r"):format(count))
+	bp.title:SetText((rareTotal > 0 and "|cffffd100Bosses & Rares|r |cff998866(%d)|r" or "|cffffd100Bosses|r |cff998866(%d)|r"):format(count))
 	bp.foot:SetShown(pinnedTotal == 0)
 	bp.contentH = count * 20
 	bp.content:SetHeight(math.max(1, bp.contentH))
@@ -2505,22 +2814,54 @@ function mod.HighlightDungeonBoss(bossName)
 	if view and view:IsShown() then bossUI.RefreshHighlight() end
 end
 
+function mod.RefreshBossTooltip()
+	if not (view and view:IsShown() and GameTooltip:IsShown()) then return end
+	local owner = GameTooltip:GetOwner()
+	if not owner then return end
+	for _, pin in ipairs(view.bossPins or {}) do
+		if owner == pin and pin:IsShown() then
+			PinTip(pin)
+			return
+		end
+	end
+	local bp = view.bossPanel
+	if bp and bp:IsShown() then
+		for _, row in ipairs(bp.rows or {}) do
+			if owner == row and row:IsShown() then
+				bossUI.ShowRowTip(row)
+				return
+			end
+		end
+	end
+end
+
 function mod.FocusDungeonBoss(bossName)
 	if not (view and view:IsShown() and view.inst and bossName) then return false end
 	bossUI.focusBoss = bossName
-	local p = BossAt(view.inst, bossName)
-	if p then
-		if p[1] ~= view.floor and view.floors and view.floors[p[1]] then
+	local entry = BossAt(view.inst, bossName)
+	local spots = bossUI.Spots(entry)
+	if spots then
+		local targetFloor = spots[1][1]
+		for _, sp in ipairs(spots) do
+			if sp[1] == view.floor then targetFloor = view.floor; break end
+		end
+		if targetFloor and targetFloor ~= view.floor and view.floors and view.floors[targetFloor] then
 			bossUI.keepFocus = true
-			ShowFloor(p[1])
+			ShowFloor(targetFloor)
 			bossUI.keepFocus = nil
 		end
 		if view.zoom and view.zoom > 1.05 and view.page then
+			local sx, sy, cnt = 0, 0, 0
+			for _, sp in ipairs(spots) do
+				if sp[1] == view.floor then
+					sx, sy, cnt = sx + sp[2], sy + sp[3], cnt + 1
+				end
+			end
 			local pw, ph = view.page:GetSize()
-			if pw and pw > 0 and ph and ph > 0 then
-				view.ox = (0.5 - p[2]) * pw
-				view.oy = (p[3] - 0.5) * ph
-				LayoutView()
+			if cnt > 0 and pw and pw > 0 and ph and ph > 0 then
+				view.ox = (0.5 - sx / cnt) * pw
+				view.oy = (sy / cnt - 0.5) * ph
+				LayoutView(true)
 			end
 		end
 	end
@@ -2589,22 +2930,26 @@ function mod.OpenDungeonBoss(instID, dungName, bossName)
 	return false
 end
 
--- Pure side-effect-free lookup of a boss's pinned floor (and floor count) for Dave's Map sidebar rows.
-function mod.DungeonBossFloor(instID, dungName, bossName)
-	if not bossName then return nil, 0 end
+-- Pure side-effect-free lookup of a dungeon's ordered boss & rare names for Dave's Map sidebar rows.
+function mod.DungeonBossList(instID, dungName)
 	local inst = bossUI.FindInst(instID, dungName)
-	if not inst then return nil, 0 end
+	if not inst then return nil, nil end
+	local _, src = FloorsOf(inst)
+	local names = bossUI.BossNamesFor(inst, src)
+	return names, inst[1]
+end
+
+-- Pure side-effect-free lookup of a boss/rare's pinned floor, floor count, rare flag, spot count, and note.
+function mod.DungeonBossFloor(instID, dungName, bossName)
+	if not bossName then return nil, 0, false, 0, nil end
+	local inst = bossUI.FindInst(instID, dungName)
+	if not inst then return nil, 0, false, 0, nil end
 	local floors, src = FloorsOf(inst)
 	local nFloors = floors and #floors or 0
-	local baseKey = inst[1] ~= 0 and inst[1] or inst[2]
-	local key = (src == "minimap" and baseKey) and ("minimap:" .. baseKey) or baseKey
-	local mine = mod.db and mod.db.bossPlaced and (mod.db.bossPlaced[key] or (inst[2] and mod.db.bossPlaced[inst[2]]))
-	local p = mine and mine[bossName]
-	if not p then
-		local shipped = ns.MapDungeonBosses and ns.MapDungeonBosses[key]
-		p = shipped and shipped[bossName]
-	end
-	return p and p[1] or nil, nFloors
+	local entry, _, isRare, note = bossUI.ReadEntry(inst, bossName, src)
+	local spots = bossUI.Spots(entry)
+	local spotCount = spots and #spots or 0
+	return spots and spots[1][1] or nil, nFloors, isRare, spotCount, note
 end
 
 -- the placer's bar, over the picture's top: the boss to place, Skip, Undo, Done

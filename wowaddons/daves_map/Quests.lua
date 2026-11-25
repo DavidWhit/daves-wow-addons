@@ -633,8 +633,6 @@ end
 
 function ns.DungeonBosses(instID, dungName)
 	EnsureDungeonIndex()
-	local places = GetMapPlaces()
-	if not (places and places.bosses) then return nil, nil end
 	local id = instID
 	if not (type(id) == "number" and id ~= 0) and dungName then
 		local k = NormDungKey(dungName)
@@ -645,7 +643,49 @@ function ns.DungeonBosses(instID, dungName)
 			end
 		end
 	end
+	if ns.DungeonBossList then
+		local list, resolvedID = ns.DungeonBossList(id, dungName)
+		if list and #list > 0 then return list, resolvedID or id end
+	end
+	local places = GetMapPlaces()
+	if not (places and places.bosses) then return nil, id end
 	return (id and places.bosses[id]) or nil, id
+end
+
+function ns.FormatDropPct(pctX10)
+	if type(pctX10) ~= "number" or pctX10 <= 0 then return nil end
+	local pct = pctX10 / 10
+	if pct >= 10 then
+		return ("%d%%"):format(math.floor(pct + 0.5))
+	end
+	return ("%.1f%%"):format(pct)
+end
+
+function ns.BossDrops(instID, dungName, bossName)
+	local bDrops = ns.DATA and ns.DATA.bossDrops
+	if not (bDrops and type(bossName) == "string" and bossName ~= "") then return nil end
+	EnsureDungeonIndex()
+	local id = instID
+	if not (type(id) == "number" and id ~= 0) and dungName then
+		local k = NormDungKey(dungName)
+		id = state.instIdByNorm and state.instIdByNorm[k] or nil
+		if not id and k ~= "" then
+			for nk, nid in pairs(state.instIdByNorm or {}) do
+				if k:find(nk, 1, true) or nk:find(k, 1, true) then id = nid; break end
+			end
+		end
+	end
+	local instTbl = id and bDrops[id] or nil
+	if not instTbl then return nil end
+	local exact = instTbl[bossName]
+	if exact and #exact > 0 then return exact end
+	local low = bossName:lower()
+	for k, v in pairs(instTbl) do
+		if type(k) == "string" and k:lower() == low and type(v) == "table" and #v > 0 then
+			return v
+		end
+	end
+	return nil
 end
 
 function ns.MatchDungeon(instName, instID)
@@ -1237,6 +1277,8 @@ local function QueueItemDisplayRefresh()
 	C_Timer.After(0.12, function()
 		state.itemRefreshQueued = false
 		if ns.RefreshHoverTooltip then ns.RefreshHoverTooltip() end
+		local stitch = ns.StitchModule and ns.StitchModule()
+		if stitch and stitch.RefreshBossTooltip then stitch.RefreshBossTooltip() end
 		if ns.RenderPanelRows then ns.RenderPanelRows() end
 	end)
 end

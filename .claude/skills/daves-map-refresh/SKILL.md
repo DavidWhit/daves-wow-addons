@@ -15,7 +15,8 @@ description: Refresh daves_map's companion quest, objective, turn-in, chain, dun
 | `src/corrections/Forever/traces/forever*Traces.lua` | Live Forever player-trace spawns, starters/finishers, and quest-chain relations (`foreverQuestRelationTraces.lua`) |
 | `src/corrections/Forever/forever*Fixes.lua` | Hand-authored Forever quest, NPC, object, and item fixes |
 | `support/Forever/Zones/areaIdToUiMapId.lua` & `dungeons.lua` | Exact Forever `AreaID -> UiMapID` mappings (including Riverglades, Zephras Isle, Darkspear Islands, Shen'dralas, Mount Hyjal) and dungeon entrance locations |
-| `support/Forever/DropTables/classicItemDrops.lua` | Item drop rates used to pick best-in-zone drop mobs for item-objective markers |
+| `support/Forever/DropTables/classicItemDrops.lua` | Item drop rates used to pick best-in-zone drop mobs for item-objective markers and boss drop rates |
+| `Hoizame/AtlasLootClassic` (`AtlasLootClassic_DungeonsAndRaids/{data,droprate,droprate_override}.lua`, parsed by `tools/boss_loot.py`) | Curated Classic Vanilla dungeon & raid boss/rare loot tables and drop rates, merged with Forever custom dungeon & Forever-exclusive boss drops into `D.bossDrops[instID][bossName]` |
 
 ## Rules (always)
 
@@ -37,7 +38,7 @@ py -3 "wowaddons/daves_map/tools/Update-MapData.py"
 
 ## 2. Check the result
 
-- Expect `> 5,000` placed Forever quests (`Quest` + `Repeatable`), `~1,900+` quests with `~2,500+` item rewards (`D.rew` & `D.iname`), `> 5,000` `endp` turn-in links, `> 3,000` clean prerequisite links (`D.pre`) + `D.nxt` `nextQuestInChain` links, `> 4,000` objective links, `~300+` rares with notable drops, and `35` Classic + WoW: Forever dungeons/raids (`D.dungeons[uiMapID]`) with `700+` dungeon quests across all 18 categories.
+- Expect `> 5,000` placed Forever quests (`Quest` + `Repeatable`), `~1,900+` quests with `~2,500+` item rewards (`D.rew` & `D.iname`), `> 5,000` `endp` turn-in links, `> 3,000` clean prerequisite links (`D.pre`) + `D.nxt` `nextQuestInChain` links, `> 4,000` objective links, `~300+` rares with notable drops, `35` Classic + WoW: Forever dungeons/raids (`D.dungeons[uiMapID]`) with `700+` dungeon quests, and `~310+` dungeon bosses across `34` instances with `~2,200+` drops (`D.bossDrops`) across all 18 categories.
 - Run the **wow-addon-test** validator on both `wowaddons/daves_map` and `wowaddons/daves_map_data`:
   ```powershell
   py -3 "wow-addon-kit/plugins/wow-forever-addons/scripts/Test-WowAddon.py" -Path "wowaddons/daves_map" -Flavor forever -NoInfo

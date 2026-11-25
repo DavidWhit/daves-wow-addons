@@ -126,6 +126,8 @@ local function ResetRow(row)
 	row.starterBtn:Hide()
 	row.starterBtn.lbl:SetText("")
 	row.chainBtn:Hide()
+	row.chainBtn:ClearAllPoints()
+	row.chainBtn:SetWidth(CHAIN_BTN_W)
 	row.chainBtn.lbl:SetText("")
 	row.groupBadge.questID = nil
 	row.groupBadge:Hide()
@@ -319,19 +321,95 @@ local function RenderRow(row, item, yTop)
 		row.rewardBg:ClearAllPoints()
 		row.rewardBg:SetPoint("TOPLEFT", 4, -1)
 		row.rewardBg:SetPoint("BOTTOMRIGHT", -2, 1)
-		row.rewardBg:SetColorTexture(0.08, 0.07, 0.06, (item.num and item.num % 2 == 0) and 0.36 or 0.20)
+		local alt = item.num and item.num % 2 == 0
+		if item.isRare then
+			row.rewardBg:SetColorTexture(0.04, 0.09, 0.14, alt and 0.44 or 0.28)
+		else
+			row.rewardBg:SetColorTexture(0.08, 0.07, 0.06, alt and 0.36 or 0.20)
+		end
 		row.rewardBg:Show()
 		row.num:SetPoint("LEFT", row, "LEFT", 10, 0)
-		row.num:SetText(("|cffffd100%d.|r"):format(item.num or 1))
-		PlaceRowLabels(row, 34, false)
-		row.label:SetText("|cffe8d8a8" .. (item.title or "") .. "|r")
-		if item.floorNum and item.numFloors and item.numFloors > 1 then
-			row.count:SetText("|cff7fd4ffF" .. item.floorNum .. "|r")
+		if item.isRare then
+			row.num:SetText("|cff7fd4ffR|r")
+		else
+			row.num:SetText(("|cffffd100%d.|r"):format(item.bossNum or item.num or 1))
+		end
+		local rightPad = ROW_PAD
+		if item.dropCount and item.dropCount > 0 then
+			local cb = row.chainBtn
+			local cntTxt = tostring(item.dropCount)
+			local pillW = #cntTxt >= 2 and 46 or CHAIN_BTN_W
+			cb:SetWidth(pillW)
+			cb:SetPoint("RIGHT", row, "RIGHT", -ROW_PAD, 0)
+			cb.icon:SetTexture(ns.MEDIA .. (item.lootExpanded and "minus" or "plus"))
+			cb.icon:Show()
+			if item.lootExpanded then
+				cb.frame:SetVertexColor(1, 0.96, 0.80, 1)
+				cb.icon:SetAlpha(1)
+				cb.lbl:SetText("|cffffd200" .. cntTxt .. "|r")
+			else
+				cb.frame:SetVertexColor(0.90, 0.84, 0.68, 0.94)
+				cb.icon:SetAlpha(0.88)
+				cb.lbl:SetText("|cffe8d8a8" .. cntTxt .. "|r")
+			end
+			cb:Show()
+			rightPad = ROW_PAD + pillW + 6
+		end
+		PlaceRowLabels(row, 34, false, rightPad)
+		row.label:SetText((item.isRare and "|cff9ce0ff" or "|cffe8d8a8") .. (item.title or "") .. "|r")
+		local spots = item.spotCount or 0
+		local multiFloor = item.numFloors and item.numFloors > 1
+		if item.isRare then
+			if item.floorNum and multiFloor then
+				row.count:SetText(spots > 1 and ("|cff7fd4ffF%d - %d spots|r"):format(item.floorNum, spots) or ("|cff7fd4ffF%d - Rare|r"):format(item.floorNum))
+			elseif item.floorNum then
+				row.count:SetText(spots > 1 and ("|cff7fd4ff%d spots|r"):format(spots) or "|cff7fd4ffRare|r")
+			else
+				row.count:SetText("|cff5e8aa4Rare|r")
+			end
+		elseif item.floorNum and multiFloor then
+			row.count:SetText(spots > 1 and ("|cff7fd4ffF%d - %d spots|r"):format(item.floorNum, spots) or ("|cff7fd4ffF%d|r"):format(item.floorNum))
 		elseif item.floorNum then
-			row.count:SetText("|cffd4b56aMap|r")
+			row.count:SetText(spots > 1 and ("|cffd4b56a%d spots|r"):format(spots) or "|cffd4b56aMap|r")
 		else
 			row.count:SetText("")
 		end
+		return
+	end
+
+	if item.kind == "boss_drop" then
+		local name, hex, icon, subLabel = ns.ItemDisplay(item.itemID)
+		local indentPx = 24
+		row.rewardBg:ClearAllPoints()
+		row.rewardBg:SetPoint("TOPLEFT", indentPx - 3, -1)
+		row.rewardBg:SetPoint("BOTTOMRIGHT", -2, 1)
+		if item.isRare then
+			row.rewardBg:SetColorTexture(0.04, 0.08, 0.13, 0.44)
+		else
+			row.rewardBg:SetColorTexture(0.10, 0.08, 0.05, 0.46)
+		end
+		row.rewardBg:Show()
+
+		row.icon:SetSize(16, 16)
+		row.icon:SetPoint("LEFT", indentPx, 0)
+		row.icon:SetTexture(icon or 134400)
+		row.icon:SetTexCoord(.08, .92, .08, .92)
+		row.icon:Show()
+
+		local pctTxt = ns.FormatDropPct and ns.FormatDropPct(item.dropPct) or nil
+		local rightTxt
+		if subLabel and subLabel ~= "" and pctTxt then
+			rightTxt = ("|cff9ea4b0%s|r  |cffd4b56a%s|r"):format(subLabel, pctTxt)
+		elseif pctTxt then
+			rightTxt = "|cffd4b56a" .. pctTxt .. "|r"
+		elseif subLabel and subLabel ~= "" then
+			rightTxt = "|cff9ea4b0" .. subLabel .. "|r"
+		else
+			rightTxt = "|cff9ea4b0Drop|r"
+		end
+		PlaceRowLabels(row, indentPx + 19, false)
+		row.count:SetText(rightTxt)
+		row.label:SetText(("|c%s[%s]|r"):format(hex or "ffffffff", name or ("Item #" .. tostring(item.itemID))))
 		return
 	end
 
@@ -762,7 +840,7 @@ local function Render()
 	end
 	for k = r + 1, #ui.rows do
 		local row = ui.rows[k]
-		if tipOwner and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge or tipOwner == row.trackBtn) then
+		if tipOwner and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge or tipOwner == row.trackBtn or tipOwner == row.chainBtn) then
 			GameTooltip:Hide()
 			tipOwner = nil
 		end
@@ -771,7 +849,11 @@ local function Render()
 	end
 	if hoverBossRow then
 		local it = hoverBossRow:IsShown() and hoverBossRow.item or nil
-		if not (it and it.kind == "boss" and it.inView and it.title == hoverBossName) then
+		local sameBoss = it and it.inView and (
+			(it.kind == "boss" and it.title == hoverBossName)
+			or (it.kind == "boss_drop" and it.bossName == hoverBossName)
+		)
+		if not sameBoss then
 			hoverBossRow, hoverBossName = nil, nil
 			if ns.HighlightDungeonBoss then ns.HighlightDungeonBoss(nil) end
 		end
@@ -784,7 +866,7 @@ local function Render()
 	if tipOwner then
 		for k = 1, r do
 			local row = ui.rows[k]
-			if row and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge or tipOwner == row.trackBtn) then
+			if row and (tipOwner == row or tipOwner == row.header or tipOwner == row.groupBadge or tipOwner == row.trackBtn or tipOwner == row.chainBtn) then
 				GameTooltip:Hide()
 				local over = tipOwner:IsShown() and tipOwner:IsMouseOver()
 				if not issecretvalue(over) and over and row.item then
@@ -918,7 +1000,15 @@ local function ShowRewardItemTooltip(owner, item)
 		local nm = ns.ItemDisplay(item.itemID)
 		GameTooltip:SetText(nm or ("Item #" .. tostring(item.itemID)), 1, 1, 1)
 	end
-	if item.questPin and D and D.title[item.questPin] then
+	if item.kind == "boss_drop" then
+		GameTooltip:AddLine(" ")
+		local pctTxt = ns.FormatDropPct and ns.FormatDropPct(item.dropPct) or nil
+		local src = "Drops from: " .. (item.bossName or "")
+		if item.isRare then src = src .. " [Rare]" end
+		if pctTxt then src = src .. " (" .. pctTxt .. ")" end
+		GameTooltip:AddLine(src, 1, .82, .2, true)
+		GameTooltip:AddLine("Click: show boss on map  -  Shift-click: link item", .5, .8, 1)
+	elseif item.questPin and D and D.title[item.questPin] then
 		GameTooltip:AddLine(" ")
 		local prefix = item.stepNum and ("Chain Step %d: "):format(item.stepNum) or "Reward from: "
 		GameTooltip:AddLine(prefix .. D.title[item.questPin], .35, 1, .45, true)
@@ -941,6 +1031,37 @@ local function LockIfRefTab(targetPin)
 		return true
 	end
 	return false
+end
+
+local function OpenBossOnMap(row, item, bossName)
+	Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+	if item.inView and ns.IsDungeonViewShown and ns.IsDungeonViewShown() then
+		if ns.FocusDungeonBoss then ns.FocusDungeonBoss(bossName) end
+		return
+	end
+	local hasPin = item.dungeonPin and item.dungeonPin ~= 0
+	local fromRef = hasPin and LockIfRefTab(item.dungeonPin) or false
+	ns.BeforeOpenDungeonMap(hasPin and item.dungeonPin or nil, item.dungeonName)
+	local opened = false
+	if ns.OpenDungeonBoss then
+		opened = ns.OpenDungeonBoss(item.instID, item.dungeonName, bossName)
+	end
+	if not opened and item.isCurrentInstance and ns.OpenCurrentInstanceMap then
+		opened = ns.OpenCurrentInstanceMap()
+		if opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.FocusDungeonBoss then
+			ns.FocusDungeonBoss(bossName)
+		end
+	end
+	if not opened and ns.OpenInstancePin then
+		opened = ns.OpenInstancePin(hasPin and item.dungeonPin or nil, row, item.dungeonName, true)
+		if opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.FocusDungeonBoss then
+			ns.FocusDungeonBoss(bossName)
+		end
+	end
+	if not (opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown()) then
+		ns.CancelOpenDungeonMap()
+		if not opened and hasPin then ns.ShowPinMap(item.dungeonPin, true, fromRef) end
+	end
 end
 
 local function OnRowClick(row, button)
@@ -1000,34 +1121,15 @@ local function OnRowClick(row, button)
 			ns.ShowPinMap(target, true, fromRef)
 		end
 	elseif item.kind == "boss" then
-		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
-		if item.inView and ns.IsDungeonViewShown and ns.IsDungeonViewShown() then
-			if ns.FocusDungeonBoss then ns.FocusDungeonBoss(item.title) end
-			return
+		OpenBossOnMap(row, item, item.title)
+		return
+	elseif item.kind == "boss_drop" then
+		if IsModifiedClick and IsModifiedClick("CHATLINK") then
+			local _, _, _, _, link = ns.ItemDisplay(item.itemID)
+			local insertLink = (ChatFrameUtil and ChatFrameUtil.InsertLink) or ChatEdit_InsertLink
+			if link and insertLink and insertLink(link) then return end
 		end
-		local hasPin = item.dungeonPin and item.dungeonPin ~= 0
-		local fromRef = hasPin and LockIfRefTab(item.dungeonPin) or false
-		ns.BeforeOpenDungeonMap(hasPin and item.dungeonPin or nil, item.dungeonName)
-		local opened = false
-		if ns.OpenDungeonBoss then
-			opened = ns.OpenDungeonBoss(item.instID, item.dungeonName, item.title)
-		end
-		if not opened and item.isCurrentInstance and ns.OpenCurrentInstanceMap then
-			opened = ns.OpenCurrentInstanceMap()
-			if opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.FocusDungeonBoss then
-				ns.FocusDungeonBoss(item.title)
-			end
-		end
-		if not opened and ns.OpenInstancePin then
-			opened = ns.OpenInstancePin(hasPin and item.dungeonPin or nil, row, item.dungeonName, true)
-			if opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown() and ns.FocusDungeonBoss then
-				ns.FocusDungeonBoss(item.title)
-			end
-		end
-		if not (opened and ns.IsDungeonViewShown and ns.IsDungeonViewShown()) then
-			ns.CancelOpenDungeonMap()
-			if not opened and hasPin then ns.ShowPinMap(item.dungeonPin, true, fromRef) end
-		end
+		OpenBossOnMap(row, item, item.bossName)
 		return
 	elseif item.kind == "dung_open" then
 		local hasPin = item.i and item.i ~= 0
@@ -1250,10 +1352,32 @@ MakeRow = function(r)
 	cBtn:SetScript("OnClick", function(_, button)
 		if button == "Button4" then ns.GoBack(); return end
 		local item = row.item
-		if not (item and item.hasChain and item.i) then return end
+		if not item then return end
+		if item.kind == "boss" and item.lootKey and ns.ToggleBossLootExpanded then
+			Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
+			ns.ToggleBossLootExpanded(item.lootKey, item.lootExpanded)
+			ns.OnLayerChanged()
+			return
+		end
+		if not (item.hasChain and item.i) then return end
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		ns.ToggleChainExpanded(item.i, item.expanded)
 		ns.OnLayerChanged()
+	end)
+	cBtn:SetScript("OnEnter", function(self)
+		local item = row.item
+		if item and item.kind == "boss" and item.dropCount and item.dropCount > 0 then
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip:AddLine(item.lootExpanded and "Hide Boss Drops" or "Show Boss Drops", 1, 0.82, 0.2)
+			GameTooltip:AddLine(("%d listed %s for %s"):format(item.dropCount, item.dropCount == 1 and "drop" or "drops", item.title or "boss"), 0.9, 0.9, 0.9, true)
+			GameTooltip:Show()
+		end
+	end)
+	cBtn:SetScript("OnLeave", function(self)
+		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+	end)
+	cBtn:SetScript("OnHide", function(self)
+		if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
 	end)
 	cBtn:Hide()
 	row.chainBtn = cBtn
@@ -1378,13 +1502,37 @@ MakeRow = function(r)
 		if not (D and item) then return end
 		if item.kind == "reward" then
 			ShowRewardItemTooltip(self, item)
+		elseif item.kind == "boss_drop" then
+			if item.inView and ns.HighlightDungeonBoss then
+				hoverBossRow, hoverBossName = self, item.bossName
+				ns.HighlightDungeonBoss(item.bossName)
+			end
+			ShowRewardItemTooltip(self, item)
 		elseif item.kind == "boss" then
 			if item.inView and ns.HighlightDungeonBoss then
 				hoverBossRow, hoverBossName = self, item.title
 				ns.HighlightDungeonBoss(item.title)
 			end
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip:AddLine(("%d. %s"):format(item.num or 1, item.title or ""), 1, .82, .2)
+			if item.isRare then
+				GameTooltip:AddLine((item.title or "") .. "  [Rare]", 0.48, 0.88, 1)
+				if item.spotCount and item.spotCount > 1 then
+					GameTooltip:AddLine(("Possible spawn locations: %d (rare - not guaranteed every run)"):format(item.spotCount), 0.72, 0.90, 1, true)
+				else
+					GameTooltip:AddLine("Rare spawn (not guaranteed every run)", 0.72, 0.90, 1, true)
+				end
+			else
+				GameTooltip:AddLine(("%d. %s"):format(item.bossNum or item.num or 1, item.title or ""), 1, .82, .2)
+				if item.spotCount and item.spotCount > 1 then
+					GameTooltip:AddLine(("Locations on map: %d"):format(item.spotCount), .55, .85, 1)
+				end
+			end
+			if item.bossNote and item.bossNote ~= "" then
+				GameTooltip:AddLine(item.bossNote, .88, .86, .80, true)
+			end
+			if item.dropCount and item.dropCount > 0 then
+				GameTooltip:AddLine(("Listed drops: %d (click pill on right to %s)"):format(item.dropCount, item.lootExpanded and "hide" or "show"), .75, .92, .65)
+			end
 			if item.floorNum then
 				if item.numFloors and item.numFloors > 1 then
 					GameTooltip:AddLine(("Floor %d - Click to show on dungeon map"):format(item.floorNum), .5, .85, 1)

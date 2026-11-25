@@ -413,6 +413,9 @@ def fetch_questiedb(ref: str, dest_root: str) -> None:
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         total = sum(pool.map(dl, REQUIRED_FILES))
     print(f"Fetched {len(REQUIRED_FILES)} QuestieDB Forever files ({total / 1048576:.2f} MB)", flush=True)
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import boss_loot
+    boss_loot.fetch_atlasloot(dest_root, _check_url, UA, MAX_BYTES)
 
 
 def dict_to_list(d) -> list:
@@ -1565,6 +1568,7 @@ def render_data_lua(
     zone_levels: dict[int, tuple[int, int]],
     zone_dungeons: dict[int, list[dict]],
     reward_item_names: dict[int, str],
+    boss_drops: dict[int, dict[str, list[int]]],
     stamp: str,
     ref: str,
     out_lua: str,
@@ -1650,6 +1654,13 @@ def render_data_lua(
     used_iids = sorted(
         {iid for p in pins for iid in p["rew"] if iid in reward_item_names}
         | {p["drops"][k] for p in pins for k in range(0, len(p["drops"]), 2) if p["drops"][k] in reward_item_names}
+        | {
+            flat[k]
+            for inst_tbl in boss_drops.values()
+            for flat in inst_tbl.values()
+            for k in range(0, len(flat), 2)
+            if flat[k] in reward_item_names
+        }
     )
     for iid in used_iids:
         lines.append(f"  [{iid}] = {lua_str(reward_item_names[iid])},")
@@ -1671,6 +1682,14 @@ def render_data_lua(
         lines.append("  },")
     lines.append("},")
 
+    lines.append("bossDrops = {")
+    for inst_id, inst_tbl in sorted(boss_drops.items()):
+        lines.append(f"  [{inst_id}] = {{")
+        for boss_name, flat in inst_tbl.items():
+            lines.append(f"    [{lua_str(boss_name)}] = {num_list(flat)},")
+        lines.append("  },")
+    lines.append("},")
+
     lines.append("}")
     os.makedirs(os.path.dirname(out_lua), exist_ok=True)
     with open(out_lua, "w", encoding="utf-8", newline="\n") as handle:
@@ -1688,8 +1707,8 @@ def write_companion_meta(qdb_root: str, addon_dir: str, out_dir: str, ver_date: 
     toc_out = (
         f"## Interface: {iface}\n"
         "## Title: |cffd4a94eDave's|r Map (data)\n"
-        "## Notes: QuestieDB Forever quests, objectives, turn-ins, chains, townsfolk and rares for Dave's Map.\n"
-        "## Author: davidwhit5 (data: Questie/QuestieDB contributors, NOTICE-QuestieDB.md)\n"
+        "## Notes: QuestieDB Forever quests, objectives, turn-ins, chains, townsfolk, rares, and dungeon boss loot for Dave's Map.\n"
+        "## Author: davidwhit5 (data: Questie/QuestieDB & Hoizame/AtlasLootClassic contributors, NOTICE-QuestieDB.md)\n"
         f"## Version: {ver_date}\n"
         "## IconTexture: Interface\\Icons\\INV_Misc_Map_01\n"
         "\n"
@@ -1712,11 +1731,14 @@ def write_companion_meta(qdb_root: str, addon_dir: str, out_dir: str, ver_date: 
     lic_path = os.path.join(qdb_root, "LICENSE.md")
     lic_body = open(lic_path, encoding="utf-8").read().strip() if os.path.isfile(lic_path) else ""
     notice = (
-        "# QuestieDB Data Attribution (`daves_map_data`)\n\n"
-        "`daves_map_data/Data.lua` is compiled by `daves_map/tools/Update-MapData.py` from the open-source "
-        "[Questie/QuestieDB](https://github.com/Questie/QuestieDB) WoW: Forever dataset "
-        "(including `data/Forever/`, `src/corrections/Forever/`, and `support/Forever/`). "
-        "`daves_map` is an independent addon and is not affiliated with or endorsed by the Questie team.\n\n"
+        "# QuestieDB & AtlasLootClassic Data Attribution (`daves_map_data`)\n\n"
+        "`daves_map_data/Data.lua` is compiled by `daves_map/tools/Update-MapData.py` from:\n\n"
+        "- [Questie/QuestieDB](https://github.com/Questie/QuestieDB) WoW: Forever dataset "
+        "(including `data/Forever/`, `src/corrections/Forever/`, and `support/Forever/`) for quests, "
+        "objectives, turn-ins, chains, townsfolk, rares, and WoW: Forever custom dungeon boss drops.\n"
+        "- [Hoizame/AtlasLootClassic](https://github.com/Hoizame/AtlasLootClassic) (`AtlasLootClassic_DungeonsAndRaids`, "
+        "GPLv2) for curated Classic Vanilla dungeon and raid boss loot tables and drop rates.\n\n"
+        "`daves_map` is an independent addon and is not affiliated with or endorsed by the Questie or AtlasLootClassic teams.\n\n"
         "---\n\n"
         + lic_body
         + "\n"
@@ -1790,11 +1812,21 @@ def main(argv: list[str]) -> None:
         pins, zone_levels, zone_dungeons, reward_item_names, stats = build_model(
             quests, npcs, objs, items, item_drops, area_to_uimap, dungeons
         )
+        if tools_dir not in sys.path:
+            sys.path.insert(0, tools_dir)
+        import boss_loot
+
+        boss_drops, boss_item_names, boss_stats = boss_loot.build_boss_drops(
+            qdb_root, wowaddons_dir, npcs, objs, items, item_drops, dict_to_list, BAD_NAME_RX
+        )
+        for iid, nm in boss_item_names.items():
+            reward_item_names.setdefault(iid, nm)
+
         now = datetime.now(timezone.utc)
         stamp = now.strftime("%Y-%m-%d %H:%M UTC")
         ver_date = now.strftime("%Y.%m.%d")
         os.makedirs(out_dir, exist_ok=True)
-        render_data_lua(pins, zone_levels, zone_dungeons, reward_item_names, stamp, args["Ref"], out_lua)
+        render_data_lua(pins, zone_levels, zone_dungeons, reward_item_names, boss_drops, stamp, args["Ref"], out_lua)
         write_companion_meta(qdb_root, addon_dir, out_dir, ver_date)
 
         # Clean up any temporary bundled Data.lua / NOTICE-QuestieDB.md or loose zip
@@ -1812,7 +1844,9 @@ def main(argv: list[str]) -> None:
             f"{n0(stats['rew_quests'])} quests with {n0(stats['rew_items'])} item rewards, "
             f"{n0(stats['endp'])} turn-ins, {n0(stats['pre'])} prereq links, "
             f"{n0(stats['obj'])} objective links, {n0(stats['rare_with_drops'])} rares with notable loot, "
-            f"{n0(stats['dungeons'])} dungeons/raids with {n0(stats['dungeon_quests'])} dungeon quests).",
+            f"{n0(stats['dungeons'])} dungeons/raids with {n0(stats['dungeon_quests'])} dungeon quests, "
+            f"{n0(boss_stats['boss_loot_bosses'])}/{n0(boss_stats['boss_loot_total'])} dungeon bosses across "
+            f"{n0(boss_stats['boss_loot_insts'])} instances with {n0(boss_stats['boss_loot_items'])} drops).",
             flush=True,
         )
         for idx, c in enumerate(CATEGORIES, start=1):

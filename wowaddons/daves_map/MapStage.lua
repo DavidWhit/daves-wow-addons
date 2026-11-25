@@ -1,7 +1,8 @@
 -- daves_map / MapStage.lua
 -- Compact WowStyle1DropdownTemplate map navigation bar replacing WorldMapFrame.NavBar,
--- and full-bleed subtly zone-tinted map backdrop filling the entire map stage behind
--- ScrollContainer (no inner frame border around the map).
+-- full-bleed subtly zone-tinted map backdrop filling the entire map stage behind ScrollContainer
+-- (no inner frame border around the map), and edge-to-edge cover-fill zoom/pan fitting for
+-- non-stitched Blizzard maps (such as Zephras Isle, Battlegrounds, and Seamless-off zones).
 
 local _, ns = ...
 
@@ -15,9 +16,12 @@ local DEFAULT_BODY_H = L.BODY_DEFAULT_H or 467
 local DD_GAP = 6
 local DD_HEIGHT = 24
 local FALLBACK_WORLD_ID = 947
+local NON_STITCH_ZOOM_STEP = 1.25
+local NON_STITCH_MAX_MULT = 4.0
+local COVER_BLEED = 1.001 -- slight bleed so floating-point rounding at non-1.0 UI scales never exposes a 1px edge sliver
 
 local function SafeNum(v)
-	return (type(v) == "number" and not issecretvalue(v)) and v or nil
+	return (type(v) == "number" and not issecretvalue(v) and v == v and math.abs(v) < math.huge) and v or nil
 end
 
 local function SafeStr(v)
@@ -85,6 +89,16 @@ local state = {
 	biome = "world",
 	styleKey = "dark",
 	styleAlpha = 0.8,
+	viewportHooked = false,
+	viewportWaiting = false,
+	inViewportReset = false,
+	pendingViewportFit = false,
+	fitMapID = nil,
+	fitCoverScale = nil,
+	fitW = nil,
+	fitH = nil,
+	resizeKeep = nil,
+	combatPinGuarded = false,
 }
 
 local function ResolveBiome(mapID)
@@ -634,4 +648,354 @@ function ns.InitMapStage(chrome, overlay)
 	ns.LayoutMapStage(DEFAULT_MAP_LEFT_X, DEFAULT_NAV_TOP_Y, DEFAULT_NAV_H, DEFAULT_STAGE_TOP_Y, DEFAULT_MAP_W, DEFAULT_BODY_H)
 	ns.SyncMapStageStrata()
 	ns.RefreshMapStage()
+end
+
+---------------------------------------------------------------------------
+-- Non-Stitched Map Edge-to-Edge Cover Fit, Smooth Cursor Zoom & Drag Pan
+-- Installed after OpenMap's `StartStitch()` so `ns.IsStitched()` is always
+-- current when `ScrollContainer:CreateZoomLevels()` and `ResetZoom()` fire.
+---------------------------------------------------------------------------
+local function IsGamepadBlocked()
+	if not (InputUtil and InputUtil.IsGamepadUIEnabled and InputUtil.IsGamepadUIEnabled()) then
+		return false
+	end
+	local stitch = ns.StitchWorld and ns.StitchWorld() or nil
+	return not (stitch and stitch.db and stitch.db.padMap)
+end
+
+local function IsNonStitchedActive(sc)
+	if not (WorldMapFrame and sc and sc.mapID) then return false end
+	if ns.OpenMapOn and ns.OpenMapOn() then return false end
+	if IsGamepadBlocked() then return false end
+	if ns.IsStitched and ns.IsStitched() then return false end
+	local stitch = ns.StitchWorld and ns.StitchWorld() or nil
+	if stitch and stitch.instanceWorldHidden then return false end
+	if stitch and stitch.enabled and ns.IsStitchableMap and ns.IsStitchableMap(sc.mapID) then return false end
+	return true
+end
+
+local function EnsureCombatPinGuard(worldMap)
+	if state.combatPinGuarded or not worldMap then return end
+	local stitch = ns.StitchWorld and ns.StitchWorld() or nil
+	if stitch and stitch.SetupCombat then
+		state.combatPinGuarded = true
+		stitch:SetupCombat(worldMap)
+		return
+	end
+	local origPass = MapCanvasPinMixin and MapCanvasPinMixin.CheckMouseButtonPassthrough
+	if type(origPass) ~= "function" then return end
+	local prop = SuperTrackablePinMixin and SuperTrackablePinMixin.UpdateMousePropagation
+	local origProp = type(prop) == "function" and prop or nil
+	state.combatPinGuarded = true
+
+	local waiting = setmetatable({}, { __mode = "k" })
+	local seenPools = setmetatable({}, { __mode = "k" })
+	local checked = setmetatable({}, { __mode = "k" })
+	local sweepSoon = false
+
+	local function Wait(pin, key, ...)
+		local w = waiting[pin] or {}
+		waiting[pin] = w
+		w[key] = { n = select("#", ...), ... }
+	end
+	local function Done(pin, key)
+		local w = waiting[pin]
+		if not w then return end
+		w[key] = nil
+		if not w.passthrough and not w.propagation then waiting[pin] = nil end
+	end
+	local function DeferredPass(pin, ...)
+		if InCombatLockdown() then return Wait(pin, "passthrough", ...) end
+		Done(pin, "passthrough")
+		return origPass(pin, ...)
+	end
+	local function DeferredProp(pin, ...)
+		if InCombatLockdown() then return Wait(pin, "propagation", ...) end
+		Done(pin, "propagation")
+		return origProp(pin, ...)
+	end
+	local function ReadMethods(t)
+		return rawget(t, "CheckMouseButtonPassthrough"), rawget(t, "UpdateMousePropagation")
+	end
+	local function Point(t)
+		if type(t) ~= "table" then return end
+		local ok, p1, p2 = pcall(ReadMethods, t)
+		if not ok then return end
+		if p1 == origPass then t.CheckMouseButtonPassthrough = DeferredPass end
+		if origProp and p2 == origProp then t.UpdateMousePropagation = DeferredProp end
+	end
+	local function PointPool(pool)
+		for _, enumName in ipairs({ "EnumerateActive", "EnumerateInactive" }) do
+			if type(pool[enumName]) == "function" then
+				local ok, iter, st, start = pcall(pool[enumName], pool)
+				if ok and iter then
+					for pin in iter, st, start do Point(pin) end
+				end
+			end
+		end
+	end
+	local function PointPins()
+		for _, pool in pairs(worldMap.pinPools or {}) do PointPool(pool) end
+	end
+	local function ScanPools()
+		for _, pool in pairs(worldMap.pinPools or {}) do
+			if not seenPools[pool] then
+				seenPools[pool] = true
+				PointPool(pool)
+			end
+		end
+	end
+	local function Sweep()
+		sweepSoon = false
+		for _, value in pairs(_G) do
+			if type(value) == "table" and not checked[value] then
+				checked[value] = true
+				Point(value)
+			end
+		end
+		PointPins()
+	end
+	local function Flush()
+		if InCombatLockdown() then return end
+		for pin, w in pairs(waiting) do
+			waiting[pin] = nil
+			if pin.IsForbidden and not pin:IsForbidden() and (not pin.GetMap or pin:GetMap()) then
+				if w.passthrough then pcall(origPass, pin, unpack(w.passthrough, 1, w.passthrough.n)) end
+				if w.propagation then pcall(origProp, pin, unpack(w.propagation, 1, w.propagation.n)) end
+			end
+		end
+	end
+
+	Sweep()
+	ScanPools()
+	worldMap:HookScript("OnShow", PointPins)
+	local sc = worldMap.ScrollContainer
+	if sc and sc.MarkCanvasDirty then hooksecurefunc(sc, "MarkCanvasDirty", ScanPools) end
+	local ev = CreateFrame("Frame")
+	ev:RegisterEvent("ADDON_LOADED")
+	ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+	ev:SetScript("OnEvent", function(_, event)
+		if event == "PLAYER_REGEN_ENABLED" then
+			Flush()
+		elseif not sweepSoon then
+			sweepSoon = true
+			C_Timer.After(0, Sweep)
+		end
+	end)
+end
+
+local function LayerIndexForScale(origLevels, scale)
+	local idx = 1
+	if type(origLevels) == "table" then
+		for _, lvl in ipairs(origLevels) do
+			if lvl and type(lvl.scale) == "number" and scale >= lvl.scale then
+				idx = lvl.layerIndex or idx
+			end
+		end
+	end
+	return idx
+end
+
+local function FitNonStitchedZoomLevels(sc)
+	if not IsNonStitchedActive(sc) then return end
+	local vw, vh = SafeNum(sc:GetWidth()), SafeNum(sc:GetHeight())
+	if (not vw or vw <= 0 or not vh or vh <= 0)
+		and not (WorldMapFrame.IsMaximized and WorldMapFrame:IsMaximized())
+		and ns.GetUnifiedWindowSize then
+		local mw, mh = ns.GetUnifiedWindowSize()
+		local pad = L.MAP_MAT_PAD or 1
+		if mw and mh and mw > 2 * pad and mh > 0 then
+			vw, vh = mw - 2 * pad, mh
+		end
+	end
+	if not (vw and vh and vw > 0 and vh > 0) then
+		state.pendingViewportFit = true
+		return
+	end
+	local layers = C_Map and C_Map.GetMapArtLayers and C_Map.GetMapArtLayers(sc.mapID) or nil
+	local layer1 = layers and layers[1]
+	local aw, ah = layer1 and SafeNum(layer1.layerWidth), layer1 and SafeNum(layer1.layerHeight)
+	if not (aw and ah and aw > 0 and ah > 0) then return end
+	state.pendingViewportFit = false
+
+	local widthScale = vw / aw
+	local heightScale = vh / ah
+	local containScale = math.min(widthScale, heightScale)
+	local coverScale = math.max(widthScale, heightScale) * COVER_BLEED
+	local origLevels = sc.zoomLevels
+	local blizzMax = coverScale
+	if type(origLevels) == "table" and #origLevels > 0 then
+		local last = origLevels[#origLevels]
+		if last and type(last.scale) == "number" and last.scale > blizzMax then
+			blizzMax = last.scale
+		end
+	end
+
+	local maxScale = math.max(blizzMax, coverScale * NON_STITCH_MAX_MULT)
+	local levels = {}
+	local s = coverScale
+	while s < maxScale * 0.999 do
+		levels[#levels + 1] = { scale = s, layerIndex = LayerIndexForScale(origLevels, s) }
+		s = s * NON_STITCH_ZOOM_STEP
+	end
+	if #levels == 0 or levels[#levels].scale < maxScale - 0.001 then
+		levels[#levels + 1] = { scale = maxScale, layerIndex = LayerIndexForScale(origLevels, maxScale) }
+	end
+
+	sc.zoomLevels = levels
+	-- Keep baseScale below coverScale whenever viewport aspect differs from map art so
+	-- Blizzard's ScrollContainer:CanPan() allows smooth edge-to-edge dragging immediately.
+	if coverScale > containScale * 1.005 then
+		sc.baseScale = containScale
+	else
+		sc.baseScale = coverScale
+	end
+	if sc.SetScalingMode then
+		sc:SetScalingMode("SCALING_MODE_LINEAR")
+	end
+	state.fitMapID = sc.mapID
+	state.fitCoverScale = coverScale
+	state.fitW = vw
+	state.fitH = vh
+end
+
+local function OnNonStitchedResetZoom(sc)
+	if state.inViewportReset or not IsNonStitchedActive(sc) then return end
+	if not (sc.zoomLevels and sc.zoomLevels[1] and sc.InstantPanAndZoom) then return end
+
+	local coverScale = sc.zoomLevels[1].scale
+	local maxScale = sc.zoomLevels[#sc.zoomLevels].scale
+	local targetScale = coverScale
+	local tx, ty = 0.5, 0.5
+
+	local keep = state.resizeKeep
+	state.resizeKeep = nil
+	if keep and keep.mapID == sc.mapID and (GetTime() - (keep.at or 0)) < 0.5 then
+		targetScale = math.max(coverScale, math.min(maxScale, coverScale * (keep.relZoom or 1)))
+		tx = SafeNum(keep.x) or 0.5
+		ty = SafeNum(keep.y) or 0.5
+	else
+		local pos = C_Map and C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(sc.mapID, "player")
+		if pos then
+			local px, py = pos.x, pos.y
+			if pos.GetXY then px, py = pos:GetXY() end
+			px, py = SafeNum(px), SafeNum(py)
+			if px and py and (px ~= 0 or py ~= 0) then
+				tx, ty = px, py
+			end
+		end
+	end
+
+	if sc.CalculateScrollExtentsAtScale then
+		local minX, maxX, minY, maxY = sc:CalculateScrollExtentsAtScale(targetScale)
+		if SafeNum(minX) and SafeNum(maxX) and SafeNum(minY) and SafeNum(maxY) then
+			tx = math.max(minX, math.min(maxX, tx))
+			ty = math.max(minY, math.min(maxY, ty))
+		end
+	end
+
+	local curScale = SafeNum(sc:GetCanvasScale()) or 0
+	local childScale = sc.Child and SafeNum(sc.Child:GetScale())
+	local curX = SafeNum(sc:GetCurrentScrollX()) or -1
+	local curY = SafeNum(sc:GetCurrentScrollY()) or -1
+	local needApply = not (math.abs(curScale - targetScale) < 1e-4
+		and (not childScale or math.abs(childScale - targetScale) < math.max(1e-3, targetScale * 1e-3))
+		and math.abs(curX - tx) < 1e-4 and math.abs(curY - ty) < 1e-4)
+
+	if needApply then
+		state.inViewportReset = true
+		sc:InstantPanAndZoom(targetScale, tx, ty, true)
+		state.inViewportReset = false
+	end
+
+	-- Match OpenMap's combat fallback: if the engine refused Child:SetScale or scroll in
+	-- restricted combat, resync ScrollContainer state to what stuck and refit after combat.
+	if InCombatLockdown() then
+		local keptScale = sc.Child and SafeNum(sc.Child:GetScale())
+		local scaleRefused = keptScale and math.abs(keptScale - targetScale) > math.max(1e-3, targetScale * 1e-3)
+		if scaleRefused and keptScale > 0 then
+			sc.currentScale, sc.targetScale, sc.zoomTarget = keptScale, keptScale, keptScale
+			if sc.CalculateScrollExtents then sc:CalculateScrollExtents() end
+		end
+		local keptX = sc.GetNormalizedHorizontalScroll and SafeNum(sc:GetNormalizedHorizontalScroll())
+		local keptY = sc.GetNormalizedVerticalScroll and SafeNum(sc:GetNormalizedVerticalScroll())
+		local scrollRefused = (keptX and math.abs(keptX - tx) > 1e-3) or (keptY and math.abs(keptY - ty) > 1e-3)
+		if scaleRefused or scrollRefused then
+			if keptX and keptY then
+				sc.currentScrollX, sc.targetScrollX = keptX, keptX
+				sc.currentScrollY, sc.targetScrollY = keptY, keptY
+			end
+			if scaleRefused and WorldMapFrame.OnCanvasScaleChanged then
+				WorldMapFrame:OnCanvasScaleChanged()
+			end
+			if sc.MarkAreaTriggersDirty then sc:MarkAreaTriggersDirty() end
+			if sc.MarkViewRectDirty then sc:MarkViewRectDirty() end
+			state.pendingViewportFit = true
+		end
+	end
+end
+
+function ns.PrepareNonStitchedResize()
+	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
+	if not (WorldMapFrame and WorldMapFrame:IsShown() and IsNonStitchedActive(sc)) then
+		state.resizeKeep = nil
+		return
+	end
+	local curScale = SafeNum(sc:GetCanvasScale())
+	local baseCover = (state.fitMapID == sc.mapID and state.fitCoverScale)
+		or (sc.zoomLevels and sc.zoomLevels[1] and SafeNum(sc.zoomLevels[1].scale))
+	local curX = SafeNum(sc:GetCurrentScrollX())
+	local curY = SafeNum(sc:GetCurrentScrollY())
+	if curScale and baseCover and baseCover > 0 and curX and curY then
+		state.resizeKeep = {
+			mapID = sc.mapID,
+			x = curX,
+			y = curY,
+			relZoom = math.max(1, curScale / baseCover),
+			at = GetTime(),
+		}
+	else
+		state.resizeKeep = nil
+	end
+end
+
+function ns.EnsureNonStitchedViewportFit()
+	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
+	if not (WorldMapFrame and WorldMapFrame:IsShown() and IsNonStitchedActive(sc)) then return end
+	if InCombatLockdown() or not sc.OnCanvasSizeChanged then return end
+	local vw, vh = SafeNum(sc:GetWidth()), SafeNum(sc:GetHeight())
+	if not (vw and vh and vw > 0 and vh > 0) then return end
+	if state.pendingViewportFit
+		or state.fitMapID ~= sc.mapID
+		or not state.fitW or math.abs(state.fitW - vw) > 1
+		or not state.fitH or math.abs(state.fitH - vh) > 1 then
+		sc:OnCanvasSizeChanged()
+	end
+end
+
+local function InstallNonStitchedViewport()
+	if state.viewportHooked then return end
+	if (ns.OpenMapOn and ns.OpenMapOn()) or IsGamepadBlocked() then return end
+	local sc = WorldMapFrame and WorldMapFrame.ScrollContainer
+	if not (sc and sc.CreateZoomLevels and sc.ResetZoom) then return end
+	state.viewportHooked = true
+	state.viewportWaiting = false
+	EnsureCombatPinGuard(WorldMapFrame)
+	hooksecurefunc(sc, "CreateZoomLevels", FitNonStitchedZoomLevels)
+	hooksecurefunc(sc, "ResetZoom", OnNonStitchedResetZoom)
+	if WorldMapFrame:IsShown() and sc.mapID and IsNonStitchedActive(sc)
+		and not InCombatLockdown() and sc.OnCanvasSizeChanged then
+		sc:OnCanvasSizeChanged()
+	end
+end
+
+function ns.InitNonStitchedViewport()
+	if state.viewportHooked then return end
+	if (ns.OpenMapOn and ns.OpenMapOn()) or IsGamepadBlocked() then return end
+	if WorldMapFrame and WorldMapFrame.ScrollContainer then
+		InstallNonStitchedViewport()
+	elseif not state.viewportWaiting and EventUtil and EventUtil.ContinueOnAddOnLoaded then
+		state.viewportWaiting = true
+		EventUtil.ContinueOnAddOnLoaded("Blizzard_WorldMap", InstallNonStitchedViewport)
+	end
 end
