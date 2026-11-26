@@ -18,11 +18,12 @@ local content, cfg, W, H, clock = nil, nil, 300, 26, 0   -- the core's state, co
 -- which is a trough of liquid for the whole cast (wholeBar): a small shallow-water simulation spreads it with a
 -- rounded front, sloshes it off the ends and raises it until it brims at the end. The level is the progress.
 -- The station art (alch_glass, alch_liquid) is an atlas of 128x256 cells in station units S (Make-CastbarMedia.ps1
--- ALCH_PX per S): the liquid is cropped to its level and tinted; nothing turns.
+-- ALCH_PX per S, with a 16 px transparent bottom gutter per cell so row 0 never bleeds across y = 256 into row 1):
+-- the liquid is cropped to its level and tinted; nothing turns.
 ---------------------------------------------------------------------------
 local alch                   -- this cast's alchemy state
 local bench                  -- the stations' and tubes' textures and lines, made once
-local CELL_W, CELL_H = 128 / 96, 256 / 96          -- an atlas cell in station units
+local CELL_W, CELL_H, CELL_V = 128 / 96, 240 / 96, 240 / 512   -- usable 128x240 slice of each 128x256 atlas cell
 local ALCH_KINDS = {   -- atlas cell; liquid zones (station units up from the bar top; fall: fills from the top); tube ends; burner
 	boil   = { cell = 0, zones = { { .235, .748 } }, inn = { 0, 1.109 }, out = { 0, 1.109 }, burner = 0 },
 	retort = { cell = 1, zones = { { .235, .805 } }, inn = { -.14, .777 }, out = { .471, 1.07 }, burner = -.12 },
@@ -64,7 +65,7 @@ end
 
 local function BenchTexture(name, sub, blend)
 	local tex = Smooth(tools:CreateTexture(nil, "ARTWORK", nil, sub))
-	tex:SetTexture(MEDIA .. name)
+	tex:SetTexture(MEDIA .. name, "CLAMP", "CLAMP")
 	tex:SetBlendMode(blend or "BLEND")
 	tex:Hide()
 	return tex
@@ -157,7 +158,7 @@ local function MakeAlchemy()
 		local col, row = K.cell % 4, math.floor(K.cell / 4)
 		st.u0, st.u1, st.v0 = col / 4, (col + 1) / 4, row / 2
 		local g = st.tex.glass
-		g:SetTexCoord(st.u0, st.u1, st.v0, st.v0 + .5)
+		g:SetTexCoord(st.u0, st.u1, st.v0, st.v0 + CELL_V)
 		g:ClearAllPoints(); g:SetPoint("BOTTOMLEFT", tools, "BOTTOMLEFT", x - CELL_W * S / 2, H)
 		g:SetSize(CELL_W * S, CELL_H * S)
 		g:SetDesaturation(0); g:Show()
@@ -480,7 +481,7 @@ local function UpdateAlchemy(dt, fillW, casting)
 				local y0, y1 = zone[1], zone[2]
 				local a, b = y0, y0 + lv * (y1 - y0)
 				if zone.fall then a, b = y1 - lv * (y1 - y0), y1 end
-				tex:SetTexCoord(st.u0, st.u1, st.v0 + (CELL_H - b) / CELL_H * .5, st.v0 + (CELL_H - a) / CELL_H * .5)
+				tex:SetTexCoord(st.u0, st.u1, st.v0 + (CELL_H - b) / CELL_H * CELL_V, st.v0 + (CELL_H - a) / CELL_H * CELL_V)
 				tex:ClearAllPoints(); tex:SetPoint("BOTTOMLEFT", tools, "BOTTOMLEFT", st.x - CELL_W * S / 2, H + a * S)
 				tex:SetSize(CELL_W * S, math.max(.1, (b - a) * S))
 				tex:Show()

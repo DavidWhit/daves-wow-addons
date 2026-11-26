@@ -229,6 +229,7 @@ local DEFAULTS = {
 	trackerTrackedOnly = false, -- in Tracker & Log, hide untracked Quest Log quests and show only currently tracked/active quests
 	minimalQuestInfo = false,   -- minimal quest rows only (hides chains, chain steps, reward items, and Starter/XP columns)
 	mapBanner = true,       -- top-center zone level bracket & coordinates pill on the map canvas
+	nodeShimmer = false,    -- optional loot-style golden sparkle on soft-interact harvestable nodes (NodeShimmer.lua)
 	questSort = "lvl",      -- "lvl" | "xp" | "starter" | "name"
 	questSortAsc = true,    -- sort direction for questSort
 }
@@ -412,6 +413,7 @@ function ns:PLAYER_LOGIN()
 	ns.EnforceWindowedOpaqueMap()
 	if ns.InitQuests then ns.InitQuests() end
 	ns.InitTracker()
+	if ns.InitNodeShimmer then ns.InitNodeShimmer() end
 	if ns.StartStitch then ns.StartStitch() end   -- the seamless map (Stitch\Base.lua)
 	if ns.InitNonStitchedViewport then ns.InitNonStitchedViewport() end   -- edge-to-edge cover fit for non-stitched maps (MapStage.lua)
 	if ns.RefreshControls then ns.RefreshControls() end

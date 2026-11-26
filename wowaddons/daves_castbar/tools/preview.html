@@ -392,7 +392,7 @@ const ALCH_PALETTES = [
 	[[90, 255, 130], [50, 225, 235], [175, 100, 255], [255, 205, 70]], [[255, 90, 110], [255, 150, 60], [255, 225, 90], [255, 250, 210]],
 	[[90, 150, 255], [110, 255, 225], [225, 120, 255], [255, 130, 200]], [[160, 255, 80], [255, 235, 70], [255, 130, 50], [255, 70, 120]],
 ];
-const CELL = { w: 128 / 96, h: 256 / 96 }, LINK_SEGS = 12;
+const CELL = { w: 128 / 96, h: 240 / 96, pad: 16 }, LINK_SEGS = 12;
 const palAt = (pal, f) => { f = clamp01(f) * (pal.length - 1); const i = Math.min(pal.length - 2, Math.floor(f)), t = f - i; return pal[i].map((c, j) => c + (pal[i + 1][j] - c) * t); };
 const q8 = c => c.map(v => Math.round(Math.min(255, v) / 8) * 8);   // tint cache keys stay few
 const lighter = (c, k) => q8(c.map(v => v + (255 - v) * k));
@@ -1159,7 +1159,7 @@ class Bar {
 			if (L.valve) { const m = L.pts[Math.floor(LINK_SEGS / 2)], s = tw * 2.8, open = f > .45 ? 1 : 0; g.drawImage(imgs.p_valve, open * 32, 0, 32, 32, ox + m[0] - s / 2, Y(m[1]) - s / 2, s, s); }
 		});
 		// the stations
-		const gl = imgs.alch_glass, cw = gl.width / 4, ch = gl.height / 2;
+		const gl = imgs.alch_glass, cw = gl.width / 4, ch = gl.height / 2, uh = ch - CELL.pad;
 		a.st.forEach((st, i) => {
 			const f = i === 0 ? 1 : clamp01((X - st.x) / d), heat = i === 0 ? 1 : clamp01((X - st.x) / (H * .35));
 			if (!st.lit && X > st.x) { st.lit = true; for (let j = 0; j < 7; j++) this.spawn(P({ t: 'p_soft', color: [lighter(st.col, .4)], size: [.04, .08], life: [.4, .8], vx: [-25, 25], vy: [-40, -8], gravity: 70 }), st.inX, H - st.inY); }
@@ -1173,12 +1173,12 @@ class Bar {
 				const l = lv[j]; if (!(l > .005)) return;
 				let lo = z[0], hi = z[0] + l * (z[1] - z[0]);
 				if (z[2] === 'fall') { lo = z[1] - l * (z[1] - z[0]); hi = z[1]; }
-				const sy = ch * (CELL.h - hi) / CELL.h, sh = ch * (hi - lo) / CELL.h;
+				const sy = uh * (CELL.h - hi) / CELL.h, sh = uh * (hi - lo) / CELL.h;
 				g.globalAlpha = .92;
 				g.drawImage(tinted('alch_liquid', q8(st.col)), cx, cy + sy, cw, Math.max(1, sh), left, Y(H + hi * S), CELL.w * S, (hi - lo) * S);
 				g.globalAlpha = 1;
 			});
-			g.drawImage(gl, cx, cy, cw, ch, left, Y(H + CELL.h * S), CELL.w * S, CELL.h * S);
+			g.drawImage(gl, cx, cy, cw, uh, left, Y(H + CELL.h * S), CELL.w * S, CELL.h * S);
 			if (st.K.burner !== undefined && heat > .02) {
 				const bx = st.x + st.K.burner * S + (Math.sin(this.clock * 9 + st.seed) * .2 + Math.sin(this.clock * 23 + st.seed * 3) * .08) * S * .04;
 				const fh = .21 * S * heat * (.86 + .14 * Math.sin(this.clock * 31 + st.seed * 7));

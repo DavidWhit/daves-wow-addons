@@ -23,6 +23,7 @@ function ns.RestoreDefaultSettings()
 	ns.Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 	db.enabled = true
 	db.mapBanner = true
+	if ns.SetNodeShimmer then ns.SetNodeShimmer(false) else db.nodeShimmer = false end
 	db.hideCompleted = false
 	db.trackMyZone = true
 	db.focusQuest = true
@@ -68,7 +69,7 @@ function ns.RestoreDefaultSettings()
 	if ns.Refresh then ns.Refresh() end
 	for _, k in ipairs({
 		"enabled", "trackMyZone", "hideCompleted", "focusQuest", "groupQuestCount",
-		"trackerTrackedOnly", "minimalQuestInfo", "mapBanner",
+		"trackerTrackedOnly", "minimalQuestInfo", "mapBanner", "nodeShimmer",
 		"pinScale", "panelScale", "background", "backgroundStyle",
 		"seamless", "dungeonMaps", "autoSwitch", "openZoomed",
 	}) do
@@ -196,6 +197,15 @@ function ns:InitOptions()
 		if syncingSettings then return end
 		ns.RefreshOptions()
 		if ns.Refresh then ns.Refresh() end
+	end)
+
+	local nodeShimmer = Settings.RegisterAddOnSetting(category, ADDON .. "_nodeShimmer", "nodeShimmer", ns.db,
+		Settings.VarType.Boolean, "Shimmer nearby harvest nodes", false)
+	Settings.CreateCheckbox(category, nodeShimmer, "Add a golden loot-style sparkle shimmer to nearby herbs, mining veins, and chests when facing them (uses Blizzard's soft-interact icon; restores your original settings when turned off).")
+	nodeShimmer:SetValueChangedCallback(function(_, v)
+		if syncingSettings then return end
+		if ns.SetNodeShimmer then ns.SetNodeShimmer(v == true) end
+		ns.RefreshOptions()
 	end)
 
 	local pinScale = Settings.RegisterAddOnSetting(category, ADDON .. "_pinScale", "pinScale", ns.db,
@@ -330,7 +340,7 @@ end
 -- Map Settings & Style Dialog (two-column HUD Edit Mode dialog: Look + Map Tracking)
 ---------------------------------------------------------------------------
 do
-	local STYLE_W, STYLE_H = 540, 382
+	local STYLE_W, STYLE_H = 540, 408
 	local PAD_X, COL_W, COL_GAP = 22, 236, 24
 	local COL2_X = PAD_X + COL_W + COL_GAP
 	local opt, controls
@@ -711,6 +721,16 @@ do
 				if ns.RefreshGroupQuestCounts then ns.RefreshGroupQuestCounts() elseif ns.OnLayerChanged then ns.OnLayerChanged() end
 			end,
 			"While grouped, show a brass number badge beside quests showing how many group members are on that quest.")
+		ty = ty - 26
+		StyleCheckbox(opt, COL2_X, ty, COL_W, "Shimmer nearby harvest nodes",
+			function() return db.nodeShimmer == true end,
+			function(v)
+				ns.Sound(v and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+				if ns.SetNodeShimmer then ns.SetNodeShimmer(v) else db.nodeShimmer = v end
+				if ns.NotifySetting then ns.NotifySetting("nodeShimmer") end
+				if ns.OnLayerChanged then ns.OnLayerChanged() end
+			end,
+			"Add a golden loot-style sparkle shimmer to nearby herbs, mining veins, and chests when facing them (uses Blizzard's soft-interact icon; restores your original settings when turned off).")
 		ty = ty - 32
 		Header(opt, "Quest List", COL2_X, ty, COL_W)
 		ty = ty - 22

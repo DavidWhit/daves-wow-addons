@@ -631,6 +631,14 @@ local function BuildLayersItems()
 		tip = "Show a compact pill at the top of the map canvas with the zone's name, difficulty-coloured level bracket, and cursor/player coordinates.",
 		checked = db.mapBanner ~= false,
 	}
+	ui.items[#ui.items + 1] = {
+		kind = "setting_check",
+		skey = "nodeShimmer",
+		label = "Shimmer nearby harvest nodes",
+		tipTitle = "Shimmer nearby harvest nodes",
+		tip = "Add a golden loot-style sparkle shimmer to nearby herbs, mining veins, and chests when facing them (uses Blizzard's soft-interact icon; restores your original settings when turned off).",
+		checked = db.nodeShimmer == true,
+	}
 
 	if ns.BLIZZ_MAP_FILTERS and ns.GetBlizzMapFilter then
 		ui.items[#ui.items + 1] = { kind = "head", title = "Blizzard Map Tracking & Filters", right = "" }

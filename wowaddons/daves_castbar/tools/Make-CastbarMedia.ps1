@@ -2550,10 +2550,13 @@ public static class CastbarArt
 	// ================================================================ ALCHEMY: a bench of glassware on the bar, a trough of potion in it
 	// alch_glass and alch_liquid are 4x2 atlases of 128x256 cells, one per station kind (boil, retort, cyl, erlen,
 	// funnel, jacket, coil, rack), painted at ALCH_PX per station size S: the station's centre at the cell's middle
-	// column, the bar's top edge at the cell's bottom. alch_glass is the glassware, burners, rods and racks;
-	// alch_liquid is white where liquid can be (the addon crops it to the level and tints it). Station zones and
-	// tube ends (Effects.lua ALCH_KINDS) are in station units: x from the centre, y up from the bar's top.
+	// column, the bar's top edge ALCH_PAD px above the cell's bottom (16 px transparent gutter per cell so Row 0
+	// never paints into or mipmap-bleeds across y = 256 into Row 1, and Row 1 never touches y = 512). alch_glass is
+	// the glassware, burners, rods and racks; alch_liquid is white where liquid can be (the addon crops it to the
+	// level and tints it). Station zones and tube ends (Effects_Alchemy.lua ALCH_KINDS) are in station units: x from
+	// the centre, y up from the bar's top.
 	public const double ALCH_PX = 96;
+	public const int ALCH_PAD = 16;
 	static void AComp(Img img, int x, int y, double r, double g, double b, double a)   // straight-alpha "over"
 	{
 		if (a <= 0 || x < 0 || y < 0 || x >= img.W || y >= img.H) return;
@@ -2562,7 +2565,7 @@ public static class CastbarArt
 		img.R[i] = (r*a + img.R[i]*da*(1 - a))/oa; img.G[i] = (g*a + img.G[i]*da*(1 - a))/oa; img.B[i] = (b*a + img.B[i]*da*(1 - a))/oa;
 		img.A[i] = oa;
 	}
-	class ACell { public Img img; public double ox, oy; public double ylo = -9, yhi = 9; }   // station origin in pixels; paint only ylo..yhi
+	class ACell { public Img img; public double ox, oy; public int x0, y0, x1, y1; public double ylo = -9, yhi = 9; }   // station origin & clip box in pixels; paint only ylo..yhi
 	static List<double[]> APix(ACell c, List<double[]> pts)
 	{
 		var o = new List<double[]>();
@@ -2576,7 +2579,7 @@ public static class CastbarArt
 		for (int y = (int)Math.Floor(bb[1]) - 1; y <= (int)Math.Ceiling(bb[3]) + 1; y++)
 		for (int x = (int)Math.Floor(bb[0]) - 1; x <= (int)Math.Ceiling(bb[2]) + 1; x++)
 		{
-			if (!AInY(c, y + .5)) continue;
+			if (x < c.x0 || x >= c.x1 || y < c.y0 || y >= c.y1 || !AInY(c, y + .5)) continue;
 			double cov = Cover(p, x + .5, y + .5, 1);
 			if (cov > 0) AComp(c.img, x, y, col[0], col[1], col[2], a*cov);
 		}
@@ -2587,7 +2590,7 @@ public static class CastbarArt
 		for (int y = (int)Math.Floor(bb[1] - hw) - 1; y <= (int)Math.Ceiling(bb[3] + hw) + 1; y++)
 		for (int x = (int)Math.Floor(bb[0] - hw) - 1; x <= (int)Math.Ceiling(bb[2] + hw) + 1; x++)
 		{
-			if (!AInY(c, y + .5)) continue;
+			if (x < c.x0 || x >= c.x1 || y < c.y0 || y >= c.y1 || !AInY(c, y + .5)) continue;
 			double cov = Clamp(hw - LineDist(p, x + .5, y + .5, closed) + .5);
 			if (cov > 0) AComp(c.img, x, y, col[0], col[1], col[2], a*cov);
 		}
@@ -2786,7 +2789,8 @@ public static class CastbarArt
 		var img = new Img(512, 512);
 		for (int k = 0; k < 8; k++)
 		{
-			var c = new ACell { img = img, ox = (k % 4)*128 + 64, oy = (k / 4)*256 + 256 };
+			int cx = (k % 4)*128, cy = (k / 4)*256;
+			var c = new ACell { img = img, ox = cx + 64, oy = cy + 256 - ALCH_PAD, x0 = cx, y0 = cy, x1 = cx + 128, y1 = cy + 256 - ALCH_PAD };
 			AStation(c, k, liquid);
 		}
 		return img;
@@ -2816,7 +2820,7 @@ public static class CastbarArt
 			double dx = x + .5 - 16, dy = y + .5 - 16, r = Math.Sqrt(dx*dx + dy*dy);
 			double disc = Smooth(9, 8, r), rim = Smooth(1.2, 0, Math.Abs(r - 8.5));
 			double hx = cell == 0 ? dy : dx, hy = cell == 0 ? dx : dy;
-			double handle = Smooth(2.6, 1.6, Math.Abs(hy))*Smooth(14.5, 13.5, Math.Abs(hx));
+			double handle = Smooth(2.6, 1.6, Math.Abs(hy))*Smooth(12.5, 11.5, Math.Abs(hx));
 			double rr = Lerp(201, 232, handle)/255, gg = Lerp(162, 211, handle)/255, bb = Lerp(90, 160, handle)/255;
 			rr = Lerp(rr, 40/255.0, rim*.8*(1 - handle)); gg = Lerp(gg, 25/255.0, rim*.8*(1 - handle)); bb = Lerp(bb, 5/255.0, rim*.8*(1 - handle));
 			img.Set(cell*32 + x, y, rr, gg, bb, Math.Max(disc, handle));

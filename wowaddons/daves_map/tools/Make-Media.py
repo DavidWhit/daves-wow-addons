@@ -14,6 +14,7 @@ Writes uncompressed 32-bit top-left-origin BGRA TGA textures into Media/:
   - tab_zone.tga (64x64): gold/brass sculpted quest exclamation icon for the Zone tab.
   - tab_dungeon.tga (64x64): gold/brass dungeon archway portal icon for the Dungeon tab.
   - back.tga (64x64): gold/brass left-pointing arrow icon for the slim rail Back button.
+  - sparkle.tga (64x64): crisp 4-point white star glint + soft core for additive node shimmer sparkles.
   - gear.tga (64x64): copied from daves_sack/Media/gear.tga if present, for exact visual parity.
 """
 
@@ -461,12 +462,49 @@ def ring_pixel(dist):
     return (1.0, 1.0, 1.0, min(1.0, band + glow))
 
 
+def build_sparkle_icon(size: int = SIZE) -> bytearray:
+    """Crisp white 4-point loot-sparkle star with soft radial glow for additive tinting."""
+    pixels = bytearray(size * size * 4)
+    idx = 0
+    for py in range(size):
+        v = (py + 0.5) / size * 2.0 - 1.0
+        av = abs(v)
+        for px in range(size):
+            u = (px + 0.5) / size * 2.0 - 1.0
+            au = abs(u)
+            r = math.hypot(u, v)
+            # Hot center core + soft outer glow
+            core = math.exp(-((r / 0.15) ** 2))
+            halo = 0.38 * math.exp(-((r / 0.42) ** 2))
+            # Tapered 4-point vertical & horizontal star rays
+            w_h = 0.036 + 0.085 * max(0.0, 1.0 - au / 0.92)
+            ray_h = math.exp(-((av / w_h) ** 2)) * (max(0.0, 1.0 - au / 0.94) ** 1.45)
+            w_v = 0.036 + 0.085 * max(0.0, 1.0 - av / 0.92)
+            ray_v = math.exp(-((au / w_v) ** 2)) * (max(0.0, 1.0 - av / 0.94) ** 1.45)
+            # Subtle 45-degree diagonal micro-glints
+            d1 = abs(u + v) * 0.70710678
+            d2 = abs(u - v) * 0.70710678
+            diag1 = 0.36 * math.exp(-((d1 / 0.055) ** 2)) * (max(0.0, 1.0 - d2 / 0.48) ** 1.6)
+            diag2 = 0.36 * math.exp(-((d2 / 0.055) ** 2)) * (max(0.0, 1.0 - d1 / 0.48) ** 1.6)
+            # Smooth circular clip so rotated stars never show box edges
+            edge_fade = 1.0 - smoothstep(0.86, 0.98, r)
+            a = min(1.0, max(core, ray_h, ray_v) + halo + diag1 + diag2) * edge_fade
+            ab = _byte(a * 255.0)
+            pixels[idx] = 255
+            pixels[idx + 1] = 255
+            pixels[idx + 2] = 255
+            pixels[idx + 3] = ab
+            idx += 4
+    return pixels
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     media = os.path.join(here, "..", "Media")
     os.makedirs(media, exist_ok=True)
     write_tga(os.path.join(media, "dot.tga"), dot_pixel)
     write_tga(os.path.join(media, "ring.tga"), ring_pixel)
+    write_tga_bytes(os.path.join(media, "sparkle.tga"), build_sparkle_icon(SIZE), SIZE)
     write_tga_bytes(os.path.join(media, "findme.tga"), build_findme_icon(SIZE), SIZE)
     write_tga_bytes(os.path.join(media, "waypoint.tga"), build_waypoint_icon(SIZE), SIZE)
     write_tga_bytes(os.path.join(media, "plus.tga"), build_plus_icon(SIZE), SIZE)
@@ -481,7 +519,7 @@ def main():
     sack_gear = os.path.join(here, "..", "..", "daves_sack", "Media", "gear.tga")
     if os.path.isfile(sack_gear):
         shutil.copyfile(sack_gear, os.path.join(media, "gear.tga"))
-    print(f"Wrote dot, ring, findme, waypoint, plus, minus, pill, slot, tab_*, back, gear TGA files to {os.path.abspath(media)}", flush=True)
+    print(f"Wrote dot, ring, sparkle, findme, waypoint, plus, minus, pill, slot, tab_*, back, gear TGA files to {os.path.abspath(media)}", flush=True)
 
 
 if __name__ == "__main__":

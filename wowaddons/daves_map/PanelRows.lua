@@ -959,6 +959,13 @@ local function ApplySettingToggle(skey)
 		Sound(db.mapBanner and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
 		if ns.NotifySetting then ns.NotifySetting("mapBanner") end
 		if ns.Refresh then ns.Refresh() end
+	elseif skey == "nodeShimmer" then
+		local nextOn = not (db.nodeShimmer == true)
+		Sound(nextOn and "IG_MAINMENU_OPTION_CHECKBOX_ON" or "IG_MAINMENU_OPTION_CHECKBOX_OFF")
+		if ns.SetNodeShimmer then ns.SetNodeShimmer(nextOn) else db.nodeShimmer = nextOn end
+		if ns.NotifySetting then ns.NotifySetting("nodeShimmer") end
+		if ns.RefreshStyleDialog then ns.RefreshStyleDialog() end
+		ns.OnLayerChanged()
 	elseif stitch and stitch.db then
 		if skey == "stitch_enabled" then
 			stitch.db.enabled = not (stitch.db.enabled ~= false)
