@@ -246,6 +246,24 @@ local function RenderRow(row, item, yTop)
 		return
 	end
 
+	if item.kind == "zsub" then
+		row.rewardBg:ClearAllPoints()
+		row.rewardBg:SetPoint("TOPLEFT", 6, -1)
+		row.rewardBg:SetPoint("BOTTOMRIGHT", -2, 1)
+		row.rewardBg:SetColorTexture(0.14, 0.11, 0.06, 0.56)
+		row.rewardBg:Show()
+
+		row.icon:SetSize(12, 12)
+		row.icon:SetPoint("LEFT", 12, 0)
+		row.icon:SetTexture(ns.MEDIA .. (item.closed and "plus" or "minus"))
+		row.icon:Show()
+
+		PlaceRowLabels(row, 28, false)
+		row.label:SetText("|cffe8c870" .. (item.title or "") .. "|r")
+		row.count:SetText("|cffb8b0a0" .. tostring(item.n or "") .. "|r")
+		return
+	end
+
 	if item.kind == "note" then
 		local leftX = 6
 		if item.groupCount and item.groupCount > 0 then
@@ -1107,7 +1125,8 @@ local function OnRowClick(row, button)
 	elseif item.kind == "setting_check" then
 		ApplySettingToggle(item.skey)
 		return
-	elseif item.kind == "zsec" then
+	elseif item.kind == "zsec" or item.kind == "zsub" then
+		if item.kind == "zsub" and button ~= "LeftButton" then return end
 		db.zoneFold[item.key] = not item.closed
 		Sound("IG_MAINMENU_OPTION_CHECKBOX_ON")
 		ns.OnLayerChanged()
@@ -1507,7 +1526,14 @@ MakeRow = function(r)
 		local D = ns.DATA
 		local item = self.item
 		if not (D and item) then return end
-		if item.kind == "reward" then
+		if item.kind == "zsub" then
+			local trunc = self.label and self.label.IsTruncated and self.label:IsTruncated()
+			if not issecretvalue(trunc) and trunc and item.title then
+				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+				GameTooltip:AddLine(item.title, 1, .82, .2, true)
+				GameTooltip:Show()
+			end
+		elseif item.kind == "reward" then
 			ShowRewardItemTooltip(self, item)
 		elseif item.kind == "boss_drop" then
 			if item.inView and ns.HighlightDungeonBoss then

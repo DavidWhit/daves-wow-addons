@@ -20,6 +20,7 @@ local STATE_ORDER = { ready = 1, log = 2, avail = 3, locked = 3, done = 4 }
 
 local ROW_HEIGHTS = {
 	zsec = 25,
+	zsub = 23,
 	qcols = 22,
 	lgroup = 25,
 	head = 25,
@@ -1037,17 +1038,93 @@ local function BuildLogMetaMap()
 		local info = ns.QuestInfo and ns.QuestInfo(idx)
 		if info then
 			if info.isHeader then
-				header = info.title
+				header = (type(info.title) == "string" and not issecretvalue(info.title) and info.title ~= "") and info.title or nil
 			elseif not info.isHidden and info.questID and info.questID ~= 0 and not issecretvalue(info.questID) then
+				local t = (type(info.title) == "string" and not issecretvalue(info.title) and info.title ~= "") and info.title or nil
+				local lvl = (type(info.level) == "number" and not issecretvalue(info.level)) and info.level or 0
 				meta[info.questID] = {
-					title = info.title,
-					level = info.level or 0,
+					title = t,
+					level = lvl,
 					zone = header,
 				}
 			end
 		end
 	end
 	return meta
+end
+
+local function CurrentPlayerZoneSet()
+	local set = {}
+	local function Add(name)
+		if type(name) == "string" and not issecretvalue(name) and name ~= "" then
+			set[name:lower()] = true
+		end
+	end
+	Add(GetRealZoneText and GetRealZoneText() or nil)
+	local best = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+	if type(best) == "number" and not issecretvalue(best) and best ~= 0 and C_Map.GetMapInfo then
+		local m, hops = best, 0
+		while m and m ~= 0 and hops < 4 do
+			local info = C_Map.GetMapInfo(m)
+			if not info then break end
+			if info.mapType and info.mapType >= Enum.UIMapType.Zone then
+				Add(info.name)
+			end
+			if info.mapType and info.mapType <= Enum.UIMapType.Zone then break end
+			m = info.parentMapID
+			hops = hops + 1
+		end
+	end
+	return set
+end
+
+local function SortLogOnlyEntries(list)
+	if #list < 2 then return end
+	local mode = (ns.db and ns.db.questSort) or "lvl"
+	if MinimalInfo() and (mode == "xp" or mode == "starter") then
+		mode = "lvl"
+	end
+	local asc = not (ns.db and ns.db.questSortAsc == false)
+	table.sort(list, function(a, b)
+		if a == b then return false end
+		if mode == "name" then
+			local tc = CompareDirected((a.title or ""):lower(), (b.title or ""):lower(), asc)
+			if tc ~= nil then return tc end
+		elseif mode == "starter" then
+			local sa, sb = (a.zone or ""):lower(), (b.zone or ""):lower()
+			local ea, eb = sa == "", sb == ""
+			if ea ~= eb then return not ea end
+			local sc = CompareDirected(sa, sb, asc)
+			if sc ~= nil then return sc end
+		else
+			local la = (a.level and a.level > 0) and a.level or 999
+			local lb = (b.level and b.level > 0) and b.level or 999
+			local lc = CompareLevel(la, lb, asc)
+			if lc ~= nil then return lc end
+		end
+		local ta, tb = (a.title or ""):lower(), (b.title or ""):lower()
+		if ta ~= tb then return ta < tb end
+		return (a.q or 0) < (b.q or 0)
+	end)
+end
+
+local function EmitLogOnlyRow(out, lq)
+	local gCnt = (IsInGroup and IsInGroup() and ns.GroupQuestCount) and ns.GroupQuestCount(lq.q) or 0
+	local isReady = ns.QuestReady(lq.q) or ns.QuestComplete(lq.q) == true
+	out[#out + 1] = {
+		kind = "logquest",
+		questID = lq.q,
+		inLogQuestID = lq.q,
+		trackQuestID = lq.q,
+		watched = ns.QuestWatched(lq.q),
+		title = lq.title,
+		zone = lq.zone,
+		lvlTxt = FormatLvlCell(lq.level),
+		state = isReady and "ready" or "log",
+		groupCount = gCnt > 0 and gCnt or nil,
+		groupQuestID = gCnt > 0 and lq.q or nil,
+		xpColTxt = isReady and "|cffffd200Ready|r" or "|cff7fd4ffIn Log|r",
+	}
 end
 
 local function BuildTrackerItems()
@@ -1061,86 +1138,100 @@ local function BuildTrackerItems()
 	local seenStarter = {}
 	local fold = (ns.db and ns.db.zoneFold) or {}
 	local trackedOnly = ns.db and ns.db.trackerTrackedOnly == true
+	local curZones = (not trackedOnly) and CurrentPlayerZoneSet() or nil
 	for _, sec in ipairs(TRACKER_SECTIONS) do
 		local entries, logOnly = {}, {}
 		if not (trackedOnly and sec.key == "log") then
 			for _, q in ipairs(bucketQuests[sec.key] or {}) do
+				local lm = logMeta[q]
 				local pin = ResolveTrackerPin(q)
 				if pin then
 					local entry = MakeQuestEntry(pin, nil, true, q)
 					if entry and not seenStarter[entry.pin] then
 						seenStarter[entry.pin] = true
+						entry.logZone = (lm and lm.zone) or (ns.ZoneName and ns.ZoneName(pin)) or entry.starterZone or "Other"
 						entries[#entries + 1] = entry
 					end
 				else
-					local lm = logMeta[q]
 					logOnly[#logOnly + 1] = {
 						q = q,
 						title = (lm and lm.title) or (ns.QuestTitle and ns.QuestTitle(q)) or ("Quest #" .. tostring(q)),
 						level = lm and lm.level or 0,
-						zone = lm and lm.zone or nil,
+						zone = (lm and lm.zone) or nil,
 					}
 				end
 			end
 		end
 		local total = #entries + #logOnly
 		if total > 0 then
-			SortQuestEntries(entries)
-			if #logOnly > 1 then
-				local mode = (ns.db and ns.db.questSort) or "lvl"
-				if MinimalInfo() and (mode == "xp" or mode == "starter") then
-					mode = "lvl"
-				end
-				local asc = not (ns.db and ns.db.questSortAsc == false)
-				table.sort(logOnly, function(a, b)
-					if a == b then return false end
-					if mode == "name" then
-						local tc = CompareDirected((a.title or ""):lower(), (b.title or ""):lower(), asc)
-						if tc ~= nil then return tc end
-					elseif mode == "starter" then
-						local sa, sb = (a.zone or ""):lower(), (b.zone or ""):lower()
-						local ea, eb = sa == "", sb == ""
-						if ea ~= eb then return not ea end
-						local sc = CompareDirected(sa, sb, asc)
-						if sc ~= nil then return sc end
-					else
-						local la = (a.level and a.level > 0) and a.level or 999
-						local lb = (b.level and b.level > 0) and b.level or 999
-						local lc = CompareLevel(la, lb, asc)
-						if lc ~= nil then return lc end
-					end
-					local ta, tb = (a.title or ""):lower(), (b.title or ""):lower()
-					if ta ~= tb then return ta < tb end
-					return (a.q or 0) < (b.q or 0)
-				end)
-			end
 			local fkey = "trk:" .. sec.key
 			local closed = fold[fkey] == true
 			ui.items[#ui.items + 1] = { kind = "zsec", key = fkey, title = sec.title, n = tostring(total), closed = closed }
 			if not closed then
-				if #entries > 0 or #logOnly > 0 then
-					ui.items[#ui.items + 1] = { kind = "qcols" }
-				end
-				for _, entry in ipairs(entries) do
-					EmitQuestEntry(ui.items, entry, true)
-				end
-				for _, lq in ipairs(logOnly) do
-					local gCnt = (IsInGroup and IsInGroup() and ns.GroupQuestCount) and ns.GroupQuestCount(lq.q) or 0
-					local isReady = ns.QuestReady(lq.q) or ns.QuestComplete(lq.q) == true
-					ui.items[#ui.items + 1] = {
-						kind = "logquest",
-						questID = lq.q,
-						inLogQuestID = lq.q,
-						trackQuestID = lq.q,
-						watched = ns.QuestWatched(lq.q),
-						title = lq.title,
-						zone = lq.zone,
-						lvlTxt = FormatLvlCell(lq.level),
-						state = isReady and "ready" or "log",
-						groupCount = gCnt > 0 and gCnt or nil,
-						groupQuestID = gCnt > 0 and lq.q or nil,
-						xpColTxt = isReady and "|cffffd200Ready|r" or "|cff7fd4ffIn Log|r",
-					}
+				ui.items[#ui.items + 1] = { kind = "qcols" }
+				if sec.key == "log" then
+					local byZone, zoneOrder = {}, {}
+					local function ZoneGroup(zName)
+						local z = (zName and zName ~= "") and zName or "Other"
+						local grp = byZone[z]
+						if not grp then
+							grp = { name = z, entries = {}, logOnly = {} }
+							byZone[z] = grp
+							zoneOrder[#zoneOrder + 1] = z
+						end
+						return grp
+					end
+					for _, entry in ipairs(entries) do
+						local grp = ZoneGroup(entry.logZone)
+						grp.entries[#grp.entries + 1] = entry
+					end
+					for _, lq in ipairs(logOnly) do
+						local grp = ZoneGroup(lq.zone)
+						grp.logOnly[#grp.logOnly + 1] = lq
+					end
+					table.sort(zoneOrder, function(a, b)
+						if a == b then return false end
+						local al, bl = a:lower(), b:lower()
+						if curZones then
+							local ac, bc = curZones[al] == true, curZones[bl] == true
+							if ac ~= bc then return ac end
+						end
+						local ao, bo = a == "Other", b == "Other"
+						if ao ~= bo then return not ao end
+						return al < bl
+					end)
+					for _, zName in ipairs(zoneOrder) do
+						local grp = byZone[zName]
+						local zCount = #grp.entries + #grp.logOnly
+						local zKey = "trk:log:z:" .. zName
+						local zClosed = fold[zKey] == true
+						ui.items[#ui.items + 1] = {
+							kind = "zsub",
+							key = zKey,
+							title = zName,
+							n = tostring(zCount),
+							closed = zClosed,
+						}
+						if not zClosed then
+							SortQuestEntries(grp.entries)
+							SortLogOnlyEntries(grp.logOnly)
+							for _, entry in ipairs(grp.entries) do
+								EmitQuestEntry(ui.items, entry, true)
+							end
+							for _, lq in ipairs(grp.logOnly) do
+								EmitLogOnlyRow(ui.items, lq)
+							end
+						end
+					end
+				else
+					SortQuestEntries(entries)
+					SortLogOnlyEntries(logOnly)
+					for _, entry in ipairs(entries) do
+						EmitQuestEntry(ui.items, entry, true)
+					end
+					for _, lq in ipairs(logOnly) do
+						EmitLogOnlyRow(ui.items, lq)
+					end
 				end
 			end
 		end

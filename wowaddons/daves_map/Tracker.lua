@@ -844,9 +844,15 @@ local function ZoneKey()
 	return ((type(r) == "string" and not issecretvalue(r)) and r or "") .. "\1"
 		.. ((type(z) == "string" and not issecretvalue(z)) and z or "") .. "\1" .. b
 end
+local function NotifyTrackerZone()
+	if ns.db and ns.db.panelTab == "tracker" and not ns.db.trackerTrackedOnly and ns.OnLayerChanged then
+		ns.OnLayerChanged()
+	end
+end
 local function OnTaxiLanded()
 	lastZoneKey = ZoneKey()
 	ns.TrackZoneQuests()
+	NotifyTrackerZone()
 	Queue(true, 0.8)
 end
 CheckZoneAndTaxi = function(pollZone)
@@ -862,6 +868,7 @@ CheckZoneAndTaxi = function(pollZone)
 		if lastZoneKey and k ~= lastZoneKey then
 			lastZoneKey = k
 			ns.TrackZoneQuests()
+			NotifyTrackerZone()
 			Queue(true, 0.5)
 		elseif not lastZoneKey then
 			lastZoneKey = k
@@ -875,6 +882,7 @@ events.ZONE_CHANGED_NEW_AREA = function()
 	end
 	lastZoneKey = ZoneKey()
 	ns.TrackZoneQuests()
+	NotifyTrackerZone()
 	Queue(true)
 end
 events.ZONE_CHANGED = function()
@@ -886,6 +894,7 @@ events.ZONE_CHANGED = function()
 	if k ~= lastZoneKey then
 		lastZoneKey = k
 		ns.TrackZoneQuests()
+		NotifyTrackerZone()
 		Queue(true)
 	end
 end
@@ -897,6 +906,7 @@ events.PLAYER_ENTERING_WORLD = function()
 	wasOnTaxi = (UnitOnTaxi and UnitOnTaxi("player") == true) or false
 	lastZoneKey = ZoneKey()
 	if ns.NumQuestLogEntries() > 0 then ns.TrackZoneQuests() end
+	NotifyTrackerZone()
 	Queue(true)
 end
 events.PLAYER_CONTROL_GAINED = function()
